@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Genuary 2016 #6</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { display: flex; justify-content: center; align-items: center; min-height: 100vh; background: #0a0a0a; padding: 20px; position: relative; }
+    #container { width: 100%; max-width: 800px; aspect-ratio: 1; position: relative; }
+    canvas { width: 100%; height: 100%; border: 2px solid #333; border-radius: 20px; box-shadow: 0 10px 50px rgba(0,0,0,0.8); display: block; }
+    #toggleBtn { position: absolute; top: 20px; right: 20px; width: 50px; height: 50px; padding: 0; font-size: 24px; font-weight: 600; background: rgba(0, 0, 0, 0.6); color: #fff; border: 2px solid rgba(255, 255, 255, 0.3); border-radius: 50%; cursor: pointer; backdrop-filter: blur(10px); transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1); z-index: 10; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4); display: flex; align-items: center; justify-content: center; }
+    #toggleBtn:hover { background: rgba(0, 0, 0, 0.8); transform: translateY(-2px) scale(1.1); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5); }
+    #toggleBtn:active { transform: translateY(0) scale(1); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3); }
+    #refreshBtn { position: absolute; top: 20px; right: 80px; width: 50px; height: 50px; padding: 0; font-size: 24px; font-weight: 600; background: rgba(0, 0, 0, 0.6); color: #fff; border: 2px solid rgba(255, 255, 255, 0.3); border-radius: 50%; cursor: pointer; backdrop-filter: blur(10px); transition: all 0.2s ease; z-index: 10; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4); display: flex; align-items: center; justify-content: center; }
+    #refreshBtn:hover { background: rgba(0, 0, 0, 0.8); transform: translateY(-2px) scale(1.1); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5); }
+    #refreshBtn:active { background: rgba(255, 255, 255, 0.9); color: #000; transform: translateY(0) scale(0.95); box-shadow: 0 2px 10px rgba(255, 255, 255, 0.5); }
+  </style>
+</head>
+<body>
+  <button id="refreshBtn">✨</button>
+  <button id="toggleBtn">🌙</button>
+  <div id="container"><canvas id="canvas"></canvas></div>
+  
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const toggleBtn = document.getElementById('toggleBtn');
+    const refreshBtn = document.getElementById('refreshBtn');
+    let isNightMode = false;
+    let cache = null;
+    let groundPatches = null;
+    
+    toggleBtn.onclick = () => {
+      isNightMode = !isNightMode;
+      toggleBtn.textContent = isNightMode ? '☀️' : '🌙';
+    };
+    
+    refreshBtn.onclick = () => {
+      cache = null;
+      groundPatches = null;
+    };
+    
+    refreshBtn.onclick = () => {
+      cache = null;
+      groundPatches = null;
+    };
+    
+    class Perlin {
+      constructor() {
+        this.p = [];
+        for (let i = 0; i < 256; i++) this.p[i] = i;
+        this.p.sort(() => Math.random() - 0.5);
+        this.p = this.p.concat(this.p);
+      }
+      noise(x, y) {
+        const X = Math.floor(x) & 255, Y = Math.floor(y) & 255;
+        x -= Math.floor(x); y -= Math.floor(y);
+        const u = x * x * x * (x * (x * 6 - 15) + 10);
+        const v = y * y * y * (y * (y * 6 - 15) + 10);
+        const a = this.p[X] + Y, b = this.p[X + 1] + Y;
+        const grad = (h, x, y) => { const u = h < 8 ? x : y, v = h < 4 ? y : h === 12 || h === 14 ? x : 0; return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v); };
+        return (1 - v) * ((1 - u) * grad(this.p[a], x, y) + u * grad(this.p[b], x - 1, y)) + v * ((1 - u) * grad(this.p[a + 1], x, y - 1) + u * grad(this.p[b + 1], x - 1, y - 1));
+      }
+    }
+    const perlin = new Perlin();
+    
+    class Rng {
+      constructor(s) { this.s = s; }
+      r() { const x = Math.sin(this.s++) * 10000; return x - Math.floor(x); }
+    }
+    
+    function genCache() {
+      const rng = new Rng(Date.now());
+      const c = { flowers: [], grass: [], flora: [], stars: [], clouds: [], trees: [], spores: [], insects: [] };
+      for (let i = 0; i < 60; i++) c.flowers.push({ x: rng.r(), y: rng.r(), sv: 0.3 + rng.r() * 1.5, sh: 10 + rng.r() * 25, pc: 3 + ~~(rng.r() * 6), h: rng.r() * 360, s: 2 + rng.r() * 5 });
+      for (let i = 0; i < 80; i++) c.grass.push({ a: rng.r() * Math.PI * 2, d: 20 + rng.r() * 120, h: 15 + rng.r() * 35, bo: (rng.r() - 0.5) * 15, eo: (rng.r() - 0.5) * 8, hu: 100 + rng.r() * 40, lw: 0.8 + rng.r() * 1.2, x: rng.r() });
+      for (let i = 0; i < 15; i++) c.flora.push({ a: rng.r() * Math.PI * 2, d: 30 + rng.r() * 100, sh: 20 + rng.r() * 25, pc: 4 + ~~(rng.r() * 4), h: rng.r() * 360, s: 3 + rng.r() * 4 });
+      for (let i = 0; i < 150; i++) c.stars.push({ x: rng.r(), y: rng.r() * 0.7, s: 0.3 + rng.r(), b: 60 + rng.r() * 40, t: rng.r() });
+      for (let i = 0; i < 8; i++) { const puffs = []; for (let p = 0; p < 4 + ~~(rng.r() * 4); p++) puffs.push({ ox: (rng.r() - 0.5) * 80, oy: (rng.r() - 0.5) * 30, rx: 30 + rng.r() * 40, ry: 20 + rng.r() * 25, o: 0.6 + rng.r() * 0.3 }); c.clouds.push({ x: rng.r(), y: 0.1 + rng.r() * 0.4, puffs }); }
+      for (let i = 0; i < 40; i++) c.trees.push({ x: rng.r(), h: 50 + rng.r() * 80, w: 15 + rng.r() * 25, ba: 20 + rng.r() * 15, bl: 2 + ~~(rng.r() * 2), seed: rng.r() * 1000 });
+      for (let i = 0; i < 20; i++) c.spores.push({ a: Math.PI + rng.r() * Math.PI, d: rng.r() * 0.7, s: 1 + rng.r() * 3 });
+      for (let i = 0; i < 3; i++) c.insects.push({ x: rng.r(), y: 0.3 + rng.r() * 0.4, speed: 0.5 + rng.r() * 0.5, phase: rng.r() * Math.PI * 2 });
+      
+      groundPatches = [];
+      for (let i = 0; i < 50; i++) groundPatches.push({ x: rng.r(), y: rng.r(), r: 2 + rng.r() * 6 });
+      
+      return c;
+    }
+    
+    function draw() {
+      const sz = canvas.width;
+      if (!cache) cache = genCache();
+      if (!cache) return;
+      
+      const bg = ctx.createLinearGradient(0, 0, 0, sz);
+      if (isNightMode) { bg.addColorStop(0, '#1a1a2e'); bg.addColorStop(1, '#0a0a0a'); }
+      else { bg.addColorStop(0, '#87CEEB'); bg.addColorStop(1, '#E0F6FF'); }
+      ctx.fillStyle = bg; ctx.fillRect(0, 0, sz, sz);
+      
+      const gy = sz * 0.75;
+      isNightMode ? drawStarsMoon(sz) : drawClouds(sz);
+      drawForest(sz, gy);
+      
+      const gg = ctx.createLinearGradient(0, gy, 0, sz);
+      if (isNightMode) { gg.addColorStop(0, '#1a2a1a'); gg.addColorStop(1, '#0d150d'); }
+      else { gg.addColorStop(0, '#4a6741'); gg.addColorStop(1, '#2d4025'); }
+      ctx.fillStyle = gg; ctx.fillRect(0, gy, sz, sz - gy);
+      
+      drawGroundTex(sz, gy);
+      const sc = sz / 900;
+      drawFlowers(sz, gy, sc);
+      drawMushroom(sz / 2, gy, 1.5 * sc);
+      drawGrassFlora(sz / 2, gy, sc);
+      drawInsects(sz);
+    }
+    
+    function drawGroundTex(sz, gy) {
+      for (let x = 0; x < sz; x += 3) for (let y = gy; y < sz; y += 3) {
+        const n = (perlin.noise(x * 0.01, y * 0.01) + perlin.noise(x * 0.05, y * 0.05) * 0.5 + perlin.noise(x * 0.1, y * 0.1) * 0.25) / 1.75;
+        ctx.fillStyle = isNightMode ? `rgba(${15 + n * 20}, ${25 + n * 20}, ${15 + n * 20}, ${0.3 + n * 0.3})` : `rgba(${40 + n * 30}, ${60 + n * 40}, ${30 + n * 25}, ${0.2 + n * 0.3})`;
+        ctx.fillRect(x, y, 3, 3);
+      }
+      groundPatches.forEach(gp => {
+        const px = gp.x * sz, py = gy + gp.y * (sz - gy);
+        ctx.fillStyle = isNightMode ? `rgba(10, 15, 10, ${0.2 + perlin.noise(px * 0.02, py * 0.02) * 0.3})` : `rgba(60, 45, 30, ${0.15 + perlin.noise(px * 0.02, py * 0.02) * 0.25})`;
+        ctx.beginPath(); ctx.arc(px, py, gp.r, 0, Math.PI * 2); ctx.fill();
+      });
+    }
+    
+    function drawForest(sz, gy) {
+      const sc = sz / 900;
+      [...cache.trees].sort((a, b) => a.x - b.x).forEach(t => {
+        ctx.save(); ctx.translate(t.x * sz, gy);
+        drawBranch(0, 0, -t.h * sc, t.w * sc, t.ba, t.bl, t.seed, isNightMode ? [20, 30, 15] : [40, 50, 30]);
+        ctx.restore();
+      });
+    }
+    
+    function drawBranch(x1, y1, len, th, ang, d, s, bc) {
+      if (d === 0 || th < 0.5) return;
+      const x2 = x1, y2 = y1 + len;
+      const cv = Math.sin(s) * 10, r = Math.max(0, Math.min(255, bc[0] + cv)), g = Math.max(0, Math.min(255, bc[1] + cv)), b = Math.max(0, Math.min(255, bc[2] + cv));
+      const gr = ctx.createLinearGradient(x1, y1, x2, y2);
+      gr.addColorStop(0, `rgb(${r},${g},${b})`); gr.addColorStop(1, `rgb(${r * 0.7},${g * 0.7},${b * 0.7})`);
+      ctx.strokeStyle = gr; ctx.lineWidth = th; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+      const nl = len * (0.6 + Math.sin(s) * 0.1), nt = th * 0.7;
+      ctx.save(); ctx.translate(x2, y2); ctx.rotate(-ang * Math.PI / 180); drawBranch(0, 0, nl, nt, ang, d - 1, s + 1, bc); ctx.restore();
+      ctx.save(); ctx.translate(x2, y2); ctx.rotate(ang * Math.PI / 180); drawBranch(0, 0, nl, nt, ang, d - 1, s + 2, bc); ctx.restore();
+      if (d > 1 && Math.sin(s * 10) > 0.5) { ctx.save(); ctx.translate(x2, y2); drawBranch(0, 0, nl * 0.8, nt * 0.8, ang, d - 1, s + 3, bc); ctx.restore(); }
+      if (d <= 1) { ctx.fillStyle = isNightMode ? 'rgba(30,60,30,0.6)' : 'rgba(60,100,50,0.7)'; ctx.beginPath(); ctx.arc(x2, y2, th * 3, 0, Math.PI * 2); ctx.fill(); }
+    }
+    
+    function drawClouds(sz) {
+      cache.clouds.forEach(c => {
+        ctx.save(); ctx.translate(c.x * sz, c.y * sz);
+        c.puffs.forEach(p => {
+          ctx.fillStyle = `rgba(255,255,255,${p.o})`;
+          ctx.beginPath();
+          for (let s = 0; s <= 40; s++) {
+            const a = (s / 40) * Math.PI * 2, n = perlin.noise(Math.cos(a) * 2 + c.x * sz * 0.01, Math.sin(a) * 2 + c.y * sz * 0.01);
+            const rv = 1 + n * 0.3, rx = p.ox + Math.cos(a) * p.rx * rv, ry = p.oy + Math.sin(a) * p.ry * rv;
+            s === 0 ? ctx.moveTo(rx, ry) : ctx.lineTo(rx, ry);
+          }
+          ctx.closePath(); ctx.fill();
+        });
+        ctx.restore();
+      });
+    }
+    
+    function drawStarsMoon(sz) {
+      cache.stars.forEach(s => {
+        ctx.fillStyle = `rgba(255,255,255,${s.b / 100})`;
+        ctx.beginPath(); ctx.arc(s.x * sz, s.y * sz, s.s, 0, Math.PI * 2); ctx.fill();
+        if (s.t > 0.8) { ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.beginPath(); ctx.arc(s.x * sz, s.y * sz, s.s * 2, 0, Math.PI * 2); ctx.fill(); }
+      });
+      const mx = sz * 0.8, my = sz * 0.15, mr = sz * 0.06;
+      const mg = ctx.createRadialGradient(mx, my, mr * 0.5, mx, my, mr * 2);
+      mg.addColorStop(0, 'rgba(255,255,200,0.15)'); mg.addColorStop(1, 'rgba(255,255,200,0)');
+      ctx.fillStyle = mg; ctx.beginPath(); ctx.arc(mx, my, mr * 2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#f4f1de'; ctx.beginPath(); ctx.arc(mx, my, mr, 0, Math.PI * 2); ctx.fill();
+    }
+    
+    function drawFlowers(sz, gy, sc) {
+      cache.flowers.forEach(f => {
+        const fx = f.x * sz, fy = gy + f.y * (sz - gy), sh = f.sh * sc * f.sv;
+        ctx.strokeStyle = `hsl(120,40%,${isNightMode ? 15 + f.x * 10 : 25 + f.x * 15}%)`;
+        ctx.lineWidth = 0.8 * sc * f.sv; ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(fx, fy - sh); ctx.stroke();
+        const fs = f.s * sc * f.sv, sat = isNightMode ? 40 : 80, bri = isNightMode ? 25 + f.y * 10 : 60 + f.y * 20;
+        for (let p = 0; p < f.pc; p++) {
+          const pa = (p / f.pc) * Math.PI * 2, px = fx + Math.cos(pa) * fs, py = fy - sh + Math.sin(pa) * fs;
+          ctx.fillStyle = `hsl(${f.h},${sat}%,${bri}%)`; ctx.beginPath(); ctx.arc(px, py, fs * 0.4, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.fillStyle = `hsl(${(f.h + 180) % 360},55%,${isNightMode ? 20 : 45}%)`; ctx.beginPath(); ctx.arc(fx, fy - sh, fs * 0.3, 0, Math.PI * 2); ctx.fill();
+      });
+    }
+    
+    function drawMushroom(x, y, sc) {
+      const cw = 140 * sc, ch = 80 * sc, sw = 40 * sc, sh = 160 * sc;
+      ctx.save(); ctx.translate(x, y);
+      ctx.save(); ctx.translate(0, -sh);
+      ctx.fillStyle = isNightMode ? '#9dff00' : '#8b4513'; ctx.shadowColor = isNightMode ? 'rgba(157,255,0,0.6)' : 'transparent'; ctx.shadowBlur = isNightMode ? 20 : 0;
+      ctx.beginPath();
+      for (let i = 0; i <= 100; i++) {
+        const a = Math.PI + (i / 100) * Math.PI, n = perlin.noise(Math.cos(a) * 2, Math.sin(a) * 2) * 10;
+        const rx = (cw + n) * Math.cos(a), ry = -Math.pow(Math.abs(Math.sin(a)), 1.2) * ch * 1.8;
+        i === 0 ? ctx.moveTo(rx, ry) : ctx.lineTo(rx, ry);
+      }
+      ctx.fill(); ctx.shadowBlur = 0;
+      ctx.fillStyle = isNightMode ? '#7ab800' : '#6b3410'; ctx.beginPath(); ctx.ellipse(0, 0, cw, cw * 0.2, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = isNightMode ? 'rgba(180,255,100,0.4)' : 'rgba(139,90,43,0.3)'; ctx.beginPath(); ctx.ellipse(-cw * 0.3, -ch * 0.8, 30 * sc, 15 * sc, -0.2, 0, Math.PI * 2); ctx.fill();
+      cache.spores.forEach(sp => {
+        const px = Math.cos(sp.a) * sp.d * cw, ry = -Math.pow(Math.abs(Math.sin(sp.a)), 1.2) * ch * 1.8 * sp.d;
+        ctx.fillStyle = isNightMode ? `rgba(60,100,0,${0.1 + sp.d * 0.15})` : `rgba(100,70,40,${0.15 + sp.d * 0.2})`;
+        ctx.beginPath(); ctx.arc(px, ry, sp.s, 0, Math.PI * 2); ctx.fill();
+      });
+      ctx.restore();
+      ctx.save(); ctx.translate(0, -sh);
+      ctx.fillStyle = isNightMode ? '#6bad00' : '#5a4332'; ctx.beginPath(); ctx.ellipse(0, 0, cw * 0.95, cw * 0.475, 0, 0, Math.PI * 2); ctx.fill();
+      for (let i = 0; i < 120; i++) {
+        const a = (i / 120) * Math.PI * 2, d = cw * 0.9 + perlin.noise(i * 0.1, x) * 8;
+        const gr = ctx.createLinearGradient(0, 0, Math.cos(a) * d, Math.sin(a) * d * 0.5);
+        if (isNightMode) { gr.addColorStop(0, '#8dd100'); gr.addColorStop(1, '#5a8a00'); } else { gr.addColorStop(0, '#7a6350'); gr.addColorStop(1, '#4a3828'); }
+        ctx.strokeStyle = gr; ctx.lineWidth = 2 * sc; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(a) * d, Math.sin(a) * d * 0.5); ctx.stroke();
+      }
+      ctx.restore();
+      ctx.fillStyle = isNightMode ? '#9dff00' : '#d4c5b0'; ctx.shadowBlur = isNightMode ? 15 : 0; ctx.shadowColor = isNightMode ? 'rgba(157,255,0,0.5)' : 'transparent';
+      for (let i = 0; i <= sh; i += 0.5) { const w = sw * (1 + i / sh * 0.2); ctx.fillRect(-w / 2 + perlin.noise(x * 0.01, i * 0.03) * 3, -i, w, 1); }
+      ctx.beginPath(); ctx.ellipse(0, -sh, sw * 0.6, sw * 0.3, 0, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
+      ctx.fillStyle = isNightMode ? 'rgba(60,100,0,0.3)' : 'rgba(180,160,130,0.3)';
+      for (let i = 0; i <= sh; i++) { const w = sw * (1 + i / sh * 0.2); ctx.fillRect(w / 6, -i, w / 3, 1); }
+      ctx.restore();
+    }
+    
+    function drawGrassFlora(x, y, sc) {
+      cache.grass.forEach(g => {
+        const gx = x + Math.cos(g.a) * g.d * sc, gy = y + Math.sin(g.a) * g.d * sc * 0.3, h = g.h * sc;
+        ctx.strokeStyle = `hsl(${g.hu},50%,${isNightMode ? 25 + g.x * 15 : 35 + g.x * 20}%)`; ctx.lineWidth = g.lw * sc;
+        ctx.beginPath(); ctx.moveTo(gx, gy); ctx.quadraticCurveTo(gx + g.bo * sc, gy - h * 0.6, gx + g.eo * sc, gy - h); ctx.stroke();
+      });
+      cache.flora.forEach(f => {
+        const fx = x + Math.cos(f.a) * f.d * sc, fy = y + Math.sin(f.a) * f.d * sc * 0.3, sh = f.sh * sc;
+        ctx.strokeStyle = `hsl(120,40%,${isNightMode ? 20 + f.d * 0.1 : 30 + f.d * 0.15}%)`; ctx.lineWidth = sc;
+        ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(fx, fy - sh); ctx.stroke();
+        const fs = f.s * sc, sat = isNightMode ? 45 : 80, bri = isNightMode ? 30 + f.sh : 65 + f.sh;
+        for (let p = 0; p < f.pc; p++) {
+          const pa = (p / f.pc) * Math.PI * 2; ctx.fillStyle = `hsl(${f.h},${sat}%,${bri}%)`;
+          ctx.beginPath(); ctx.arc(fx + Math.cos(pa) * fs, fy - sh + Math.sin(pa) * fs, fs * 0.4, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.fillStyle = `hsl(${(f.h + 180) % 360},60%,${isNightMode ? 25 : 50}%)`; ctx.beginPath(); ctx.arc(fx, fy - sh, fs * 0.3, 0, Math.PI * 2); ctx.fill();
+      });
+    }
+    
+    function drawInsects(sz) {
+      const time = Date.now() * 0.001;
+      cache.insects.forEach(ins => {
+        const rawX = ins.x + Math.sin(time * ins.speed + ins.phase) * 0.3;
+        const rawY = ins.y + Math.cos(time * ins.speed * 1.3 + ins.phase) * 0.2;
+        const x = sz * (rawX % 1.3 - 0.15);
+        const y = sz * (rawY % 1.2 - 0.1);
+        
+        if (isNightMode) {
+          const blinkCycle = Math.sin(time * 3 + ins.phase) * 0.5 + 0.5;
+          const isOn = blinkCycle > 0.7;
+          
+          if (isOn) {
+            const intensity = Math.pow(blinkCycle, 2);
+            const glow = ctx.createRadialGradient(x, y, 0, x, y, 12 * intensity);
+            glow.addColorStop(0, `rgba(255, 255, 150, ${0.9 * intensity})`);
+            glow.addColorStop(1, 'rgba(255, 255, 150, 0)');
+            ctx.fillStyle = glow;
+            ctx.beginPath(); ctx.arc(x, y, 12 * intensity, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = `rgba(255, 255, 150, ${intensity})`;
+            ctx.beginPath(); ctx.arc(x, y, 2.5, 0, Math.PI * 2); ctx.fill();
+          } else {
+            ctx.fillStyle = 'rgba(80, 80, 60, 0.3)';
+            ctx.beginPath(); ctx.arc(x, y, 1.5, 0, Math.PI * 2); ctx.fill();
+          }
+        } else {
+          ctx.fillStyle = '#ffeb3b';
+          ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.fill();
+          ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+          ctx.lineWidth = 0.5;
+          ctx.beginPath(); ctx.moveTo(x - 3, y); ctx.lineTo(x - 5, y - 2); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(x + 3, y); ctx.lineTo(x + 5, y - 2); ctx.stroke();
+        }
+      });
+    }
+    
+    function resize() { 
+      const sz = document.getElementById('container').offsetWidth; 
+      canvas.width = canvas.height = sz; 
+      cache = null; 
+      groundPatches = null;
+    }
+    function animate() { draw(); requestAnimationFrame(animate); }
+    window.addEventListener('resize', resize);
+    resize();
+    animate();
+  </script>
+</body>
+</html>

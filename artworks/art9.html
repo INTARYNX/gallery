@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Daredevil's Ascent</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="c"></canvas>
+    <script>
+        const c = document.getElementById('c'), ctx = c.getContext('2d');
+        function resize() {
+            let w = innerWidth, h = innerHeight;
+            if (w/h > 4/3) w = h*4/3; else h = w*3/4;
+            c.width = w; c.height = h;
+            c.style.cssText = 'position:absolute;left:50%;top:50%;transform:translate(-50%,-50%)';
+            window.canvasScale = w / 700; // échelle basée sur largeur de référence 700px
+        }
+        resize();
+        
+        let cZ = 0, cY = 2, spd = 0, t0 = Date.now(), ph = 'takeoff', pA = 0, sX = 0, sY = 0, tilt = 0, tdT = -1, engineFailT = -1;
+        const dust = [], trees = [], veg = [], clds = [], smoke = [];
+        
+        for (let i = 0; i < 60; i++) {
+            const s = Math.random()>.5?1:-1;
+            trees.push({x:s*(300+Math.random()*200), z:2000+Math.random()*4000, sz:0.8+Math.random()*0.4, 
+                hasA:Math.random()>.4, ap:[{x:Math.random()-.5,y:Math.random()-.5},{x:Math.random()-.5,y:Math.random()-.5},
+                {x:Math.random()-.5,y:Math.random()-.5},{x:Math.random()-.5,y:Math.random()-.5}]});
+        }
+        for (let i = 0; i < 200; i++) veg.push({x:(Math.random()-.5)*800, z:Math.random()*3000, sz:1+Math.random()*2});
+        for (let i = 0; i < 120; i++) clds.push({x:(Math.random()-.5)*6000, y:50+Math.random()*250, z:Math.random()*10000});
+        
+        function draw() {
+            const t = (Date.now()-t0)/1000, hy = c.height*0.3 + (cY/50)*c.height*0.4;
+            sX = sY = tilt = 0;
+            const s = window.canvasScale || 1;
+            
+            if (ph === 'takeoff') {
+                if (t < 2) { spd = 0; cY = 2; pA += t*2; }
+                else if (t < 8) { spd = (t-2)*6; cY = 2; sX = (Math.random()-.5)*spd*.3; sY = (Math.random()-.5)*spd*.2; }
+                else if (t < 12) { spd = 36; const lp = (t-8)/4; cY = 2+lp*13; sX = (Math.random()-.5)*(1-lp)*8; sY = (Math.random()-.5)*(1-lp)*6; }
+                else { ph = 'flying'; cY = 15; }
+            } else if (ph === 'flying') {
+                spd = 36; cY = 15;
+                sX = Math.sin(t*2)*4+Math.cos(t*3.5)*2; sY = Math.sin(t*1.5)*3+Math.cos(t*3)*2;
+                tilt = Math.sin(t*1.2)*.05+Math.cos(t*.8)*.04+Math.sin(t*2.3)*.02;
+                if (t > 24 && t < 25) {
+                    if (Math.random() > .5) {
+                        // NOUVELLE TAILLE INITIALE POUR LE VOL NORMAL (TRÈS AUGMENTÉE)
+                        smoke.push({x:(Math.random()-.5)*20*s, y:-15*s-Math.random()*5*s, vx:(Math.random()-.5)*1*s, vy:-Math.random()*3*s-2*s, life:1, sz:(12+Math.random()*13)*s});
+                    }
+                }
+                if (t > 25) { ph = 'landing'; engineFailT = t; }
+            } else if (ph === 'landing') {
+                if (engineFailT !== -1 && Math.random() > .4) {
+                    // NOUVELLE TAILLE INITIALE POUR LA PANNE MOTEUR (TRÈS AUGMENTÉE)
+                    smoke.push({x:(Math.random()-.5)*25*s, y:-18*s-Math.random()*8*s, vx:(Math.random()-.5)*1.5*s, vy:-Math.random()*4*s-3*s, life:1, sz:(18+Math.random()*20)*s});
+                }
+                const lp = Math.min(1,(t-25)/10);
+                cY = 15-lp*13; spd = 36-lp*24;
+                sX = (Math.random()-.5)*lp*8; sY = (Math.random()-.5)*lp*8;
+                tilt = (Math.random()-.5)*.15*lp;
+                if (cY <= 2.5 && tdT === -1) {
+                    tdT = t;
+                    // CORRECTION POUSSIÈRE : Mise à l'échelle des propriétés initiales (x, vx, vy)
+                    for (let i = 0; i < 50; i++) dust.push({x:(Math.random()-.5)*400*s, y:0, vx:(Math.random()-.5)*8*s, vy:-Math.random()*6*s-3*s, life:1});
+                }
+                if (tdT !== -1 && t-tdT < .3) sY += Math.sin((t-tdT)*50)*15;
+                if (t > 32.5 && t < 35) { sX = (Math.random()-.5)*20; sY = (Math.random()-.5)*15; tilt = (Math.random()-.5)*.2; }
+                if (t > 37 || (cY <= 2 && spd < 2)) { ph = 'landed'; cY = 2; spd = 0; }
+            } else if (ph === 'landed') {
+                const ts = t-37;
+                if (ts < 2) { sX = (Math.random()-.5)*10*(2-ts); sY = (Math.random()-.5)*8*(2-ts); }
+                if (ts < 5) pA += (5-ts)*.4; else pA = Math.PI/4;
+            }
+            
+            cZ += spd*.15; if (spd > 0) pA += spd*.5;
+            
+            trees.forEach(tr => {
+                if (tr.z-cZ < -50) {
+                    tr.z += 6000; tr.x = (Math.random()>.5?1:-1)*(300+Math.random()*200);
+                    tr.hasA = Math.random()>.4;
+                    tr.ap = [{x:Math.random()-.5,y:Math.random()-.5},{x:Math.random()-.5,y:Math.random()-.5},
+                            {x:Math.random()-.5,y:Math.random()-.5},{x:Math.random()-.5,y:Math.random()-.5}];
+                }
+            });
+            veg.forEach(v => { if (v.z-cZ < -50) { v.z += 3000; v.x = (Math.random()-.5)*800; }});
+            
+            // Mise à jour de la position et de la durée de vie de la poussière (FIX de la durée de vie)
+            dust.forEach((p,i) => { p.x += p.vx; p.y += p.vy; p.vy += .2; p.life -= .01; if (p.life <= 0) dust.splice(i,1); });
+            // FIX CRITIQUE : AUGMENTATION DU TAUX DE CROISSANCE (1.0 au lieu de 0.3)
+            smoke.forEach((p,i) => { p.x += p.vx; p.y += p.vy; p.vx *= .98; p.vy *= .95; p.life -= .015; p.sz += 1.0 * s; if (p.life <= 0) smoke.splice(i,1); });
+            
+            ctx.save();
+            ctx.translate(c.width/2, c.height/2); ctx.rotate(tilt); ctx.translate(-c.width/2+sX, -c.height/2+sY);
+            
+            if (spd > 25) {
+                ctx.save(); ctx.globalAlpha = .15; ctx.translate(spd*.3, 0);
+                drawAll();
+                ctx.restore();
+            }
+            drawAll();
+            
+            // DESSIN DE LA POUSSIÈRE
+            dust.forEach(p => {
+                // Position de dessin corrigée pour apparaître au niveau du sol (hy + 100*s) + le mouvement vertical de la particule (p.y)
+                const transX = c.width/2 + p.x; 
+                const transY = hy + 100*s + p.y; 
+                
+                ctx.fillStyle = 'rgba(210,180,140,'+p.life+')';
+                ctx.beginPath(); 
+                ctx.arc(transX, transY, 4*s, 0, Math.PI*2); // Taille augmentée à 4*s pour plus de visibilité
+                ctx.fill(); 
+            });
+
+            ctx.restore();
+            
+            smoke.forEach(p => {
+                const ct = (Date.now()-t0)/1000;
+                const fade = ct < 25 ? 0 : Math.min(1, (ct-25)/3);
+                const gray = 30 + fade*90;
+                const alpha = 0.3 - fade*0.15;
+                // Note : p.x, p.y et p.sz sont déjà correctement mis à l'échelle ici.
+                ctx.fillStyle = 'rgba('+gray+','+gray+','+(gray+5)+','+p.life*alpha+')';
+                ctx.beginPath(); ctx.arc(c.width/2+p.x, c.height+30+p.y, p.sz, 0, Math.PI*2); ctx.fill(); 
+            });
+            
+            drawFlare();
+            
+            let txt = '';
+            if (t < 3) txt = 'PARIS - 1909';
+            else if (t >= 3 && t < 6) {
+                ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                // Correction de la police pour utiliser celles définies dans le header
+                ctx.font = (20*s)+'px "Cinzel", serif'; 
+                ctx.textAlign = 'center';
+                ctx.fillText('TEMPERATURE: 18°C', c.width/2, c.height-60*s);
+                ctx.fillText('WIND: 5 KT NW', c.width/2, c.height-30*s);
+            }
+            else if (ph === 'landed' && t > 42) {
+                ctx.fillStyle = 'rgba(0,0,0,0.7)';
+                ctx.fillRect(0, c.height/2-90*s, c.width, 180*s);
+                ctx.fillStyle = 'rgba(255,255,255,0.95)';
+                // Correction de la police pour utiliser celles définies dans le header
+                ctx.font = (18*s)+'px "Cinzel", serif'; 
+                ctx.textAlign = 'center';
+                ctx.fillText('In those early days,', c.width/2, c.height/2-50*s);
+                ctx.fillText('the sky belonged to dreamers', c.width/2, c.height/2-25*s);
+                ctx.fillText('and daredevils.', c.width/2, c.height/2);
+                ctx.fillText('', c.width/2, c.height/2+25*s);
+                ctx.fillText('Many fell from the heavens', c.width/2, c.height/2+50*s);
+                ctx.fillText('so that others might soar.', c.width/2, c.height/2+75*s);
+            }
+            if (txt) { 
+                ctx.fillStyle = 'rgba(0,0,0,0.3)'; 
+                // Correction de la police pour utiliser celles définies dans le header
+                ctx.font = (28*s)+'px "Cinzel", serif'; 
+                ctx.textAlign = 'center'; 
+                ctx.fillText(txt, c.width/2, c.height-30*s); 
+            }
+            
+            requestAnimationFrame(draw);
+        }
+        
+        function drawAll() {
+            const t = (Date.now()-t0)/1000, hy = c.height*.3 + (cY/50)*c.height*.4;
+            const s = window.canvasScale || 1;
+            
+            const g = ctx.createLinearGradient(0,0,0,c.height);
+            g.addColorStop(0,'#6A9BD8'); g.addColorStop(.5,'#8FB5E0'); g.addColorStop(1,'#C4DBF0');
+            ctx.fillStyle = g; ctx.fillRect(-c.width*25, -c.height*25, c.width*50, c.height*50);
+            
+            clds.forEach(cl => {
+                let wz = (cl.z - cZ*.3);
+                while (wz < -1000) wz += 10000;
+                while (wz > 9000) wz -= 10000;
+                
+                // CORRECTION NUAGES (1/2) : Mise à l'échelle de la distance de référence (400)
+                const sc = (400*s)/(wz+800), 
+                      // CORRECTION NUAGES (2/2) : Mise à l'échelle de l'effet de perspective verticale (2)
+                      sx = c.width/2+cl.x*sc, 
+                      sy = hy-(cl.y-cY)*sc*2*s; 
+                
+                const bs = 35*sc*s; // Mise à l'échelle de la taille de base (35)
+                
+                // Fade progressif basé sur la distance
+                let f = 0.35;
+                if (wz < 200) f *= wz / 200; // Fade in proche
+                if (wz > 8000) f *= Math.max(0, 1 - (wz - 8000) / 2000); // Fade out lointain
+                
+                if (f > .01 && wz > 0) {
+                    ctx.fillStyle = 'rgba(255,255,255,'+f+')';
+                    ctx.beginPath(); ctx.arc(sx-bs*1.2,sy,bs*1.1,0,Math.PI*2); ctx.fill();
+                    ctx.beginPath(); ctx.arc(sx,sy-bs*.4,bs*1.3,0,Math.PI*2); ctx.fill();
+                    ctx.beginPath(); ctx.arc(sx+bs*1.3,sy,bs,0,Math.PI*2); ctx.fill();
+                    ctx.beginPath(); ctx.arc(sx-bs*.3,sy+bs*.5,bs*.9,0,Math.PI*2); ctx.fill();
+                }
+            });
+            
+            ctx.fillStyle = '#5A7A4E'; ctx.beginPath(); ctx.moveTo(-c.width,hy);
+            for (let x = -c.width; x <= c.width*2; x += 20) ctx.lineTo(x, hy-40+Math.sin(x*.008)*25);
+            ctx.lineTo(c.width*2,hy); ctx.lineTo(c.width*2,c.height*2); ctx.lineTo(-c.width,c.height*2); ctx.closePath(); ctx.fill();
+            
+            ctx.fillStyle = '#6A8A5E'; ctx.beginPath(); ctx.moveTo(-c.width,hy);
+            for (let x = -c.width; x <= c.width*2; x += 20) ctx.lineTo(x, hy-15+Math.sin(x*.012)*8);
+            ctx.lineTo(c.width*2,hy); ctx.lineTo(c.width*2,c.height*2); ctx.lineTo(-c.width,c.height*2); ctx.closePath(); ctx.fill();
+            
+            drawParis(hy);
+            
+            const gg = ctx.createLinearGradient(0,hy,0,c.height);
+            gg.addColorStop(0,'#8db88d'); gg.addColorStop(.3,'#7aaa7a'); gg.addColorStop(.7,'#6b9d6b'); gg.addColorStop(1,'#5a8c5a');
+            // FIX: étendre le rectangle du sol pour couvrir la rotation
+            ctx.fillStyle = gg; ctx.fillRect(-c.width, hy, c.width*3, c.height-hy);
+            
+            for (let i = 0; i < 20; i++) {
+                const z = i*50 - (cZ%50);
+                if (z > 5 && z < 600) {
+                    // sc et py sont mis à l'échelle via hy
+                    const sc = 400/(z+100), py = hy+100*sc/(1+cY*.01);
+                    ctx.strokeStyle = 'rgba(100,130,70,'+(0.5-z*.0008)+')'; ctx.lineWidth = 1.5;
+                    ctx.beginPath(); ctx.moveTo(c.width/2-600*sc,py); ctx.lineTo(c.width/2+600*sc,py); ctx.stroke();
+                }
+            }
+            
+            drawRunway(hy);
+            
+            trees.sort((a,b) => (b.z-cZ)-(a.z-cZ));
+            trees.forEach(tr => {
+                const wz = tr.z-cZ;
+                if (wz > 50 && wz < 3000) {
+                    const sc = 400/(wz+100), sx = c.width/2+tr.x*sc, gy = hy+100*sc/(1+cY*.01);
+                    const sf = Math.max(.3,1-wz/3000)*Math.max(.2,5-cY/4);
+                    // th et tw sont mis à l'échelle via s
+                    const th = 70*tr.sz*sc*sf*s, tw = 35*tr.sz*sc*sf*s, f = Math.min(1,1-Math.pow(wz/3000,2));
+                    if (f > .02 && th > .5) {
+                        ctx.fillStyle = 'rgba(90,60,40,'+f+')';
+                        ctx.fillRect(sx-tw*.18, gy-th*.4, tw*.36, th*.4);
+                        
+                        const g1 = ctx.createRadialGradient(sx-tw*.3,gy-th*.58,0,sx-tw*.4,gy-th*.55,tw*.7);
+                        g1.addColorStop(0,'rgba(70,140,70,'+f+')'); g1.addColorStop(1,'rgba(50,120,50,'+f+')');
+                        ctx.fillStyle = g1; ctx.beginPath(); ctx.arc(sx-tw*.4,gy-th*.55,tw*.7,0,Math.PI*2); ctx.fill();
+                        
+                        const g2 = ctx.createRadialGradient(sx+tw*.2,gy-th*.63,0,sx+tw*.3,gy-th*.6,tw*.75);
+                        g2.addColorStop(0,'rgba(60,150,60,'+f+')'); g2.addColorStop(1,'rgba(45,130,45,'+f+')');
+                        ctx.fillStyle = g2; ctx.beginPath(); ctx.arc(sx+tw*.3,gy-th*.6,tw*.75,0,Math.PI*2); ctx.fill();
+                        
+                        const g3 = ctx.createRadialGradient(sx-tw*.05,gy-th*.73,0,sx,gy-th*.7,tw*.8);
+                        g3.addColorStop(0,'rgba(65,145,65,'+f+')'); g3.addColorStop(1,'rgba(48,125,48,'+f+')');
+                        ctx.fillStyle = g3; ctx.beginPath(); ctx.arc(sx,gy-th*.7,tw*.8,0,Math.PI*2); ctx.fill();
+                        
+                        if ((ph === 'landing' || ph === 'landed') && sf > 1 && tr.hasA) {
+                            ctx.fillStyle = 'rgba(180,50,50,'+f+')';
+                            tr.ap.forEach(a => {
+                                ctx.beginPath(); ctx.arc(sx+a.x*tw*.8,gy-th*.6+a.y*tw*.5,tw*.08,0,Math.PI*2); ctx.fill();
+                            });
+                        }
+                    }
+                }
+            });
+            
+            veg.forEach(v => {
+                const wz = v.z-cZ;
+                if (wz > 10 && wz < 1000) {
+                    const sc = 400/(wz+100), sx = c.width/2+v.x*sc, gy = hy+100*sc/(1+cY*.01);
+                    const f = Math.min(.8,1-Math.pow(wz/1000,2)), gh = v.sz*sc*2*s; // gh mis à l'échelle via s
+                    if (gh > .5 && f > .05) {
+                        ctx.strokeStyle = 'rgba(60,100,50,'+f+')'; ctx.lineWidth = Math.max(.5,sc*.5);
+                        ctx.beginPath(); ctx.moveTo(sx,gy); ctx.lineTo(sx+Math.random()*2-1,gy-gh); ctx.stroke();
+                    }
+                }
+            });
+            
+            const cx = c.width/2, cy = c.height+30, ts = (Date.now()-t0)/1000-37;
+            let al = .15; if (ph === 'landed' && ts > 5) al = 1;
+            ctx.save(); ctx.globalAlpha = al; ctx.translate(cx,cy); ctx.rotate(pA);
+            // L'hélice est mise à l'échelle via s (700px)
+            for (let i = 0; i < 2; i++) {
+                ctx.save(); ctx.rotate(Math.PI*i);
+                ctx.fillStyle = '#6B5433';
+                ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(280*s,-28*s); ctx.lineTo(295*s,-22*s); ctx.lineTo(300*s,0); ctx.lineTo(295*s,22*s); ctx.lineTo(280*s,28*s); ctx.closePath(); ctx.fill();
+                ctx.fillStyle = '#8B7453';
+                ctx.beginPath(); ctx.moveTo(20*s,-22*s); ctx.lineTo(270*s,-22*s); ctx.lineTo(270*s,22*s); ctx.lineTo(20*s,22*s); ctx.closePath(); ctx.fill();
+                ctx.restore();
+            }
+            ctx.fillStyle = '#4A3822'; ctx.beginPath(); ctx.arc(0,0,32*s,0,Math.PI*2); ctx.fill();
+            ctx.fillStyle = '#6B5433'; ctx.beginPath(); ctx.arc(0,0,22*s,0,Math.PI*2); ctx.fill();
+            ctx.restore();
+        }
+        
+        function drawParis(hy) {
+            const s = window.canvasScale || 1;
+            // FIX: Augmentation du nombre de bâtiments pour densifier l'horizon
+            const bldgs = [
+                {x:.01,w:20*s,h:9*s,t:'b'}, 
+                {x:.05,w:35*s,h:12*s,t:'b'},
+                {x:.09,w:25*s,h:8*s,t:'c'}, 
+                {x:.12,w:30*s,h:10*s,t:'b'},
+                {x:.15,w:22*s,h:11*s,t:'b'}, 
+                {x:.2,w:40*s,h:14*s,t:'c'},
+                {x:.25,w:28*s,h:10*s,t:'b'}, 
+                {x:.3,w:38*s,h:13*s,t:'b'},
+                {x:.35,w:24*s,h:9*s,t:'c'}, 
+                {x:.39,w:32*s,h:11*s,t:'b'},
+                {x:.44,w:26*s,h:12*s,t:'b'}, 
+                {x:.48,w:42*s,h:15*s,t:'c'},
+                {x:.53,w:30*s,h:10*s,t:'b'}, 
+                {x:.58,w:36*s,h:12*s,t:'b'},
+                {x:.63,w:25*s,h:9*s,t:'c'}, 
+                {x:.66,w:30*s,h:10*s,t:'b'},
+                {x:.7,w:22*s,h:11*s,t:'b'}, 
+                {x:.74,w:34*s,h:13*s,t:'b'},
+                {x:.78,w:28*s,h:10*s,t:'c'}, 
+                {x:.82,w:38*s,h:14*s,t:'c'},
+                {x:.86,w:24*s,h:9*s,t:'b'}, 
+                {x:.91,w:32*s,h:11*s,t:'b'},
+                {x:.95,w:20*s,h:8*s,t:'b'}
+            ];
+            bldgs.forEach(b => {
+                const x = c.width*b.x;
+                if (b.t === 'c') {
+                    ctx.fillStyle = 'rgba(80,80,95,0.6)';
+                    ctx.fillRect(x+b.w*.25,hy-b.h*.6,b.w*.5,b.h*.6);
+                    ctx.beginPath(); ctx.moveTo(x+b.w*.5,hy-b.h); ctx.lineTo(x+b.w*.25,hy-b.h*.6); ctx.lineTo(x+b.w*.75,hy-b.h*.6); ctx.closePath(); ctx.fill();
+                    ctx.fillRect(x+b.w*.45,hy-b.h-4*s,b.w*.1,4*s); // 4px mis à l'échelle
+                } else {
+                    const g = ctx.createLinearGradient(x,hy-b.h,x,hy);
+                    g.addColorStop(0,'rgba(70,70,85,0.6)'); g.addColorStop(1,'rgba(90,90,105,0.6)');
+                    ctx.fillStyle = g; ctx.fillRect(x,hy-b.h,b.w,b.h); ctx.fillRect(x+b.w*.3,hy-b.h-3*s,b.w*.4,3*s); // 3px mis à l'échelle
+                    const seed = Math.floor(b.x * 1000);
+                    const now = (Date.now()-t0)/1000;
+                    for (let wy = 0; wy < 3; wy++) for (let wx = 0; wx < 4; wx++) {
+                        const winSeed = seed + wy * 10 + wx;
+                        if ((winSeed + Math.floor(now * 0.3)) % 7 < 3) {
+                            ctx.fillStyle = 'rgba(255,240,180,0.15)'; ctx.fillRect(x+5*s+wx*7*s,hy-b.h+2*s+wy*3*s,2*s,2*s); // Fenêtres mises à l'échelle
+                        }
+                    }
+                }
+            });
+            
+            const ex = c.width*.15;
+            ctx.strokeStyle = 'rgba(70,70,85,0.7)'; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(ex-10*s,hy); ctx.lineTo(ex-6*s,hy-12*s); ctx.lineTo(ex-4*s,hy-20*s); ctx.lineTo(ex-2*s,hy-28*s); ctx.lineTo(ex-1*s,hy-35*s); ctx.stroke(); // E-Tower
+            ctx.beginPath(); ctx.moveTo(ex+10*s,hy); ctx.lineTo(ex+6*s,hy-12*s); ctx.lineTo(ex+4*s,hy-20*s); ctx.lineTo(ex+2*s,hy-28*s); ctx.lineTo(ex+1*s,hy-35*s); ctx.stroke();
+            ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.moveTo(ex-6*s,hy-12*s); ctx.lineTo(ex+6*s,hy-12*s); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(ex-4*s,hy-20*s); ctx.lineTo(ex+4*s,hy-20*s); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(ex-2*s,hy-28*s); ctx.lineTo(ex+2*s,hy-28*s); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(ex-10*s,hy); ctx.lineTo(ex-8*s,hy-3*s); ctx.lineTo(ex+8*s,hy-3*s); ctx.lineTo(ex+10*s,hy); ctx.stroke();
+            ctx.fillStyle = 'rgba(70,70,85,0.65)'; ctx.fillRect(ex-.5*s,hy-38*s,1*s,3*s);
+            
+            const ax = c.width*.7;
+            ctx.fillStyle = 'rgba(85,85,100,0.6)';
+            ctx.fillRect(ax-15*s,hy-18*s,8*s,18*s); ctx.fillRect(ax+7*s,hy-18*s,8*s,18*s); ctx.fillRect(ax-15*s,hy-20*s,30*s,2*s); // Arc
+            ctx.beginPath(); ctx.arc(ax,hy-18*s,11*s,Math.PI,0,true); ctx.fill();
+        }
+        
+		function drawRunway(hy) {
+			if (cY > 10 || ph === 'landing' || ph === 'landed') return;
+			
+			const t = (Date.now()-t0)/1000;
+			const s = window.canvasScale || 1;
+			const altitudeFade = cY < 5 ? 1 : Math.max(0, 1 - (cY-5)/5);
+			const op = Math.min(.7,Math.max(.2,1-cY/20)) * altitudeFade;
+			
+			if (op < 0.05) return;
+			
+			// Décalage vertical pendant le décollage
+			const verticalDrop = cY > 2 ? (cY - 2) * 80 * s : 0; // Mise à l'échelle de la chute verticale
+			
+			// Point proche (devant l'avion) - descend pendant le décollage
+			const nearY = c.height + verticalDrop;
+			const nearWidth = 400 * s;
+			
+			// Point lointain (horizon de la piste) - plus large pendant le décollage
+			const farZ = 15000 - cZ;
+			const farDist = farZ + 100 + cY*50;
+			const farScale = 200 / farDist;
+			const farY = hy + 50*farScale*s + cY*10*s + verticalDrop; // 50 et 10 mis à l'échelle
+			const widthMultiplier = ph === 'takeoff' && cY < 5 ? 2.5 : 1;
+			const farWidth = Math.max(20*s, 70*farScale*widthMultiplier*s);
+			
+			// Ne dessiner que si visible
+			if (nearY < -100) return;
+			
+			// DESSIN DE LA PISTE (CORPS) - Correction du doublon et du remplissage
+			for (let layer = 0; layer < 3; layer++) {
+				const fade = (3-layer)/3;
+				const layer_nw = nearWidth * (0.7 + layer*0.1);
+				const layer_fw = farWidth * (0.7 + layer*0.1);
+				
+				const grad = ctx.createLinearGradient(c.width/2, nearY, c.width/2, farY);
+				grad.addColorStop(0, 'rgba(130,145,100,'+(op*fade*.5)+')');
+				grad.addColorStop(0.7, 'rgba(130,145,100,'+(op*fade*.5)+')');
+				grad.addColorStop(1, 'rgba(130,145,100,0)');
+				
+				ctx.fillStyle = grad;
+				ctx.beginPath();
+				ctx.moveTo(c.width/2-layer_nw, nearY);
+				ctx.lineTo(c.width/2-layer_fw, farY);
+				ctx.lineTo(c.width/2+layer_fw, farY);
+				ctx.lineTo(c.width/2+layer_nw, nearY);
+				ctx.closePath();
+				ctx.fill();
+			}
+			
+			// LIGNES DE BORD DE PISTE - Correction du triplon
+			for (let i = 0; i < 30; i++) {
+				const z = i*50-(cZ%50);
+				if (z > 5 && z < 2500) {
+					const sc = 400/(z+100+cY*50), py = hy+120*sc*s+cY*18*s + verticalDrop, tw = 50*sc*s, f = Math.min(.4,1-z*.0008); // 120 et 18 mis à l'échelle
+					if (py < c.height + 100) {
+						ctx.strokeStyle = 'rgba(110,100,80,'+(f*op)+')'; ctx.lineWidth = Math.max(1,2*sc*s);
+						ctx.beginPath(); ctx.moveTo(c.width/2-tw,py); ctx.lineTo(c.width/2-tw,py+Math.max(1,3*sc*s)); ctx.stroke(); // 3 mis à l'échelle
+						ctx.beginPath(); ctx.moveTo(c.width/2+tw,py); ctx.lineTo(c.width/2+tw,py+Math.max(1,3*sc*s)); ctx.stroke();
+					}
+				}
+			}
+			
+			// Poteaux de balisage
+			const postPositions = [100, 160, 210, 260];
+			postPositions.forEach(pos => {
+				const z = pos - cZ;
+				if (z > -50 && z < 800) {
+					const sc = 400/(z+100+cY*50), 
+						  py = hy + (120 * sc * s) + verticalDrop, 
+						  pw = 260*sc*s, ph = 60*sc*s; // ph et pw mis à l'échelle
+					[-1,1].forEach(side => {
+						const px = c.width/2 + side*pw;
+						
+						const grad = ctx.createLinearGradient(px-sc*6*s, py-ph, px+sc*6*s, py-ph); // 6 mis à l'échelle
+						grad.addColorStop(0, 'rgba(160,160,160,'+op+')');
+						grad.addColorStop(0.5, 'rgba(255,255,255,'+op+')');
+						grad.addColorStop(1, 'rgba(180,180,180,'+op+')');
+						ctx.fillStyle = grad;
+						ctx.fillRect(px-sc*6*s, py-ph, sc*12*s, ph); // 6 et 12 mis à l'échelle
+						
+						const bandH = ph/3;
+						ctx.fillStyle = 'rgba(0,85,164,'+op+')';
+						ctx.fillRect(px-sc*6*s, py-ph, sc*12*s, bandH);
+						ctx.fillStyle = 'rgba(255,255,255,'+op+')';
+						ctx.fillRect(px-sc*6*s, py-ph+bandH, sc*12*s, bandH);
+						ctx.fillStyle = 'rgba(239,65,53,'+op+')';
+						ctx.fillRect(px-sc*6*s, py-ph+bandH*2, sc*12*s, bandH);
+					});
+				}
+			});
+		}
+        
+        function drawFlare() {
+            const t = (Date.now()-t0)/1000, sx = c.width*.25, sy = c.height*.15, in0 = .3+Math.sin(t*.5)*.1;
+            const s = window.canvasScale || 1;
+            const fg = ctx.createRadialGradient(sx,sy,0,sx,sy,150*s); // 150 mis à l'échelle
+            fg.addColorStop(0,'rgba(255,255,200,'+(in0*.4)+')'); fg.addColorStop(.3,'rgba(255,230,150,'+(in0*.2)+')'); fg.addColorStop(1,'rgba(255,200,100,0)');
+            ctx.fillStyle = fg; ctx.fillRect(0,0,c.width,c.height);
+            
+            const fls = [{p:.3,s:40,c:'rgba(200,150,255,',a:.15},{p:.5,s:60,c:'rgba(150,200,255,',a:.12},
+                         {p:.7,s:30,c:'rgba(255,180,150,',a:.18},{p:.85,s:45,c:'rgba(180,255,200,',a:.1}];
+            const cx = c.width/2, cy = c.height/2;
+            fls.forEach(f => {
+                const fx = sx+(cx-sx)*f.p, fy = sy+(cy-sy)*f.p, g = ctx.createRadialGradient(fx,fy,0,fx,fy,f.s*s); // f.s mis à l'échelle
+                g.addColorStop(0,f.c+(f.a*in0)+')'); g.addColorStop(.5,f.c+(f.a*in0*.5)+')'); g.addColorStop(1,f.c+'0)');
+                ctx.fillStyle = g; ctx.fillRect(fx-f.s*s,fy-f.s*s,f.s*2*s,f.s*2*s); // f.s*2 mis à l'échelle
+            });
+            
+            for (let i = 0; i < 3; i++) {
+                const hs = (80+i*30)*s, hx = sx+(cx-sx)*(.4+i*.15), hy = sy+(cy-sy)*(.4+i*.15); // 80 et 30 mis à l'échelle
+                ctx.save(); ctx.translate(hx,hy); ctx.rotate(Math.PI/6+t*.1*(i+1));
+                ctx.strokeStyle = 'rgba(150,200,255,'+((.08-i*.02)*in0)+')'; ctx.lineWidth = 2*s; ctx.beginPath(); // 2 mis à l'échelle
+                for (let j = 0; j < 6; j++) {
+                    const ang = Math.PI/3*j, x = Math.cos(ang)*hs, y = Math.sin(ang)*hs;
+                    if (j === 0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+                }
+                ctx.closePath(); ctx.stroke(); ctx.restore();
+            }
+        }
+        
+        window.addEventListener('resize', resize);
+        draw();
+    </script>
+</body>
+</html>

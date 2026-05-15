@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      background: #000;
+    }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+
+    let W;
+    function resize() {
+      W = Math.min(window.innerWidth, window.innerHeight);
+      canvas.width = canvas.height = W;
+      canvas.style.position = 'absolute';
+      canvas.style.top = '50%';
+      canvas.style.left = '50%';
+      canvas.style.transform = 'translate(-50%,-50%)';
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    const stars = Array.from({length: 200}, () => ({
+      x: Math.random(), y: Math.random(),
+      s: Math.random() * 1.2 + 0.3,
+      b: Math.random()
+    }));
+
+    let f = 0;
+    const B = Math.PI / 124;
+    const TAU = Math.PI * 2;
+
+
+    function draw() {
+      const w = W / 2;
+      const sc = W / 400;
+
+      // Background
+      // Fade with true black (avoid rgba rounding residue)
+      const img = ctx.getImageData(0, 0, W, W);
+      const d = img.data;
+      for (let i = 0; i < d.length; i += 4) {
+        d[i]   = d[i]   * 0.92 | 0;
+        d[i+1] = d[i+1] * 0.92 | 0;
+        d[i+2] = d[i+2] * 0.92 | 0;
+      }
+      ctx.putImageData(img, 0, 0);
+
+      // Twinkling stars (sparse)
+      stars.forEach(s => {
+        s.b += (Math.random() - 0.5) * 0.06;
+        s.b = Math.max(0.05, Math.min(0.7, s.b));
+        ctx.fillStyle = `rgba(180, 190, 255, ${s.b * 0.4})`;
+        ctx.beginPath();
+        ctx.arc(s.x * W, s.y * W, s.s * sc * 0.4, 0, TAU);
+        ctx.fill();
+      });
+
+
+
+      // 3 layers
+      for (let L = 0; L < 3; L++) {
+        const lOff = L * 0.35;
+        const lScale = 0.55 + L * 0.22;
+        const hueShift = L * 110;
+        const speed = 1.5 + L * 0.4;
+        const alpha = 0.12 - L * 0.02;
+
+        for (let j = 0; j < TAU; j += B / 2) {
+          const ff = f + lOff;
+          const r = Math.cos(3 * ff) * w * 0.8 * lScale;
+          const p = Math.sin(ff) * w * 0.9 * lScale;
+          const A = j + ff * speed;
+          const R = j - ff * 0.5;
+
+          const x = Math.cos(A) * p + w;
+          const y = Math.sin(R) * p + w;
+          const X = Math.sin(A + 7 * ff) * r + w;
+          const Y = Math.cos(R + 7 * ff) * r + w;
+
+          const hue = (j / TAU * 360 + f * 50 + hueShift) % 360;
+          ctx.strokeStyle = `hsla(${hue}, 80%, 55%, ${alpha})`;
+          ctx.lineWidth = (1.8 - L * 0.3) * sc;
+
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+          const cx1 = (x + X) / 2 + Math.sin(f * 3 + j) * 12 * sc;
+          const cy1 = (y + Y) / 2 + Math.cos(f * 2 + j) * 12 * sc;
+          ctx.quadraticCurveTo(cx1, cy1, X, Y);
+          ctx.stroke();
+        }
+      }
+
+      // Central glow
+      const pulse = 0.5 + Math.sin(f * 4) * 0.3;
+      const glow = ctx.createRadialGradient(w, w, 0, w, w, 70 * sc);
+      const gH = (f * 60) % 360;
+      glow.addColorStop(0, `hsla(${gH}, 100%, 70%, ${0.06 * pulse})`);
+      glow.addColorStop(0.5, `hsla(${(gH + 60) % 360}, 100%, 40%, ${0.02 * pulse})`);
+      glow.addColorStop(1, `transparent`);
+      ctx.fillStyle = glow;
+      ctx.fillRect(0, 0, W, W);
+
+      f += B / 10;
+      requestAnimationFrame(draw);
+    }
+
+    draw();
+  </script>
+</body>
+</html>

@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Noise Whirlwind</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        canvas {
+            display: block;
+            max-width: 100vmin;
+            max-height: 100vmin;
+            border-radius: 20px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        const size = Math.min(window.innerWidth, window.innerHeight);
+        canvas.width = size;
+        canvas.height = size;
+        
+        const particles1 = [];
+        const particles2 = [];
+        const letters = [];
+        const isMobile = window.innerWidth < 768 || window.devicePixelRatio > 2;
+        const particleCount = isMobile ? 800 : 1500;
+        let cx1 = canvas.width / 2;
+        let cy1 = canvas.height / 2;
+        let cx2 = canvas.width / 2;
+        let cy2 = canvas.height / 2;
+        
+        let scanCanvas = document.createElement('canvas');
+        let scanCtx;
+        
+        function createScanlines() {
+            scanCanvas.width = canvas.width;
+            scanCanvas.height = canvas.height;
+            scanCtx = scanCanvas.getContext('2d');
+            
+            scanCtx.strokeStyle = 'rgba(0, 0, 0, 0.15)';
+            scanCtx.lineWidth = 1;
+            
+            for (let i = 0; i < scanCanvas.height; i += 4) {
+                scanCtx.beginPath();
+                scanCtx.moveTo(0, i);
+                scanCtx.lineTo(scanCanvas.width, i);
+                scanCtx.stroke();
+            }
+            
+            for (let i = 0; i < scanCanvas.width; i += 4) {
+                scanCtx.beginPath();
+                scanCtx.moveTo(i, 0);
+                scanCtx.lineTo(i, scanCanvas.height);
+                scanCtx.stroke();
+            }
+        }
+        
+        createScanlines();
+        
+        function noise(x, y, t) {
+            return Math.sin(x * 0.01 + t) * Math.cos(y * 0.01 + t) * 
+                   Math.sin((x + y) * 0.005 + t * 0.5);
+        }
+        
+        class Particle {
+            constructor(getCenterFunc, clockwise, color) {
+                this.getCenterFunc = getCenterFunc;
+                this.clockwise = clockwise;
+                this.color = color;
+                this.reset();
+            }
+            
+            reset() {
+                const center = this.getCenterFunc();
+                const angle = Math.random() * Math.PI * 2;
+                const radius = Math.random() * 150;
+                this.x = center.x + Math.cos(angle) * radius;
+                this.y = center.y + Math.sin(angle) * radius;
+                this.life = Math.random() * 150 + 100;
+                this.maxLife = this.life;
+            }
+            
+            update(t) {
+                const center = this.getCenterFunc();
+                const dx = this.x - center.x;
+                const dy = this.y - center.y;
+                const dist2 = dx * dx + dy * dy;
+                const angle = Math.atan2(dy, dx);
+                
+                const n = noise(this.x, this.y, t);
+                const n2 = noise(this.x * 0.5, this.y * 0.5, t * 1.3);
+                const rotationSpeed = this.clockwise ? 0.08 : -0.08;
+                const swirl = angle + rotationSpeed + n * 2.5 + n2 * 1.5;
+                
+                const speed = 1.2 + Math.abs(n) * 0.8;
+                
+                this.x += Math.cos(swirl) * speed;
+                this.y += Math.sin(swirl) * speed;
+                
+                this.life--;
+                
+                if (this.life <= 0 || dist2 > 160000) {
+                    this.reset();
+                }
+            }
+            
+            draw() {
+                const alpha = this.life / this.maxLife;
+                const flicker = 0.85 + Math.random() * 0.15;
+                
+                const accentHue = (time * 30) % 360;
+                const useAccent = Math.random() < 0.15;
+                
+                if (useAccent) {
+                    ctx.fillStyle = `hsla(${accentHue}, 70%, 60%, ${alpha * 0.9 * flicker})`;
+                } else {
+                    ctx.fillStyle = `rgba(${this.color[0]}, ${this.color[1]}, ${this.color[2]}, ${alpha * 0.7 * flicker})`;
+                }
+                
+                const size = 1.5 + Math.random() * 1;
+                ctx.fillRect(this.x, this.y, size, size);
+            }
+        }
+        
+        class Letter {
+            constructor(char, index, total) {
+                this.char = char;
+                this.index = index;
+                this.baseAngle = (index / total) * Math.PI * 2 - Math.PI / 2;
+                this.orbitRadius = 140;
+                this.orbitSpeed = 0.015;
+                this.wobbleSpeed = 0.03 + Math.random() * 0.02;
+                this.wobbleAmount = 15 + Math.random() * 20;
+                this.rotation = 0;
+                this.rotationSpeed = (Math.random() - 0.5) * 0.1;
+            }
+            
+            update(t) {
+                const orbitAngle = this.baseAngle + t * this.orbitSpeed;
+                
+                const wx = this.x || canvas.width / 2;
+                const wy = this.y || canvas.height / 2;
+                const n = noise(wx, wy, t) * 25;
+                
+                const wobbleX = Math.sin(t * this.wobbleSpeed + this.index) * this.wobbleAmount + n;
+                const wobbleY = Math.cos(t * this.wobbleSpeed * 1.3 + this.index) * this.wobbleAmount + n * 0.8;
+                
+                this.x = canvas.width / 2 + Math.cos(orbitAngle) * this.orbitRadius + wobbleX;
+                this.y = canvas.height / 2 + Math.sin(orbitAngle) * this.orbitRadius + wobbleY;
+                
+                this.rotation += this.rotationSpeed + noise(this.x, this.y, t) * 0.02;
+            }
+            
+            draw() {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.rotation);
+                
+                const flipCycle = Math.sin(time * 0.5 + this.index * 1.2);
+                const scaleX = Math.cos(flipCycle * Math.PI * 0.5);
+                ctx.scale(scaleX, 1);
+                
+                const colorCycle = (time * 2 + this.index * 0.5) % text.length;
+                const distance = Math.abs(colorCycle - this.index);
+                const fade = Math.max(0, 1 - distance);
+                
+                const blinkCycle = Math.sin(time * 0.8 + this.index * 0.7) * 0.5 + 0.5;
+                const blinkMultiplier = 0.6 + blinkCycle * 0.4;
+                
+                const gradient = ctx.createLinearGradient(-20, -20, 20, 20);
+                
+                if (fade > 0.5) {
+                    const opacity = (0.9 + fade * 0.1) * blinkMultiplier;
+                    gradient.addColorStop(0, `rgba(255, 255, 255, ${opacity})`);
+                    gradient.addColorStop(1, `rgba(240, 240, 240, ${opacity * 0.9})`);
+                } else {
+                    const opacity = (0.4 + fade * 0.2) * blinkMultiplier;
+                    gradient.addColorStop(0, `rgba(180, 180, 180, ${opacity})`);
+                    gradient.addColorStop(1, `rgba(140, 140, 140, ${opacity * 0.8})`);
+                }
+                
+                ctx.fillStyle = gradient;
+                ctx.font = 'bold 36px "Courier New", monospace';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(this.char, 0, 0);
+                ctx.restore();
+            }
+        }
+        
+        for (let i = 0; i < particleCount; i++) {
+            particles1.push(new Particle(() => ({x: cx1, y: cy1}), true, [130, 135, 145]));
+            particles2.push(new Particle(() => ({x: cx2, y: cy2}), false, [85, 90, 100]));
+        }
+        
+        const text = 'INTARYNX';
+        for (let i = 0; i < text.length; i++) {
+            letters.push(new Letter(text[i], i, text.length));
+        }
+        
+        let time = 0;
+        
+        function animate() {
+            const hue1 = (time * 8) % 360;
+            const hue2 = (time * 8 + 120) % 360;
+            
+            const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+            gradient.addColorStop(0, `hsla(${hue1}, 15%, 8%, 0.06)`);
+            gradient.addColorStop(1, `hsla(${hue2}, 15%, 8%, 0.06)`);
+            
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            time += 0.015;
+            
+            const spiralRadius = 150;
+            const spiralSpeed = 0.3;
+            cx1 = canvas.width / 2 + Math.cos(time * spiralSpeed) * spiralRadius;
+            cy1 = canvas.height / 2 + Math.sin(time * spiralSpeed) * spiralRadius;
+            
+            cx2 = canvas.width / 2 + Math.cos(time * spiralSpeed + Math.PI) * spiralRadius;
+            cy2 = canvas.height / 2 + Math.sin(time * spiralSpeed + Math.PI) * spiralRadius;
+            
+            particles1.forEach(p => {
+                p.update(time);
+                p.draw();
+            });
+            
+            particles2.forEach(p => {
+                p.update(time);
+                p.draw();
+            });
+            
+            letters.forEach(l => {
+                l.update(time);
+                l.draw();
+            });
+            
+            ctx.fillStyle = `hsla(${hue1}, 15%, 8%, 0.3)`;
+            ctx.beginPath();
+            ctx.arc(canvas.width / 2, canvas.height / 2, 50, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.save();
+            ctx.translate(canvas.width / 2, canvas.height / 2);
+            
+            const noiseValue = noise(canvas.width / 2, canvas.height / 2, time);
+            const compassRotation = time * 3 + Math.sin(time * 2) * 0.5 + noiseValue * 4 + Math.cos(time * 1.5) * 0.8;
+            ctx.rotate(compassRotation);
+            
+            ctx.strokeStyle = 'rgba(200, 200, 200, 0.9)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(0, 0, 35, 0, Math.PI * 2);
+            ctx.stroke();
+            
+            ctx.strokeStyle = 'rgba(150, 150, 150, 0.6)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(0, 0, 28, 0, Math.PI * 2);
+            ctx.stroke();
+            
+            for (let i = 0; i < 4; i++) {
+                ctx.save();
+                ctx.rotate((i * Math.PI) / 2);
+                ctx.strokeStyle = 'rgba(200, 200, 200, 0.7)';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(0, -35);
+                ctx.lineTo(0, -40);
+                ctx.stroke();
+                ctx.restore();
+            }
+            
+            const gradient1 = ctx.createLinearGradient(0, -30, 0, 0);
+            gradient1.addColorStop(0, 'rgba(255, 80, 80, 1)');
+            gradient1.addColorStop(1, 'rgba(200, 50, 50, 0.8)');
+            ctx.fillStyle = gradient1;
+            ctx.beginPath();
+            ctx.moveTo(0, -30);
+            ctx.lineTo(-7, 0);
+            ctx.lineTo(0, 3);
+            ctx.lineTo(7, 0);
+            ctx.closePath();
+            ctx.fill();
+            
+            ctx.strokeStyle = 'rgba(150, 40, 40, 0.9)';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            
+            const gradient2 = ctx.createLinearGradient(0, 0, 0, 30);
+            gradient2.addColorStop(0, 'rgba(240, 240, 240, 1)');
+            gradient2.addColorStop(1, 'rgba(180, 180, 180, 0.8)');
+            ctx.fillStyle = gradient2;
+            ctx.beginPath();
+            ctx.moveTo(0, 30);
+            ctx.lineTo(7, 0);
+            ctx.lineTo(0, 3);
+            ctx.lineTo(-7, 0);
+            ctx.closePath();
+            ctx.fill();
+            
+            ctx.strokeStyle = 'rgba(120, 120, 120, 0.9)';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            
+            ctx.fillStyle = 'rgba(80, 80, 80, 0.9)';
+            ctx.beginPath();
+            ctx.arc(0, 0, 4, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.restore();
+            
+            ctx.drawImage(scanCanvas, 0, 0);
+            
+            requestAnimationFrame(animate);
+        }
+        
+        animate();
+        
+        window.addEventListener('resize', () => {
+            const size = Math.min(window.innerWidth, window.innerHeight);
+            canvas.width = size;
+            canvas.height = size;
+            createScanlines();
+        });
+    </script>
+</body>
+</html>

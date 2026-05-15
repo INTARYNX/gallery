@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MBV</title>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: #000;
+            padding: 10px;
+            box-sizing: border-box;
+        }
+        canvas {
+            border: 1px solid #333;
+            will-change: transform;
+            max-width: 100%;
+            max-height: 100vh;
+            width: auto;
+            height: auto;
+            aspect-ratio: 1;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="c"></canvas>
+    <script>
+        const c = document.getElementById('c');
+        const ctx = c.getContext('2d', { alpha: false, desynchronized: true });
+        const S = 700;
+        const HALF_S = S / 2;
+        const TWO_PI = Math.PI * 2;
+        c.width = S;
+        c.height = S;
+
+        // Offscreen canvas pour la grille statique
+        const gridCanvas = document.createElement('canvas');
+        gridCanvas.width = S;
+        gridCanvas.height = S;
+        const gCtx = gridCanvas.getContext('2d');
+
+        // Loveless palette: pure magenta/pink monolith with subtle shifts
+        const PALETTES = [
+            { h1: 330, h2: 320, h3: 340 }, // Magenta core
+            { h1: 340, h2: 325, h3: 350 }, // Hot pink
+            { h1: 320, h2: 310, h3: 335 }, // Deep magenta/fuchsia
+        ];
+        let palette = PALETTES[0];
+        let paletteBlend = 0;
+        let nextPalette = PALETTES[1];
+
+        let t = 0, zoom = 2.2, tZoom = 2.2, blur = 0, rot = 0.15, tRot = 0.15, gOpacity = 1;
+        let fx = HALF_S, fy = HALF_S, tfx = HALF_S, tfy = HALF_S, fTimer = 0, cFocus = 0;
+        let glide = 0; // pitch bend / tremolo bar effect
+        let washIntensity = 0;
+        let flash = 0; // 0 = dark monolith, 1 = blown-out pale flash
+        let flashTarget = 0;
+        let flashTimer = 0;
+        let lastTime = performance.now();
+        let gridNeedsRedraw = true;
+
+        const guitars = Array.from({ length: 8 }, () => ({
+            x: S * (0.1 + Math.random() * 0.8),
+            y: S * (0.15 + Math.random() * 0.7),
+            i: Math.random(),
+            p: Math.random() * TWO_PI,
+            bend: Math.random() * 0.8 + 0.4
+        }));
+
+        const voices = [
+            { x: S * 0.3, y: S * 0.35, r: 35 },
+            { x: S * 0.7, y: S * 0.65, r: 40 },
+            { x: S * 0.5, y: S * 0.5, r: 28 },
+            { x: S * 0.25, y: S * 0.7, r: 32 },
+            { x: S * 0.75, y: S * 0.3, r: 30 }
+        ];
+
+        const amps = Array.from({ length: 5 }, () => ({
+            x: S * (0.15 + Math.random() * 0.7),
+            y: S * (0.55 + Math.random() * 0.35),
+            w: 70 + Math.random() * 60,
+            h: 90 + Math.random() * 60
+        }));
+
+        const picks = [];
+        const MAX_PICKS = 80;
+
+        // Fragments typographiques - mots qui flottent dans le wash
+        const WORDS = [
+            'loveless', 'sometimes', 'soon', 'only shallow', 'when you sleep',
+            'to here knows when', 'i only said', 'come in alone', 'blown a wish',
+            'drown', 'bend', 'glide', 'wash', 'haze', 'dream',
+            'feed me with your kiss', 'softly',
+            'no more sorry', 'lose my breath', '∞', '◦ ◦ ◦'
+        ];
+        const typos = Array.from({ length: 7 }, (_, i) => ({
+            text: WORDS[~~(Math.random() * WORDS.length)],
+            x: Math.random() * S,
+            y: Math.random() * S,
+            vx: (Math.random() - 0.5) * 0.15,
+            vy: (Math.random() - 0.5) * 0.15,
+            size: 18 + Math.random() * 60,
+            rot: (Math.random() - 0.5) * 0.4,
+            p: Math.random() * TWO_PI,
+            life: Math.random(),
+            lifeSpeed: 0.001 + Math.random() * 0.003,
+            italic: Math.random() > 0.5,
+            weight: Math.random() > 0.6 ? 700 : 300,
+            spacing: Math.random() * 8
+        }));
+
+        // Gros titre central qui pulse
+        const bigTitle = {
+            text: 'loveless',
+            x: HALF_S,
+            y: HALF_S,
+            life: 0,
+            nextChange: 0
+        };
+
+        const waves = Array.from({ length: 7 }, (_, i) => ({
+            o: Math.random() * TWO_PI,
+            s: 0.2 + Math.random() * 0.6,
+            a: 50 + Math.random() * 80,
+            f: 0.8 + Math.random() * 1.8,
+            y: S * (0.15 + i * 0.11)
+        }));
+
+        // Drone particles - thick wall of sound
+        const drones = Array.from({ length: 45 }, () => ({
+            x: Math.random() * S,
+            y: Math.random() * S,
+            vx: (Math.random() - 0.5) * 0.3,
+            vy: (Math.random() - 0.5) * 0.3,
+            r: 20 + Math.random() * 80,
+            p: Math.random() * TWO_PI,
+            hShift: Math.random() * 60 - 30,
+            colorIdx: ~~(Math.random() * 3)
+        }));
+
+        // Pré-rendu des sprites de drones (3 teintes × N tailles) - évite createRadialGradient par frame
+        const DRONE_SPRITE_SIZE = 128;
+        const DRONE_SPRITES = [];
+        function buildDroneSprites(hues) {
+            DRONE_SPRITES.length = 0;
+            const palette = [hues.h1, hues.h2, hues.h3];
+            for (let p = 0; p < 3; p++) {
+                const cv = document.createElement('canvas');
+                cv.width = cv.height = DRONE_SPRITE_SIZE;
+                const cx = cv.getContext('2d');
+                const r = DRONE_SPRITE_SIZE / 2;
+                const grad = cx.createRadialGradient(r, r, 0, r, r, r);
+                grad.addColorStop(0, `hsla(${palette[p]},85%,65%,1)`);
+                grad.addColorStop(0.5, `hsla(${palette[p]},75%,55%,0.5)`);
+                grad.addColorStop(1, `hsla(${palette[p]},70%,50%,0)`);
+                cx.fillStyle = grad;
+                cx.fillRect(0, 0, DRONE_SPRITE_SIZE, DRONE_SPRITE_SIZE);
+                DRONE_SPRITES.push(cv);
+            }
+        }
+
+        // Pré-rendu des halos de voix
+        const VOICE_SPRITE_SIZE = 256;
+        const VOICE_SPRITES = [];
+        function buildVoiceSprites(hues) {
+            VOICE_SPRITES.length = 0;
+            const palette = [hues.h1, hues.h3];
+            for (let p = 0; p < 2; p++) {
+                const cv = document.createElement('canvas');
+                cv.width = cv.height = VOICE_SPRITE_SIZE;
+                const cx = cv.getContext('2d');
+                const r = VOICE_SPRITE_SIZE / 2;
+                const grad = cx.createRadialGradient(r, r, 0, r, r, r);
+                grad.addColorStop(0, `hsla(${palette[p]},80%,75%,0.5)`);
+                grad.addColorStop(0.6, `hsla(${palette[p] - 20},70%,60%,0.15)`);
+                grad.addColorStop(1, `hsla(${palette[p]},70%,50%,0)`);
+                cx.fillStyle = grad;
+                cx.fillRect(0, 0, VOICE_SPRITE_SIZE, VOICE_SPRITE_SIZE);
+                VOICE_SPRITES.push(cv);
+            }
+        }
+
+        // Grain pré-généré sur offscreen, pannant chaque frame
+        const grainCanvas = document.createElement('canvas');
+        grainCanvas.width = grainCanvas.height = 256;
+        const grCtx = grainCanvas.getContext('2d');
+        function buildGrain(hues) {
+            const img = grCtx.createImageData(256, 256);
+            const d = img.data;
+            for (let i = 0; i < d.length; i += 4) {
+                const v = Math.random();
+                // Grain magenta/noir - pas de neutre
+                d[i] = v * 200 + 40;       // R
+                d[i + 1] = v * 30;         // G - quasi nul
+                d[i + 2] = v * 120 + 30;   // B
+                d[i + 3] = Math.random() * 90;
+            }
+            grCtx.putImageData(img, 0, 0);
+        }
+        buildGrain();
+
+        const focusPts = [
+            ...guitars.map(g => ({ x: g.x, y: g.y, z: 2.2 + Math.random() * 1.0 })),
+            ...voices.map(v => ({ x: v.x, y: v.y, z: 2.5 + Math.random() * 0.9 })),
+            ...amps.map(a => ({ x: a.x, y: a.y, z: 1.9 + Math.random() * 0.6 })),
+            { x: S * 0.25, y: S * 0.3, z: 2.7 },
+            { x: S * 0.75, y: S * 0.7, z: 3.0 },
+            { x: S * 0.5, y: S * 0.5, z: 1.5 }
+        ];
+
+        // Pré-calcul des angles pour morphPath
+        const MORPH_PTS = 18;
+        const morphAngles = Array.from({ length: MORPH_PTS + 1 }, (_, i) => (i / MORPH_PTS) * TWO_PI);
+
+        const morphPath = (cx, cy, r, t, idx) => {
+            ctx.beginPath();
+            const t3 = t * 3;
+            const t2 = t * 2;
+            const tg = t + glide * 2;
+            for (let i = 0; i <= MORPH_PTS; i++) {
+                const a = morphAngles[i];
+                const d = Math.sin(a * 4 + t3 + idx) * 0.25 + Math.sin(a * 7 + t2) * 0.15 + Math.sin(a * 11 + tg) * 0.08;
+                const mr = r * (1 + d);
+                const px = cx + Math.cos(a) * mr;
+                const py = cy + Math.sin(a) * mr;
+                i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+            }
+            ctx.closePath();
+        };
+
+        function lerpHue(a, b, t) {
+            const d = ((b - a + 540) % 360) - 180;
+            return (a + d * t + 360) % 360;
+        }
+
+        function getHues() {
+            return {
+                h1: lerpHue(palette.h1, nextPalette.h1, paletteBlend),
+                h2: lerpHue(palette.h2, nextPalette.h2, paletteBlend),
+                h3: lerpHue(palette.h3, nextPalette.h3, paletteBlend)
+            };
+        }
+
+        function drawGrid(hues) {
+            if (!gridNeedsRedraw) return;
+            
+            gCtx.clearRect(0, 0, S, S);
+            gCtx.strokeStyle = `hsla(${hues.h2},40%,75%,0.06)`;
+            gCtx.lineWidth = 1;
+            
+            gCtx.beginPath();
+            for (let y = 0; y < S; y += 4) {
+                gCtx.moveTo(0, y);
+                gCtx.lineTo(S, y);
+            }
+            for (let x = 0; x < S; x += 4) {
+                gCtx.moveTo(x, 0);
+                gCtx.lineTo(x, S);
+            }
+            gCtx.stroke();
+            
+            gridNeedsRedraw = false;
+        }
+
+        function changeFocus() {
+            if (++fTimer > 100 + Math.random() * 200 || Math.random() > 0.994) {
+                fTimer = 0;
+                cFocus = ~~(Math.random() * focusPts.length);
+                const f = focusPts[cFocus];
+                tfx = f.x;
+                tfy = f.y;
+                tZoom = f.z;
+                tRot = (Math.random() - 0.5) * 0.8;
+                blur = Math.random() * 6 + 2;
+                // Trigger glide
+                glide = (Math.random() - 0.5) * 0.6;
+                washIntensity = Math.random() * 0.5 + 0.3;
+            }
+        }
+
+        function drawDrones(t05) {
+            // Wall of sound - sprites pré-rendus en lighter, scale dynamique
+            ctx.globalCompositeOperation = 'lighter';
+            for (let i = 0; i < drones.length; i++) {
+                const d = drones[i];
+                d.x += d.vx + Math.sin(t05 + d.p) * 0.4;
+                d.y += d.vy + Math.cos(t05 * 0.7 + d.p) * 0.4;
+                
+                if (d.x < -100) d.x = S + 100;
+                else if (d.x > S + 100) d.x = -100;
+                if (d.y < -100) d.y = S + 100;
+                else if (d.y > S + 100) d.y = -100;
+
+                const pulse = Math.sin(t * 1.2 + d.p) * 0.4 + 0.6;
+                const r = d.r * pulse;
+                const sprite = DRONE_SPRITES[d.colorIdx];
+                ctx.globalAlpha = 0.16 * pulse;
+                ctx.drawImage(sprite, d.x - r, d.y - r, r * 2, r * 2);
+            }
+            ctx.globalAlpha = 1;
+            ctx.globalCompositeOperation = 'source-over';
+        }
+
+        function drawGuitars(hues, t8, t4, t3) {
+            // Réduit nombre de trails de 7 à 4 + shadow seulement sur la corde principale
+            for (let i = 0; i < guitars.length; i++) {
+                const g = guitars[i];
+                const bendAmt = glide * g.bend * 30;
+                const vib = Math.sin(t8 + g.p) * 18 * g.i + bendAmt;
+                const len = 220 + Math.sin(t4 + g.p) * 90;
+                const gx = g.x + Math.sin(t3 + i) * 6;
+                const halfLen = len / 2;
+                const h = i % 2 === 0 ? hues.h1 : hues.h2;
+
+                ctx.shadowBlur = 0;
+                for (let k = 0; k < 4; k++) {
+                    const tr = 12 - k * 3;
+                    const dt = tr * 0.04;
+                    const pBend = (glide - dt * 0.5) * g.bend * 30;
+                    const pv = Math.sin((t - dt) * 8 + g.p) * 18 * g.i + pBend;
+                    const pl = 220 + Math.sin((t - dt) * 4 + g.p) * 90;
+                    const phl = pl / 2;
+                    const offset = (tr - 7) * 1.5;
+                    
+                    ctx.strokeStyle = `hsla(${h + tr * 3},80%,70%,${0.025 * tr})`;
+                    ctx.lineWidth = 14 + tr * 0.5;
+                    ctx.beginPath();
+                    ctx.moveTo(gx + pv + offset, g.y - phl);
+                    ctx.lineTo(gx + pv + offset, g.y + phl);
+                    ctx.stroke();
+                }
+
+                ctx.strokeStyle = `hsla(${h},90%,85%,0.7)`;
+                ctx.lineWidth = 3;
+                ctx.shadowBlur = 25 + blur * 12;
+                ctx.shadowColor = `hsla(${h},90%,75%,0.9)`;
+                ctx.beginPath();
+                ctx.moveTo(gx + vib, g.y - halfLen);
+                ctx.lineTo(gx + vib, g.y + halfLen);
+                ctx.stroke();
+                ctx.shadowBlur = 0;
+
+                if (Math.random() > 0.95 && picks.length < MAX_PICKS) {
+                    picks.push({
+                        x: gx,
+                        y: g.y + (Math.random() - 0.5) * 120,
+                        vx: (Math.random() - 0.5) * 4,
+                        vy: (Math.random() - 0.5) * 4,
+                        l: 1,
+                        h: h + (Math.random() - 0.5) * 40
+                    });
+                }
+            }
+        }
+
+        function drawVoices(hues, t2, t5, br) {
+            for (let i = 0; i < voices.length; i++) {
+                const v = voices[i];
+                const p = 35 + Math.sin(t2 + i) * 25 + Math.sin(t5 + i) * 12 + br * 50;
+                const r = v.r + p;
+                const h = i % 2 === 0 ? hues.h1 : hues.h3;
+
+                // Trails réduits 6 → 4
+                for (let k = 0; k < 4; k++) {
+                    const tr = 15 - k * 3;
+                    const dt = tr * 0.025;
+                    const pp = 35 + Math.sin((t - dt) * 2 + i) * 25 + Math.sin((t - dt) * 5 + i) * 12;
+                    const pr = v.r + pp;
+                    ctx.fillStyle = `hsla(${h + tr * 2},75%,70%,${0.015 * tr})`;
+                    morphPath(v.x, v.y, pr, t - dt, i);
+                    ctx.fill();
+                }
+
+                // Halos via sprites pré-rendus (3 couches au lieu de 6 createRadialGradient)
+                const spriteIdx = i % 2;
+                const sprite = VOICE_SPRITES[spriteIdx];
+                ctx.globalCompositeOperation = 'lighter';
+                for (let j = 3; j > 0; j--) {
+                    const hr = r + j * 22;
+                    ctx.globalAlpha = 0.18 / j;
+                    ctx.drawImage(sprite, v.x - hr, v.y - hr, hr * 2, hr * 2);
+                }
+                ctx.globalAlpha = 1;
+                ctx.globalCompositeOperation = 'source-over';
+
+                ctx.fillStyle = `hsla(${h},85%,85%,${0.35 + Math.sin(t * 3 + i) * 0.2})`;
+                ctx.shadowBlur = 35 + blur * 22;
+                ctx.shadowColor = `hsla(${h},90%,70%,0.9)`;
+                morphPath(v.x, v.y, r, t, i);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+            }
+        }
+
+        function drawAmps(hues, t15) {
+            for (let i = 0; i < amps.length; i++) {
+                const a = amps[i];
+                const p = Math.sin(t15 + i) * 6;
+                const hw = a.w / 2, hh = a.h / 2;
+                const h = hues.h2;
+
+                // Heavier trails
+                for (let tr = 8; tr > 0; tr -= 2) {
+                    const pp = Math.sin((t - tr * 0.04) * 1.5 + i) * 6;
+                    ctx.fillStyle = `hsla(${h + tr * 4},65%,65%,${0.03 * tr})`;
+                    ctx.fillRect(a.x - hw, a.y - hh + pp, a.w, a.h);
+                }
+
+                ctx.fillStyle = `hsla(${h},70%,75%,0.32)`;
+                ctx.shadowBlur = 28 + blur * 15;
+                ctx.shadowColor = `hsla(${h},75%,70%,0.5)`;
+                ctx.fillRect(a.x - hw, a.y - hh + p, a.w, a.h);
+            }
+        }
+
+        function drawTypos(hues) {
+            for (let i = 0; i < typos.length; i++) {
+                const ty = typos[i];
+                ty.x += ty.vx + Math.sin(t * 0.4 + ty.p) * 0.3;
+                ty.y += ty.vy + Math.cos(t * 0.3 + ty.p) * 0.3;
+                ty.life += ty.lifeSpeed;
+
+                if (ty.x < -200) ty.x = S + 100;
+                else if (ty.x > S + 200) ty.x = -100;
+                if (ty.y < -100) ty.y = S + 100;
+                else if (ty.y > S + 100) ty.y = -100;
+
+                // Cycle de vie : fade in / hold / fade out
+                let alpha = Math.sin(ty.life * Math.PI) ** 1.5;
+                if (ty.life >= 1) {
+                    ty.life = 0;
+                    ty.text = WORDS[~~(Math.random() * WORDS.length)];
+                    ty.x = Math.random() * S;
+                    ty.y = Math.random() * S;
+                    ty.size = 18 + Math.random() * 60;
+                    ty.rot = (Math.random() - 0.5) * 0.4;
+                    ty.italic = Math.random() > 0.5;
+                    ty.weight = Math.random() > 0.6 ? 700 : 300;
+                    ty.spacing = Math.random() * 8;
+                }
+
+                if (alpha < 0.02) continue;
+
+                const h = i % 2 === 0 ? hues.h1 : hues.h3;
+                const wobble = Math.sin(t * 0.8 + ty.p) * 0.05 + glide * 0.3;
+
+                ctx.save();
+                ctx.translate(ty.x, ty.y);
+                ctx.rotate(ty.rot + wobble);
+                ctx.font = `${ty.italic ? 'italic ' : ''}${ty.weight} ${ty.size}px Georgia, serif`;
+                ctx.letterSpacing = `${ty.spacing}px`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+
+                // Aberration chromatique sur le texte (signature MBV)
+                const ab = 2 + glide * 6 + Math.sin(t * 0.7 + ty.p) * 1.5;
+                ctx.globalCompositeOperation = 'screen';
+                ctx.fillStyle = `hsla(${h},85%,70%,${alpha * 0.5})`;
+                ctx.fillText(ty.text, -ab, 0);
+                ctx.fillStyle = `hsla(${h + 60},85%,70%,${alpha * 0.5})`;
+                ctx.fillText(ty.text, ab, 0);
+                ctx.globalCompositeOperation = 'source-over';
+
+                // Texte principal délavé
+                ctx.fillStyle = `hsla(${h},75%,88%,${alpha * 0.7})`;
+                ctx.shadowBlur = 12 + blur * 8;
+                ctx.shadowColor = `hsla(${h},80%,70%,${alpha})`;
+                ctx.fillText(ty.text, 0, 0);
+                ctx.shadowBlur = 0;
+                ctx.restore();
+            }
+        }
+
+        function drawBigTitle(hues) {
+            bigTitle.life += 0.004;
+            if (bigTitle.life >= 1) {
+                bigTitle.life = -0.5 - Math.random() * 1.5;
+                bigTitle.text = WORDS[~~(Math.random() * WORDS.length)];
+                bigTitle.x = HALF_S + (Math.random() - 0.5) * 200;
+                bigTitle.y = HALF_S + (Math.random() - 0.5) * 200;
+            }
+            if (bigTitle.life < 0) return;
+
+            const alpha = Math.sin(bigTitle.life * Math.PI) ** 2 * 0.4;
+            if (alpha < 0.02) return;
+
+            const h = hues.h1;
+            const size = 110 + Math.sin(t * 0.5) * 20;
+
+            ctx.save();
+            ctx.translate(bigTitle.x, bigTitle.y);
+            ctx.rotate(Math.sin(t * 0.3) * 0.05 + glide * 0.2);
+            ctx.font = `italic 200 ${size}px Georgia, serif`;
+            ctx.letterSpacing = '12px';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            const ab = 4 + glide * 12;
+            ctx.globalCompositeOperation = 'screen';
+            ctx.fillStyle = `hsla(${h},85%,65%,${alpha})`;
+            ctx.fillText(bigTitle.text, -ab, 0);
+            ctx.fillStyle = `hsla(${h + 80},85%,65%,${alpha})`;
+            ctx.fillText(bigTitle.text, ab, 0);
+            ctx.globalCompositeOperation = 'source-over';
+
+            ctx.fillStyle = `hsla(${h},70%,90%,${alpha * 0.8})`;
+            ctx.shadowBlur = 30 + blur * 20;
+            ctx.shadowColor = `hsla(${h},85%,70%,${alpha})`;
+            ctx.fillText(bigTitle.text, 0, 0);
+            ctx.shadowBlur = 0;
+            ctx.restore();
+        }
+
+        function drawPicks() {
+            // Trails réduits 6 → 3, shadow seulement sur la 1re passe
+            for (let i = picks.length - 1; i >= 0; i--) {
+                const p = picks[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.l -= 0.007;
+
+                if (p.l > 0) {
+                    ctx.shadowBlur = 12 + blur * 6;
+                    for (let j = 0; j < 3; j++) {
+                        const a = p.l * 0.2 * (3 - j) / 3;
+                        const px = p.x - p.vx * j * 3.5;
+                        const py = p.y - p.vy * j * 3.5;
+                        
+                        ctx.strokeStyle = `hsla(${p.h},85%,75%,${a})`;
+                        ctx.lineWidth = 2;
+                        if (j === 0) ctx.shadowColor = `hsla(${p.h},90%,70%,${a})`;
+                        else ctx.shadowBlur = 0;
+                        ctx.beginPath();
+                        ctx.arc(px, py, 3, 0, TWO_PI);
+                        ctx.stroke();
+                    }
+                    ctx.shadowBlur = 0;
+                } else {
+                    picks[i] = picks[picks.length - 1];
+                    picks.pop();
+                }
+            }
+        }
+
+        function drawWaves(hues, t07) {
+            // Trails 4→2, step augmenté 5→8, shadow seulement sur passe principale
+            for (let i = 0; i < waves.length; i++) {
+                const w = waves[i];
+                const it = Math.sin(t07 + w.o) * 0.5 + 0.5;
+                const h = i % 3 === 0 ? hues.h1 : i % 3 === 1 ? hues.h2 : hues.h3;
+                const glideOffset = glide * 0.3;
+
+                ctx.shadowBlur = 0;
+                for (let k = 0; k < 2; k++) {
+                    const tr = 9 - k * 3;
+                    const pt = t - tr * 0.025;
+                    const pi = Math.sin(pt * 0.7 + w.o) * 0.5 + 0.5;
+                    ctx.strokeStyle = `hsla(${h + tr * 3},75%,70%,${0.02 * tr})`;
+                    ctx.lineWidth = 4 + pi * 6;
+                    ctx.beginPath();
+                    const freq = 0.01 * (w.f + glideOffset);
+                    const speedT = pt * w.s + w.o;
+                    for (let x = 0; x < S; x += 8) {
+                        const y = w.y + Math.sin(x * freq + speedT) * w.a * pi + Math.sin(x * 0.015 + pt * 1.5) * 30;
+                        x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+                    }
+                    ctx.stroke();
+                }
+
+                ctx.strokeStyle = `hsla(${h},85%,80%,${0.2 + it * 0.25})`;
+                ctx.lineWidth = 3 + it * 5;
+                ctx.shadowBlur = 25 + blur * 12;
+                ctx.shadowColor = `hsla(${h},90%,70%,0.6)`;
+                ctx.beginPath();
+                const freq = 0.01 * (w.f + glideOffset);
+                const speedT = t * w.s + w.o;
+                const t2 = t * 2;
+                for (let x = 0; x < S; x += 8) {
+                    const y = w.y + Math.sin(x * freq + speedT) * w.a * it + Math.sin(x * 0.015 + t2) * 30;
+                    x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+                ctx.shadowBlur = 0;
+            }
+        }
+
+        let washGradCache = null;
+        let washGradKey = '';
+        function getWashGrad(hues) {
+            const key = `${~~hues.h1}_${~~hues.h2}_${~~hues.h3}`;
+            if (key !== washGradKey) {
+                const g = ctx.createRadialGradient(HALF_S, HALF_S, 0, HALF_S, HALF_S, S * 0.75);
+                // Loveless: bright pink center, fade to transparent for vignette to take over
+                g.addColorStop(0, `hsla(${hues.h1},95%,75%,0.05)`);
+                g.addColorStop(0.4, `hsla(${hues.h1},90%,55%,0.18)`);
+                g.addColorStop(0.85, `hsla(${hues.h2},85%,30%,0.1)`);
+                g.addColorStop(1, `hsla(${hues.h3},90%,15%,0)`);
+                washGradCache = g;
+                washGradKey = key;
+            }
+            return washGradCache;
+        }
+
+        function draw(now) {
+            const realDt = Math.min((now - lastTime) / 1000, 0.05);
+            lastTime = now;
+
+            changeFocus();
+
+            // Flash system - alternance noir saturé / rose pâle cramé
+            flashTimer += realDt;
+            if (flashTimer > 4 + Math.random() * 6) {
+                flashTimer = 0;
+                if (flashTarget < 0.3) {
+                    flashTarget = 0.7 + Math.random() * 0.3;
+                } else {
+                    flashTarget = 0;
+                }
+            }
+            const flashSpeed = flashTarget > flash ? 0.08 : 0.015;
+            flash += (flashTarget - flash) * flashSpeed;
+
+            // Time dilation - pendant le flash, le temps de la scène ralentit (suspension)
+            const timeScale = 1 - flash * 0.75;
+            const dt = realDt * timeScale;
+            t += dt;
+
+            glide *= 0.985;
+            washIntensity *= 0.97;
+
+            paletteBlend += 0.0015;
+            if (paletteBlend >= 1) {
+                palette = nextPalette;
+                nextPalette = PALETTES[~~(Math.random() * PALETTES.length)];
+                paletteBlend = 0;
+                gridNeedsRedraw = true;
+            }
+
+            const hues = getHues();
+
+            // Rebuild sprites occasionnellement (toutes les ~1s)
+            if (!DRONE_SPRITES.length || ~~(t * 1) !== ~~((t - dt) * 1)) {
+                buildDroneSprites(hues);
+                buildVoiceSprites(hues);
+            }
+
+            fx += (tfx - fx) * 0.018;
+            fy += (tfy - fy) * 0.018;
+            zoom += (tZoom - zoom) * 0.025;
+            rot += (tRot - rot) * 0.008;
+            blur *= 0.96;
+
+            gOpacity = 0.55 + Math.sin(t * 1.3) * 0.18 + Math.sin(t * 3.5) * 0.12 + Math.sin(t * 0.7) * 0.15;
+            
+            if (~~(t * 60) % 30 === 0) gridNeedsRedraw = true;
+
+            ctx.fillStyle = `hsla(${hues.h1},85%,55%,${0.15 + washIntensity * 0.08})`;
+            ctx.fillRect(0, 0, S, S);
+
+            ctx.save();
+            ctx.translate(HALF_S, HALF_S);
+            ctx.scale(zoom, zoom);
+            ctx.rotate(rot);
+            ctx.translate(-fx, -fy);
+            ctx.globalAlpha = gOpacity;
+            ctx.shadowBlur = 0;
+
+            const t2 = t * 2, t3 = t * 3, t4 = t * 4, t5 = t * 5, t8 = t * 8;
+            const t07 = t * 0.7, t15 = t * 1.5, t05 = t * 0.5;
+            const br = Math.sin(t * 0.5) * 0.3 + Math.sin(t * 1.3) * 0.2;
+
+            drawDrones(t05);
+            drawAmps(hues, t15);
+            drawWaves(hues, t07);
+            drawGuitars(hues, t8, t4, t3);
+            drawPicks();
+            drawTypos(hues);
+            drawVoices(hues, t2, t5, br);
+
+            ctx.globalAlpha = 1;
+            ctx.restore();
+
+            // Aberration chromatique
+            const ab = Math.sin(t * 0.9) * 1.4 + glide * 8;
+            ctx.globalCompositeOperation = 'screen';
+            ctx.globalAlpha = 0.12;
+            ctx.drawImage(c, ab, 0);
+            ctx.drawImage(c, -ab, 0);
+            ctx.globalAlpha = 0.08;
+            ctx.drawImage(c, 0, ab * 0.5);
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.globalAlpha = 1;
+
+            // Wash overlay - gradient en cache
+            ctx.fillStyle = getWashGrad(hues);
+            ctx.fillRect(0, 0, S, S);
+
+            // Big title flottant au-dessus du wash
+            drawBigTitle(hues);
+
+            // Grain - drawImage tilé du buffer pré-généré, panné
+            const grainOffX = (Math.sin(t * 0.13) * 128) | 0;
+            const grainOffY = (Math.cos(t * 0.09) * 128) | 0;
+            ctx.globalAlpha = 0.08 + Math.sin(t * 0.3) * 0.04;
+            ctx.globalCompositeOperation = 'overlay';
+            for (let gx = -256; gx < S; gx += 256) {
+                for (let gy = -256; gy < S; gy += 256) {
+                    ctx.drawImage(grainCanvas, gx + grainOffX, gy + grainOffY);
+                }
+            }
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.globalAlpha = 1;
+
+            // Loveless monolith - teinte magenta + écrasement des ombres en noir
+            // L'intensité dépend du flash : flash=1 → tout pâle/cramé, flash=0 → dark monolith
+            const darkAmount = 1 - flash;
+            ctx.globalCompositeOperation = 'multiply';
+            ctx.fillStyle = `hsla(${hues.h1},90%,${50 + flash * 30}%,${0.4 * darkAmount + 0.05})`;
+            ctx.fillRect(0, 0, S, S);
+            ctx.globalCompositeOperation = 'source-over';
+
+            // Vignette noire profonde - s'efface pendant le flash
+            const vGrad = ctx.createRadialGradient(HALF_S, HALF_S, S * 0.25, HALF_S, HALF_S, S * 0.75);
+            vGrad.addColorStop(0, 'rgba(0,0,0,0)');
+            vGrad.addColorStop(0.6, `rgba(0,0,0,${0.4 * darkAmount})`);
+            vGrad.addColorStop(1, `rgba(0,0,0,${0.92 * darkAmount})`);
+            ctx.fillStyle = vGrad;
+            ctx.fillRect(0, 0, S, S);
+
+            // Crush des ombres - seulement en mode dark
+            if (darkAmount > 0.1) {
+                ctx.globalCompositeOperation = 'multiply';
+                ctx.fillStyle = `rgba(20,0,15,${0.25 * darkAmount})`;
+                ctx.fillRect(0, 0, S, S);
+                ctx.globalCompositeOperation = 'source-over';
+            }
+
+            // Flash overlay - voile rose pâle/blanc cramé qui surexpose tout
+            if (flash > 0.02) {
+                ctx.globalCompositeOperation = 'screen';
+                const fGrad = ctx.createRadialGradient(HALF_S, HALF_S, 0, HALF_S, HALF_S, S * 0.8);
+                fGrad.addColorStop(0, `hsla(${hues.h1},70%,95%,${flash * 0.85})`);
+                fGrad.addColorStop(0.5, `hsla(${hues.h1},80%,85%,${flash * 0.6})`);
+                fGrad.addColorStop(1, `hsla(${hues.h1},85%,75%,${flash * 0.3})`);
+                ctx.fillStyle = fGrad;
+                ctx.fillRect(0, 0, S, S);
+                ctx.globalCompositeOperation = 'source-over';
+
+                // Bloom blanc additionnel sur les pics
+                if (flash > 0.6) {
+                    const bloom = (flash - 0.6) / 0.4;
+                    ctx.fillStyle = `rgba(255,240,250,${bloom * 0.25})`;
+                    ctx.fillRect(0, 0, S, S);
+                }
+            }
+
+            drawGrid(hues);
+            ctx.drawImage(gridCanvas, 0, 0);
+
+            // Filter CSS module aussi avec le flash
+            const flashSat = 1.4 + washIntensity * 0.3 - flash * 0.3;
+            const flashContrast = 1.25 - flash * 0.2;
+            const flashBright = 0.92 + flash * 0.25;
+            c.style.filter = `blur(${blur}px) saturate(${flashSat}) contrast(${flashContrast}) brightness(${flashBright})`;
+            requestAnimationFrame(draw);
+        }
+
+        requestAnimationFrame(draw);
+    </script>
+</body>
+</html>

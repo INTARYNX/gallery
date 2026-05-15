@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      margin: 0;
+      background: #000;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      overflow: hidden;
+    }
+    #container {
+      position: relative;
+      width: min(100vw, 100vh);
+      height: min(100vw, 100vh);
+      border: 2px solid #111;
+    }
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <canvas id="canvas"></canvas>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true, imageSmoothingEnabled: false });
+    
+    const size = 800;
+    canvas.width = size;
+    canvas.height = size;
+    const cx = size / 2;
+    const cy = size / 2;
+
+    const lights = [];
+    for (let i = 0; i < 18; i++) {
+      lights.push({
+        baseAngle: (Math.PI * 2 / 18) * i,
+        baseDistance: 70 + (i % 5) * 25,
+        hue: (i * 20) % 360,
+        hueSpeed: 0.3 + (i % 3) * 0.2,
+        phase: i * 0.6,
+        speed: 0.012 + (i % 5) * 0.006,
+        size: 35 + (i % 4) * 20,
+        orbitRadius: 25 + (i % 4) * 12,
+        orbitSpeed: 0.008 + (i % 3) * 0.004,
+        spiralSpeed: 0.0005 + (i % 2) * 0.0003
+      });
+    }
+
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = size;
+    tempCanvas.height = size;
+    const tempCtx = tempCanvas.getContext('2d', { alpha: false, imageSmoothingEnabled: false });
+
+    const segments = 12;
+    const segmentAngle = Math.PI * 2 / segments;
+    const tanHalf = Math.tan(segmentAngle / 2);
+    
+    let time = 0;
+    let rotation = 0;
+    let zoomAmount = 0;
+    let tunnelDepth = 0;
+    let frozenTexture = null;
+
+    function updateLights() {
+      const t02 = time * 0.02;
+      const t002 = time * 0.002;
+      
+      for (let i = 0; i < lights.length; i++) {
+        const l = lights[i];
+        l.phase += l.speed;
+        l.hue = (l.hue + l.hueSpeed) % 360;
+        const wobble = Math.sin(l.phase) * 25;
+        const spiral = time * l.spiralSpeed;
+        l.angle = l.baseAngle + t002 + spiral;
+        
+        const orbitAngle = time * l.orbitSpeed + i;
+        const orbitX = Math.cos(orbitAngle) * l.orbitRadius;
+        const orbitY = Math.sin(orbitAngle) * l.orbitRadius;
+        
+        l.distance = l.baseDistance + wobble + Math.sin(time * 0.003 + i) * 15;
+        l.x = cx + Math.cos(l.angle) * l.distance + orbitX;
+        l.y = cy + Math.sin(l.angle) * l.distance + orbitY;
+        const pulse = (Math.sin(t02 + i * 0.5) + 1) * 0.5;
+        l.currentSize = l.size * (0.7 + pulse * 0.5);
+      }
+    }
+
+    function drawLights() {
+      const bgHue = (time * 0.2) % 360;
+      tempCtx.fillStyle = `hsl(${bgHue}, 30%, 5%)`;
+      tempCtx.fillRect(0, 0, size, size);
+      
+      for (let i = 0; i < lights.length; i++) {
+        const l = lights[i];
+        const complementaryHue = (l.hue + 180) % 360;
+        
+        // Radial rings with gradients
+        for (let r = 6; r >= 0; r--) {
+          const ringSize = l.currentSize * (r / 6) * 0.7;
+          const grad = tempCtx.createRadialGradient(l.x, l.y, ringSize * 0.5, l.x, l.y, ringSize);
+          grad.addColorStop(0, `hsl(${l.hue}, 100%, ${r % 2 === 0 ? 60 : 40}%)`);
+          grad.addColorStop(1, `hsl(${complementaryHue}, 100%, ${r % 2 === 0 ? 40 : 60}%)`);
+          
+          tempCtx.fillStyle = grad;
+          tempCtx.beginPath();
+          tempCtx.arc(l.x, l.y, ringSize, 0, Math.PI * 2);
+          tempCtx.fill();
+          
+          // Bezel/outline
+          tempCtx.strokeStyle = `hsl(${l.hue}, 80%, 80%)`;
+          tempCtx.lineWidth = 2;
+          tempCtx.stroke();
+        }
+      }
+    }
+
+    function drawKaleidoscope(targetCtx, scale, rot) {
+      targetCtx.save();
+      targetCtx.translate(cx, cy);
+      targetCtx.rotate(rot);
+      targetCtx.scale(scale, scale);
+      targetCtx.globalCompositeOperation = 'lighter';
+      
+      for (let i = 0; i < segments; i++) {
+        targetCtx.save();
+        targetCtx.rotate(segmentAngle * i);
+        
+        targetCtx.beginPath();
+        targetCtx.moveTo(0, 0);
+        targetCtx.lineTo(size, -tanHalf * size);
+        targetCtx.lineTo(size, tanHalf * size);
+        targetCtx.closePath();
+        targetCtx.clip();
+        
+        if (i & 1) targetCtx.scale(1, -1);
+        
+        targetCtx.translate(-cx, -cy);
+        targetCtx.drawImage(tempCanvas, 0, 0);
+        targetCtx.restore();
+      }
+      targetCtx.restore();
+      targetCtx.globalCompositeOperation = 'source-over';
+    }
+
+    function drawTunnel() {
+      if (!frozenTexture) return;
+      
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = Math.max(0, 1 - tunnelDepth / 8);
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.scale(1 + tunnelDepth, 1 + tunnelDepth);
+      ctx.translate(-cx, -cy);
+      ctx.drawImage(frozenTexture, 0, 0);
+      ctx.restore();
+      
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+    }
+
+    function animate() {
+      time++;
+      rotation += 0.015 + Math.sin(time * 0.002) * 0.01;
+      
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, size, size);
+      
+      updateLights();
+      drawLights();
+      
+      zoomAmount += 0.008;
+      
+      if (zoomAmount >= 8) {
+        const freezeCanvas = document.createElement('canvas');
+        freezeCanvas.width = size;
+        freezeCanvas.height = size;
+        const freezeCtx = freezeCanvas.getContext('2d', { imageSmoothingEnabled: false });
+        freezeCtx.fillStyle = '#000';
+        freezeCtx.fillRect(0, 0, size, size);
+        drawKaleidoscope(freezeCtx, 8, rotation);
+        frozenTexture = freezeCanvas;
+        
+        zoomAmount = 0;
+        tunnelDepth = 0;
+      }
+      
+      if (frozenTexture) {
+        tunnelDepth += 0.04;
+        drawTunnel();
+      }
+      
+      const dotScale = Math.min(zoomAmount / 8, 1);
+      ctx.globalAlpha = 1;
+      drawKaleidoscope(ctx, dotScale * 8, rotation);
+      ctx.globalAlpha = 1;
+      
+      // Scanlines
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+      for (let y = 0; y < size; y += 3) {
+        ctx.fillRect(0, y, size, 1);
+      }
+      for (let x = 0; x < size; x += 3) {
+        ctx.fillRect(x, 0, 1, size);
+      }
+      
+      requestAnimationFrame(animate);
+    }
+
+    animate();
+  </script>
+</body>
+</html>

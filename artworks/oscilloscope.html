@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Oscilloscope</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(180deg, #0a0a0a 0%, #1a1a2e 100%);
+            overflow: hidden;
+        }
+        canvas {
+            border: 2px solid #333;
+            box-shadow: 0 0 50px rgba(255, 215, 0, 0.3);
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="retroComputer"></canvas>
+    <script>
+        const canvas = document.getElementById('retroComputer');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 900;
+        canvas.height = 700;
+
+        let time = 0;
+        let scanlineOffset = 0;
+        let jitterOffset = 0;
+
+        // Pixel font rendering
+        function drawPixelTextOnContext(context, text, x, y, color, size = 2) {
+            context.fillStyle = color;
+            const charWidth = 4 * size;
+            const charHeight = 6 * size;
+            
+            for (let i = 0; i < text.length; i++) {
+                drawPixelCharOnContext(context, text[i], x + i * (charWidth + size), y, size);
+            }
+        }
+
+        function drawPixelCharOnContext(context, char, x, y, size) {
+            const patterns = {
+                '>': [[1,1,0],[0,1,1],[1,1,0]],
+                'S': [[1,1,1],[1,0,0],[0,1,0],[0,0,1],[1,1,1]],
+                'Y': [[1,0,1],[1,0,1],[0,1,0],[0,1,0],[0,1,0]],
+                'T': [[1,1,1],[0,1,0],[0,1,0],[0,1,0],[0,1,0]],
+                'E': [[1,1,1],[1,0,0],[1,1,0],[1,0,0],[1,1,1]],
+                'M': [[1,0,1],[1,1,1],[1,0,1],[1,0,1],[1,0,1]],
+                'O': [[1,1,1],[1,0,1],[1,0,1],[1,0,1],[1,1,1]],
+                'N': [[1,0,1],[1,1,1],[1,0,1],[1,0,1],[1,0,1]],
+                'L': [[1,0,0],[1,0,0],[1,0,0],[1,0,0],[1,1,1]],
+                'I': [[1,1,1],[0,1,0],[0,1,0],[0,1,0],[1,1,1]],
+                'A': [[0,1,0],[1,0,1],[1,1,1],[1,0,1],[1,0,1]],
+                'C': [[1,1,1],[1,0,0],[1,0,0],[1,0,0],[1,1,1]],
+                'G': [[1,1,1],[1,0,0],[1,0,1],[1,0,1],[1,1,1]],
+                'F': [[1,1,1],[1,0,0],[1,1,0],[1,0,0],[1,0,0]],
+                'R': [[1,1,0],[1,0,1],[1,1,0],[1,0,1],[1,0,1]],
+                'P': [[1,1,1],[1,0,1],[1,1,1],[1,0,0],[1,0,0]],
+                'U': [[1,0,1],[1,0,1],[1,0,1],[1,0,1],[1,1,1]],
+                'D': [[1,1,0],[1,0,1],[1,0,1],[1,0,1],[1,1,0]],
+                ' ': [[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0]],
+                ':': [[0,0,0],[0,1,0],[0,0,0],[0,1,0],[0,0,0]],
+                '%': [[1,0,1],[0,0,1],[0,1,0],[1,0,0],[1,0,1]],
+                '0': [[1,1,1],[1,0,1],[1,0,1],[1,0,1],[1,1,1]],
+                '1': [[0,1,0],[1,1,0],[0,1,0],[0,1,0],[1,1,1]],
+                '2': [[1,1,1],[0,0,1],[1,1,1],[1,0,0],[1,1,1]],
+                '3': [[1,1,1],[0,0,1],[1,1,1],[0,0,1],[1,1,1]],
+                '4': [[1,0,1],[1,0,1],[1,1,1],[0,0,1],[0,0,1]],
+                '5': [[1,1,1],[1,0,0],[1,1,1],[0,0,1],[1,1,1]],
+                '6': [[1,1,1],[1,0,0],[1,1,1],[1,0,1],[1,1,1]],
+                '7': [[1,1,1],[0,0,1],[0,0,1],[0,0,1],[0,0,1]],
+                '8': [[1,1,1],[1,0,1],[1,1,1],[1,0,1],[1,1,1]],
+                '9': [[1,1,1],[1,0,1],[1,1,1],[0,0,1],[1,1,1]],
+                '.': [[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,1,0]],
+                '_': [[0,0,0],[0,0,0],[0,0,0],[0,0,0],[1,1,1]]
+            };
+            
+            const pattern = patterns[char.toUpperCase()] || patterns[' '];
+            for (let row = 0; row < pattern.length; row++) {
+                for (let col = 0; col < pattern[row].length; col++) {
+                    if (pattern[row][col]) {
+                        context.fillRect(x + col * size, y + row * size, size, size);
+                    }
+                }
+            }
+        }
+
+        // Draw pixelated chart
+        function drawPixelChartOnContext(context, x, y, width, height) {
+            const pixelSize = 3;
+            // Pure sine wave with slight amplitude modulation
+            const data = Array(50).fill(0).map((_, i) => {
+                const amplitude = 35 + Math.sin(time * 0.02) * 5; // Slow amplitude variation
+                return 50 + Math.sin(i * 0.4 + time * 0.15) * amplitude;
+            });
+            
+            // Chart background
+            context.fillStyle = '#001a0f';
+            for (let py = 0; py < height; py += pixelSize) {
+                for (let px = 0; px < width; px += pixelSize) {
+                    context.fillRect(x + px, y + py, pixelSize - 1, pixelSize - 1);
+                }
+            }
+            
+            // Grid lines (horizontal center line and divisions)
+            context.fillStyle = 'rgba(0, 255, 150, 0.15)';
+            for (let i = 0; i < height; i += pixelSize * 10) {
+                for (let px = 0; px < width; px += pixelSize) {
+                    context.fillRect(x + px, y + i, pixelSize - 1, pixelSize - 1);
+                }
+            }
+            
+            // Center line (zero crossing) - brighter
+            context.fillStyle = 'rgba(0, 255, 150, 0.3)';
+            const centerY = y + height / 2;
+            for (let px = 0; px < width; px += pixelSize) {
+                context.fillRect(x + px, centerY, pixelSize - 1, pixelSize - 1);
+            }
+            
+            // Ghosting layer (previous frame trail)
+            context.globalAlpha = 0.3;
+            context.fillStyle = '#00ff96';
+            context.shadowColor = '#00ff96';
+            context.shadowBlur = 8;
+            
+            for (let i = 0; i < data.length - 1; i++) {
+                const x1 = x + (i / data.length) * width;
+                const y1 = y + height - (data[i] / 100) * height;
+                const x2 = x + ((i + 1) / data.length) * width;
+                const y2 = y + height - (data[i + 1] / 100) * height;
+                
+                const steps = Math.abs(x2 - x1) / pixelSize;
+                for (let s = 0; s <= steps; s++) {
+                    const t = s / steps;
+                    const px = Math.floor((x1 + (x2 - x1) * t) / pixelSize) * pixelSize;
+                    const py = Math.floor((y1 + (y2 - y1) * t) / pixelSize) * pixelSize;
+                    context.fillRect(px, py, pixelSize + 1, pixelSize + 1);
+                }
+            }
+            
+            // Main data line (bright)
+            context.globalAlpha = 1.0;
+            context.fillStyle = '#00ff96';
+            context.shadowColor = '#00ff96';
+            context.shadowBlur = 12;
+            
+            for (let i = 0; i < data.length - 1; i++) {
+                const x1 = x + (i / data.length) * width;
+                const y1 = y + height - (data[i] / 100) * height;
+                const x2 = x + ((i + 1) / data.length) * width;
+                const y2 = y + height - (data[i + 1] / 100) * height;
+                
+                const steps = Math.abs(x2 - x1) / pixelSize;
+                for (let s = 0; s <= steps; s++) {
+                    const t = s / steps;
+                    const px = Math.floor((x1 + (x2 - x1) * t) / pixelSize) * pixelSize;
+                    const py = Math.floor((y1 + (y2 - y1) * t) / pixelSize) * pixelSize;
+                    context.fillRect(px, py, pixelSize, pixelSize);
+                }
+            }
+            context.shadowBlur = 0;
+            context.globalAlpha = 1.0;
+        }
+
+        function drawComputer() {
+            // Background
+            ctx.fillStyle = '#0a0a0a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Apply curved screen effect
+            const screenCanvas = document.createElement('canvas');
+            screenCanvas.width = 340;
+            screenCanvas.height = 250;
+            const sctx = screenCanvas.getContext('2d');
+            
+            // Draw content on temporary canvas with rounded corners
+            const screenRadius = 15;
+            sctx.fillStyle = '#001a0f';
+            sctx.beginPath();
+            sctx.moveTo(screenRadius, 0);
+            sctx.lineTo(340 - screenRadius, 0);
+            sctx.arcTo(340, 0, 340, screenRadius, screenRadius);
+            sctx.lineTo(340, 250 - screenRadius);
+            sctx.arcTo(340, 250, 340 - screenRadius, 250, screenRadius);
+            sctx.lineTo(screenRadius, 250);
+            sctx.arcTo(0, 250, 0, 250 - screenRadius, screenRadius);
+            sctx.lineTo(0, screenRadius);
+            sctx.arcTo(0, 0, screenRadius, 0, screenRadius);
+            sctx.closePath();
+            sctx.fill();
+            
+            // Clip to rounded rectangle for all content
+            sctx.save();
+            sctx.beginPath();
+            sctx.moveTo(screenRadius, 0);
+            sctx.lineTo(340 - screenRadius, 0);
+            sctx.arcTo(340, 0, 340, screenRadius, screenRadius);
+            sctx.lineTo(340, 250 - screenRadius);
+            sctx.arcTo(340, 250, 340 - screenRadius, 250, screenRadius);
+            sctx.lineTo(screenRadius, 250);
+            sctx.arcTo(0, 250, 0, 250 - screenRadius, screenRadius);
+            sctx.lineTo(0, screenRadius);
+            sctx.arcTo(0, 0, screenRadius, 0, screenRadius);
+            sctx.closePath();
+            sctx.clip();
+            
+            // Scanlines with jitter
+            sctx.strokeStyle = 'rgba(0, 255, 150, 0.1)';
+            sctx.lineWidth = 1;
+            for (let i = 0; i < 250; i += 4) {
+                const lineJitter = (Math.random() - 0.5) * 0.5;
+                sctx.beginPath();
+                sctx.moveTo(0 + lineJitter, i + scanlineOffset);
+                sctx.lineTo(340 + lineJitter, i + scanlineOffset);
+                sctx.stroke();
+            }
+            
+            // CRT scan beam effect (vertical trailing glow)
+            const beamY = (time * 3) % 250;
+            const beamGradient = sctx.createLinearGradient(0, beamY - 30, 0, beamY + 10);
+            beamGradient.addColorStop(0, 'rgba(0, 255, 150, 0)');
+            beamGradient.addColorStop(0.5, 'rgba(0, 255, 150, 0.08)');
+            beamGradient.addColorStop(1, 'rgba(0, 255, 150, 0)');
+            sctx.fillStyle = beamGradient;
+            sctx.fillRect(0, beamY - 30, 340, 40);
+
+            // Pixelated text and chart with enhanced glow
+            sctx.shadowColor = '#00ff96';
+            sctx.shadowBlur = 15;
+            sctx.fillStyle = '#00ff96';
+            
+            drawPixelTextOnContext(sctx, 'OSCILLOSCOPE', 15, 15, '#00ff96', 2);
+            
+            // Double glow for text
+            sctx.shadowBlur = 25;
+            drawPixelTextOnContext(sctx, 'OSCILLOSCOPE', 15, 15, '#00ff96', 2);
+            
+            sctx.shadowBlur = 12;
+            drawPixelTextOnContext(sctx, 'SIGNAL TRACE', 30, 40, '#00ff96', 1.5);
+            
+            // Pixelated chart with enhanced glow
+            sctx.shadowBlur = 20;
+            drawPixelChartOnContext(sctx, 15, 60, 310, 100);
+            
+            sctx.shadowBlur = 10;
+            drawPixelTextOnContext(sctx, 'FREQ: 440HZ', 30, 180, '#00ff96', 1.5);
+            
+            // Blinking cursor
+            if (Math.floor(time / 30) % 2 === 0) {
+                sctx.fillRect(185, 13, 8, 12);
+            }
+            sctx.shadowBlur = 0;
+            
+            // Add analog noise (lighter blend mode)
+            for (let i = 0; i < 1000; i++) {
+                const x = Math.random() * 340;
+                const y = Math.random() * 250;
+                const brightness = Math.random() * 80;
+                sctx.fillStyle = `rgba(${brightness}, ${brightness}, ${brightness}, 0.1)`;
+                sctx.fillRect(x, y, 1, 1);
+            }
+            
+            // Add flicker effect (more organic variation)
+            const flicker = 1 + (Math.random() - 0.5) * 0.04 + Math.sin(time * 0.1) * 0.01;
+            sctx.fillStyle = `rgba(0, 255, 150, ${Math.abs(flicker - 1) * 0.8})`;
+            sctx.fillRect(0, 0, 340, 250);
+            
+            sctx.restore();
+
+            // Draw with barrel distortion for curved effect (vertical and horizontal)
+            const curvature = 0.08;
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = 340;
+            tempCanvas.height = 250;
+            const tempCtx = tempCanvas.getContext('2d');
+            
+            // First pass: horizontal distortion
+            for (let y = 0; y < 250; y++) {
+                const distY = (y / 250) * 2 - 1;
+                const offset = Math.pow(Math.abs(distY), 2) * curvature * 340;
+                
+                tempCtx.drawImage(
+                    screenCanvas,
+                    0, y, 340, 1,
+                    offset, y, 340 - offset * 2, 1
+                );
+            }
+            
+            // Second pass: vertical distortion with jitter
+            for (let x = 0; x < 340; x++) {
+                const distX = (x / 340) * 2 - 1;
+                const offset = Math.pow(Math.abs(distX), 2) * curvature * 250;
+                
+                ctx.drawImage(
+                    tempCanvas,
+                    x, 0, 1, 250,
+                    280 + x + jitterOffset, 200 + offset, 1, 250 - offset * 2
+                );
+            }
+
+            // Screen bezel with curve (drawn on top)
+            const bezelCanvas = document.createElement('canvas');
+            bezelCanvas.width = 380;
+            bezelCanvas.height = 290;
+            const bctx = bezelCanvas.getContext('2d');
+            
+            // Draw rounded rectangle for bezel
+            const cornerRadius = 20;
+            bctx.fillStyle = '#1a1a1a';
+            bctx.beginPath();
+            bctx.moveTo(cornerRadius, 0);
+            bctx.lineTo(380 - cornerRadius, 0);
+            bctx.arcTo(380, 0, 380, cornerRadius, cornerRadius);
+            bctx.lineTo(380, 290 - cornerRadius);
+            bctx.arcTo(380, 290, 380 - cornerRadius, 290, cornerRadius);
+            bctx.lineTo(cornerRadius, 290);
+            bctx.arcTo(0, 290, 0, 290 - cornerRadius, cornerRadius);
+            bctx.lineTo(0, cornerRadius);
+            bctx.arcTo(0, 0, cornerRadius, 0, cornerRadius);
+            bctx.closePath();
+            bctx.fill();
+            
+            const screenGlow = bctx.createRadialGradient(190, 145, 50, 190, 145, 200);
+            screenGlow.addColorStop(0, 'rgba(0, 255, 150, 0.3)');
+            screenGlow.addColorStop(1, 'rgba(0, 255, 150, 0)');
+            bctx.fillStyle = screenGlow;
+            bctx.beginPath();
+            bctx.moveTo(cornerRadius, 0);
+            bctx.lineTo(380 - cornerRadius, 0);
+            bctx.arcTo(380, 0, 380, cornerRadius, cornerRadius);
+            bctx.lineTo(380, 290 - cornerRadius);
+            bctx.arcTo(380, 290, 380 - cornerRadius, 290, cornerRadius);
+            bctx.lineTo(cornerRadius, 290);
+            bctx.arcTo(0, 290, 0, 290 - cornerRadius, cornerRadius);
+            bctx.lineTo(0, cornerRadius);
+            bctx.arcTo(0, 0, cornerRadius, 0, cornerRadius);
+            bctx.closePath();
+            bctx.fill();
+            
+            // Cut out center for screen with rounded corners
+            bctx.globalCompositeOperation = 'destination-out';
+            bctx.fillStyle = '#000';
+            const innerRadius = 15;
+            bctx.beginPath();
+            bctx.moveTo(20 + innerRadius, 20);
+            bctx.lineTo(360 - innerRadius, 20);
+            bctx.arcTo(360, 20, 360, 20 + innerRadius, innerRadius);
+            bctx.lineTo(360, 270 - innerRadius);
+            bctx.arcTo(360, 270, 360 - innerRadius, 270, innerRadius);
+            bctx.lineTo(20 + innerRadius, 270);
+            bctx.arcTo(20, 270, 20, 270 - innerRadius, innerRadius);
+            bctx.lineTo(20, 20 + innerRadius);
+            bctx.arcTo(20, 20, 20 + innerRadius, 20, innerRadius);
+            bctx.closePath();
+            bctx.fill();
+            bctx.globalCompositeOperation = 'source-over';
+            
+            // Draw bezel with barrel distortion (vertical and horizontal)
+            const bezelCurve = 0.08;
+            const tempBezelCanvas = document.createElement('canvas');
+            tempBezelCanvas.width = 380;
+            tempBezelCanvas.height = 290;
+            const tempBezelCtx = tempBezelCanvas.getContext('2d');
+            
+            // First pass: horizontal distortion
+            for (let y = 0; y < 290; y++) {
+                const distY = (y / 290) * 2 - 1;
+                const offset = Math.pow(Math.abs(distY), 2) * bezelCurve * 380;
+                
+                tempBezelCtx.drawImage(
+                    bezelCanvas,
+                    0, y, 380, 1,
+                    offset, y, 380 - offset * 2, 1
+                );
+            }
+            
+            // Second pass: vertical distortion
+            for (let x = 0; x < 380; x++) {
+                const distX = (x / 380) * 2 - 1;
+                const offset = Math.pow(Math.abs(distX), 2) * bezelCurve * 290;
+                
+                ctx.drawImage(
+                    tempBezelCanvas,
+                    x, 0, 1, 290,
+                    260 + x, 180 + offset, 1, 290 - offset * 2
+                );
+            }
+        }
+
+        function animate() {
+            time++;
+            scanlineOffset = (scanlineOffset + 0.5) % 4;
+            // More organic jitter with occasional stronger shakes
+            jitterOffset = (Math.random() - 0.5) * 1.5 + (Math.random() < 0.05 ? (Math.random() - 0.5) * 3 : 0);
+            drawComputer();
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+    </script>
+</body>
+</html>

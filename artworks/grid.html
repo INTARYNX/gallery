@@ -1,0 +1,973 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tron Game - Interactive</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { 
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      background: #000;
+      font-family: 'Rajdhani', sans-serif;
+      color: #0ff;
+      overflow: hidden;
+      touch-action: none;
+      padding: 20px;
+    }
+    #intro {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: linear-gradient(135deg, #0a0a1a 0%, #1a0a2e 50%, #0a0a1a 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 200;
+      cursor: pointer;
+    }
+    #intro.hidden {
+      display: none;
+    }
+    .intro-title {
+      font-size: 80px;
+      font-weight: 700;
+      font-family: 'Rajdhani', sans-serif;
+      color: #0ff;
+      text-shadow: 0 0 30px rgba(0, 255, 255, 0.6);
+      margin-bottom: 30px;
+      letter-spacing: 0.2em;
+      text-align: center;
+    }
+    .intro-subtitle {
+      font-size: 24px;
+      color: #0ff;
+      font-family: 'Rajdhani', sans-serif;
+      margin-bottom: 50px;
+      opacity: 0.7;
+      text-align: center;
+      font-weight: 400;
+    }
+    .intro-cta {
+      font-size: 28px;
+      font-family: 'Rajdhani', sans-serif;
+      font-weight: 600;
+      color: #fff;
+      padding: 20px 40px;
+      border: 3px solid #0ff;
+      border-radius: 10px;
+      background: rgba(0, 255, 255, 0.1);
+      box-shadow: 0 0 30px rgba(0, 255, 255, 0.5);
+      letter-spacing: 0.1em;
+    }
+    .intro-lines {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      opacity: 0.15;
+    }
+    .line {
+      position: absolute;
+      background: linear-gradient(90deg, transparent, #0ff, transparent);
+      animation: moveLine 3s linear infinite;
+    }
+    .line:nth-child(1) { top: 20%; height: 2px; width: 100%; animation-delay: 0s; }
+    .line:nth-child(2) { top: 40%; height: 2px; width: 100%; animation-delay: 1s; }
+    .line:nth-child(3) { top: 60%; height: 2px; width: 100%; animation-delay: 2s; }
+    .line:nth-child(4) { top: 80%; height: 2px; width: 100%; animation-delay: 0.5s; }
+    @keyframes moveLine {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(100%); }
+    }
+    #container {
+      position: relative;
+      border: 2px solid #0ff;
+      box-shadow: 
+        0 0 20px rgba(0, 255, 255, 0.5),
+        0 0 40px rgba(0, 255, 255, 0.3),
+        inset 0 0 60px rgba(0, 255, 255, 0.1);
+    }
+    canvas { 
+      display: block;
+      max-width: 100%;
+      max-height: 100%;
+    }
+    #overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      pointer-events: none;
+    }
+    @media (max-width: 768px) {
+      .intro-title { font-size: 50px; }
+      .intro-subtitle { font-size: 18px; }
+      .intro-cta { font-size: 22px; padding: 15px 30px; }
+    }
+    #controls {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 10px;
+      pointer-events: auto;
+      z-index: 100;
+      justify-content: center;
+      max-width: 90vw;
+    }
+    .btn {
+      background: rgba(0, 255, 255, 0.2);
+      border: 2px solid #0ff;
+      color: #0ff;
+      padding: 12px 20px;
+      font-family: 'Rajdhani', sans-serif;
+      font-weight: 600;
+      font-size: 14px;
+      cursor: pointer;
+      border-radius: 10px;
+      transition: all 0.3s;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: manipulation;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      box-shadow: 0 0 10px rgba(0, 255, 255, 0.3);
+    }
+    .btn i {
+      font-size: 16px;
+    }
+    .btn:hover {
+      background: rgba(0, 255, 255, 0.4);
+      box-shadow: 0 0 20px rgba(0, 255, 255, 0.6);
+    }
+    .btn:active {
+      transform: scale(0.95);
+      background: rgba(0, 255, 255, 0.6);
+    }
+    @media (max-width: 768px) {
+      .btn {
+        padding: 15px 20px;
+        font-size: 14px;
+      }
+      .btn i {
+        font-size: 16px;
+      }
+      #controls {
+        gap: 8px;
+        bottom: 30px;
+      }
+    }
+    @media (orientation: landscape) and (max-height: 600px) {
+      #controls {
+        bottom: 10px;
+        gap: 8px;
+      }
+      .btn {
+        padding: 10px 18px;
+        font-size: 12px;
+      }
+      .btn i {
+        font-size: 14px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="intro">
+    <div class="intro-lines">
+      <div class="line"></div>
+      <div class="line"></div>
+      <div class="line"></div>
+      <div class="line"></div>
+    </div>
+    <div class="intro-title">GRID RUNNER</div>
+    <div class="intro-subtitle">First-Person Light Cycle Battle</div>
+    <div class="intro-cta">TOUCH TO START</div>
+  </div>
+  <div id="container">
+    <canvas id="c"></canvas>
+    <canvas id="overlay"></canvas>
+  </div>
+  <div id="controls">
+    <button class="btn" id="left">
+      <i class="fas fa-arrow-left"></i>
+      LEFT
+    </button>
+    <button class="btn" id="right">
+      RIGHT
+      <i class="fas fa-arrow-right"></i>
+    </button>
+    <button class="btn" id="camera">
+      <i class="fas fa-video"></i>
+      SWITCH
+    </button>
+  </div>
+  <script>
+    const c = document.getElementById('c');
+    const overlay = document.getElementById('overlay');
+    const gl = c.getContext('webgl', { alpha: false, antialias: false, preserveDrawingBuffer: false });
+    const ctx = overlay.getContext('2d', { alpha: true });
+    
+    if (!gl) {
+      alert('WebGL not supported');
+      throw new Error('WebGL not supported');
+    }
+    
+    const GRID_SIZE = 64;
+    const {cos, sin, abs, max, min, floor, PI} = Math;
+    
+    const grid = Array(GRID_SIZE).fill().map(() => Array(GRID_SIZE).fill(false));
+    
+    const speedCanvas = document.createElement('canvas');
+    const speedCtx = speedCanvas.getContext('2d');
+    speedCanvas.width = 200;
+    speedCanvas.height = 80;
+    
+    const compassCanvas = document.createElement('canvas');
+    const compassCtx = compassCanvas.getContext('2d');
+    compassCanvas.width = 120;
+    compassCanvas.height = 120;
+    
+    const DIRS = [
+      {x: 1, y: 0, angle: 0},
+      {x: 0, y: -1, angle: -PI/2},
+      {x: -1, y: 0, angle: PI},
+      {x: 0, y: 1, angle: PI/2}
+    ];
+    
+    const vertShader = `
+      attribute vec2 a_position;
+      void main() {
+        gl_Position = vec4(a_position, 0.0, 1.0);
+      }
+    `;
+    
+    const fragShader = `
+      precision mediump float;
+      uniform vec2 u_res;
+      uniform vec3 u_pos;
+      uniform float u_angle;
+      uniform float u_fov;
+      
+      vec3 sky(float y) {
+        return y > 0.5 ? 
+          mix(vec3(0.01, 0.02, 0.1), vec3(0.02, 0.05, 0.15), (y - 0.5) * 2.0) :
+          mix(vec3(1.0, 0.5, 0.0), vec3(1.0, 1.0, 0.0), y * 2.0);
+      }
+      
+      vec3 applyFog(vec3 color, float dist) {
+        float fogStart = 5.0;
+        float fogEnd = 18.0;
+        float fogDensity = 0.12;
+        float fogFactor = 1.0 - exp(-dist * fogDensity);
+        fogFactor = clamp(fogFactor, 0.0, 0.85);
+        vec3 fogColor = vec3(0.02, 0.05, 0.15);
+        return mix(color, fogColor, fogFactor);
+      }
+      
+      vec3 floor(vec2 pos, float dist) {
+        float fade = max(0.0, 1.0 - dist / 20.0);
+        vec2 g = fract(pos);
+        
+        float w = 0.008;
+        float line = max(
+          smoothstep(w, 0.0, g.x) + smoothstep(1.0 - w, 1.0, g.x),
+          smoothstep(w, 0.0, g.y) + smoothstep(1.0 - w, 1.0, g.y)
+        );
+        
+        vec2 sg = fract(pos * 4.0);
+        float sw = 0.003;
+        float sub = max(
+          smoothstep(sw, 0.0, sg.x) + smoothstep(1.0 - sw, 1.0, sg.x),
+          smoothstep(sw, 0.0, sg.y) + smoothstep(1.0 - sw, 1.0, sg.y)
+        ) * 0.4;
+        
+        vec3 baseColor = vec3(0.05, 0.15, 0.25);
+        vec3 col = baseColor + vec3(2.0) * line * fade + vec3(1.5) * sub * fade;
+        return applyFog(col, dist);
+      }
+      
+      void main() {
+        vec2 coord = gl_FragCoord.xy / u_res;
+        vec3 col;
+        
+        if (coord.y > 0.5) {
+          col = sky(coord.y);
+        } else {
+          float y = coord.y * u_res.y;
+          float h = u_res.y * 0.5;
+          
+          if (y > 0.0) {
+            float d = h / max(0.1, h - y) * 0.5;
+            
+            if (d < 20.0) {
+              float a = u_angle + (coord.x - 0.5) * u_fov;
+              vec2 wp = u_pos.xy + vec2(cos(a), sin(a)) * d;
+              col = floor(wp, d);
+            } else {
+              col = vec3(0.02, 0.05, 0.15);
+            }
+          } else {
+            col = vec3(0.02, 0.05, 0.15);
+          }
+        }
+        
+        if (mod(gl_FragCoord.y, 2.0) < 1.0) col *= 0.7;
+        gl_FragColor = vec4(col, 1.0);
+      }
+    `;
+    
+    function shader(type, src) {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, src);
+      gl.compileShader(s);
+      return s;
+    }
+    
+    const prog = gl.createProgram();
+    gl.attachShader(prog, shader(gl.VERTEX_SHADER, vertShader));
+    gl.attachShader(prog, shader(gl.FRAGMENT_SHADER, fragShader));
+    gl.linkProgram(prog);
+    
+    const locs = {
+      pos: gl.getAttribLocation(prog, 'a_position'),
+      res: gl.getUniformLocation(prog, 'u_res'),
+      p: gl.getUniformLocation(prog, 'u_pos'),
+      angle: gl.getUniformLocation(prog, 'u_angle'),
+      fov: gl.getUniformLocation(prog, 'u_fov')
+    };
+    
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+      -1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1
+    ]), gl.STATIC_DRAW);
+    
+    function runner(x, y, dir, color, isPlayer = false) {
+      return {
+        x, y, dir, rx: x, ry: y, tx: x, ty: y,
+        ca: DIRS[dir].angle, tca: DIRS[dir].angle,
+        color, trail: [], alive: true, mt: 0, md: 15,
+        fov: PI / 2.5, tfov: PI / 2.5, ld: dir,
+        isPlayer, nt: 0, spd: 1.0, tspd: 1.0
+      };
+    }
+    
+    const runners = [
+      runner(16, 32, 0, {r: 0, g: 150, b: 255}, true),
+      runner(48, 32, 2, {r: 255, g: 120, b: 0}, false)
+    ];
+    
+    let ai = 0, death = 0, alive = 2, winner = null;
+    let gameStarted = false;
+    
+    const isFirefox = navigator.userAgent.toLowerCase().includes('firefox');
+    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+    const rayCount = isFirefox || isSafari ? 120 : 160;
+    const rayStep = isFirefox || isSafari ? 0.25 : 0.2;
+    
+    const introEl = document.getElementById('intro');
+    
+    function startGame() {
+      if (gameStarted) return;
+      gameStarted = true;
+      introEl.classList.add('hidden');
+      reset();
+      anim();
+    }
+    
+    introEl.addEventListener('click', startGame);
+    introEl.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      startGame();
+    });
+    
+    function resize() {
+      let w = window.innerWidth - 40;
+      let h = window.innerHeight - 40;
+      const ar = 4 / 3;
+      
+      if (w / h > ar) w = h * ar;
+      else h = w / ar;
+      
+      const maxW = 1200;
+      const maxH = 900;
+      
+      if (w > maxW || h > maxH) {
+        if (w / h > ar) {
+          w = maxH * ar;
+          h = maxH;
+        } else {
+          w = maxW;
+          h = maxW / ar;
+        }
+      }
+      
+      c.width = overlay.width = w;
+      c.height = overlay.height = h;
+      c.style.width = overlay.style.width = w + 'px';
+      c.style.height = overlay.style.height = h + 'px';
+      gl.viewport(0, 0, w, h);
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    function valid(x, y) {
+      return x >= 0 && x < GRID_SIZE && y >= 0 && y < GRID_SIZE && !grid[y][x];
+    }
+
+    function move(r) {
+      r.mt++;
+      const t = min(1, r.mt / r.md);
+      r.rx = r.x + (r.tx - r.x) * t;
+      r.ry = r.y + (r.ty - r.y) * t;
+      
+      r.spd += (r.tspd - r.spd) * 0.1;
+      
+      if (r.mt < r.md) return false;
+      
+      r.mt = 0;
+      r.x = r.tx;
+      r.y = r.ty;
+      
+      if (r.trail.length > 0) grid[r.y][r.x] = true;
+      r.trail.push({x: r.x, y: r.y});
+      
+      if (r.isPlayer) {
+        const nd = (r.dir + r.nt + 4) % 4;
+        const nx = r.x + DIRS[nd].x;
+        const ny = r.y + DIRS[nd].y;
+        
+        if (valid(nx, ny)) {
+          r.dir = nd;
+          r.tx = nx;
+          r.ty = ny;
+          r.tspd = r.dir !== r.ld ? 0.7 : 1.0;
+          r.ld = r.dir;
+        } else {
+          return true;
+        }
+        r.nt = 0;
+      } else {
+        const opts = [];
+        for (let turn = -1; turn <= 1; turn++) {
+          const nd = (r.dir + turn + 4) % 4;
+          const nx = r.x + DIRS[nd].x;
+          const ny = r.y + DIRS[nd].y;
+          if (!valid(nx, ny)) continue;
+          
+          let sc = turn === 0 ? 300 : 0;
+          
+          let free = 0;
+          for (let d = 1; d <= 12; d++) {
+            const tx = nx + DIRS[nd].x * d;
+            const ty = ny + DIRS[nd].y * d;
+            if (valid(tx, ty)) free++;
+            else break;
+          }
+          sc += free * 80;
+          
+          let leftFree = 0, rightFree = 0;
+          const leftDir = (nd - 1 + 4) % 4;
+          const rightDir = (nd + 1) % 4;
+          for (let d = 1; d <= 6; d++) {
+            if (valid(nx + DIRS[leftDir].x * d, ny + DIRS[leftDir].y * d)) leftFree++;
+            if (valid(nx + DIRS[rightDir].x * d, ny + DIRS[rightDir].y * d)) rightFree++;
+          }
+          sc += (leftFree + rightFree) * 30;
+          
+          const opp = runners.find(o => o !== r && o.alive);
+          if (opp) {
+            const dist = abs(nx - opp.x) + abs(ny - opp.y);
+            if (dist < 3) sc -= 400;
+            else if (dist < 6) sc += 50;
+            else sc += 150;
+          }
+          opts.push({dir: nd, nx, ny, sc});
+        }
+        
+        if (opts.length === 0) return true;
+        
+        opts.sort((a, b) => b.sc - a.sc);
+        const bestScore = opts[0].sc;
+        const goodOpts = opts.filter(o => o.sc >= bestScore - 100);
+        const c = Math.random() < 0.9 ? goodOpts[0] : goodOpts[Math.floor(Math.random() * goodOpts.length)];
+        
+        r.dir = c.dir;
+        r.tx = c.nx;
+        r.ty = c.ny;
+        r.tspd = r.dir !== r.ld ? 0.7 : 1.0;
+        r.ld = r.dir;
+      }
+      return false;
+    }
+
+    function drawGL(r) {
+      r.tca = DIRS[r.dir].angle;
+      let diff = r.tca - r.ca;
+      while (diff > PI) diff -= 2 * PI;
+      while (diff < -PI) diff += 2 * PI;
+      r.ca += diff * 0.08;
+      
+      r.tfov = abs(diff) > 0.1 ? PI / 1.6 : PI / 2.5;
+      r.fov += (r.tfov - r.fov) * 0.08;
+      
+      gl.useProgram(prog);
+      gl.uniform2f(locs.res, c.width, c.height);
+      gl.uniform3f(locs.p, r.rx, r.ry, 0);
+      gl.uniform1f(locs.angle, r.ca);
+      gl.uniform1f(locs.fov, r.fov);
+      
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.enableVertexAttribArray(locs.pos);
+      gl.vertexAttribPointer(locs.pos, 2, gl.FLOAT, false, 0, 0);
+      
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+
+    function cast(px, py, a, cr) {
+      const sa = sin(a), ca = cos(a);
+      let bh = null, th = null;
+      
+      const maxDist = 50;
+      
+      for (let d = 0.1; d < maxDist; d += rayStep) {
+        const x = px + ca * d;
+        const y = py + sa * d;
+        
+        if (!bh) {
+          if (x <= -0.5 || x >= GRID_SIZE + 0.5 || y <= -0.5 || y >= GRID_SIZE + 0.5) {
+            bh = {d, x, y};
+          }
+        }
+        
+        if (!th) {
+          const gx = floor(x), gy = floor(y);
+          if (gx >= 0 && gx < GRID_SIZE && gy >= 0 && gy < GRID_SIZE && grid[gy][gx]) {
+            for (const rr of runners) {
+              const skip = rr === cr ? 5 : 0;
+              const check = skip > 0 ? rr.trail.slice(0, -skip) : rr.trail;
+              
+              for (let i = 0; i < check.length; i++) {
+                const p = check[i];
+                if (p.x === gx && p.y === gy) {
+                  const segmentIndex = i;
+                  const isRecent = segmentIndex >= rr.trail.length - 3;
+                  let brightness = 1;
+                  
+                  if (segmentIndex === rr.trail.length - 1) {
+                    brightness = 2.5;
+                  } else if (segmentIndex === rr.trail.length - 2) {
+                    brightness = 1.8;
+                  } else if (segmentIndex === rr.trail.length - 3) {
+                    brightness = 1.3;
+                  }
+                  
+                  th = {d, c: rr.color, brightness};
+                  break;
+                }
+              }
+              if (th) break;
+            }
+          }
+        }
+        if (th || bh) break;
+      }
+      
+      if (th && (!bh || th.d < bh.d)) {
+        return {d: th.d, hit: true, type: 'trail', c: th.c, brightness: th.brightness};
+      }
+      if (bh) return {d: bh.d, hit: true, type: 'border', x: bh.x, y: bh.y};
+      return {d: maxDist, hit: false};
+    }
+
+    function drawOver(r) {
+      const w = overlay.width, h = overlay.height;
+      ctx.clearRect(0, 0, w, h);
+      
+      const pa = r.ca, hh = h / 2;
+      const rw = w / rayCount + 1;
+      
+      for (let i = 0; i < rayCount; i++) {
+        const a = pa - r.fov / 2 + (r.fov * i / rayCount);
+        const res = cast(r.rx, r.ry, a, r);
+        const rx = i * (w / rayCount);
+        
+        if (res.hit) {
+          const cd = res.d * cos(a - pa);
+          if (cd > 0.01 && cd < 80) {
+            const wh = res.type === 'border' ? 0.7 : 0.4;
+            const sh = min(h * 2, (h / max(cd, 0.01)) * wh);
+            const wy = max(0, (h - sh) * 0.5);
+            if (!isFinite(wy) || !isFinite(sh) || sh <= 0) continue;
+            
+            const alpha = res.type === 'border' ? max(0.4, 1.0 - cd / 80.0) : 1.0;
+            const fogStart = 5;
+            const fogEnd = 18;
+            const fogFactor = min(1, max(0, (cd - fogStart) / (fogEnd - fogStart)));
+            const fogColor = {r: 5, g: 13, b: 38};
+            
+            if (res.type === 'trail') {
+              const fade = max(0.05, 1.0 - cd / 25.0);
+              const g = ctx.createLinearGradient(0, wy, 0, min(h, wy + sh));
+              
+              const bright = res.brightness || 1;
+              const applyFog = (val) => Math.floor(val * bright * (1 - fogFactor) + fogColor.r * fogFactor);
+              const applyFogG = (val) => Math.floor(val * bright * (1 - fogFactor) + fogColor.g * fogFactor);
+              const applyFogB = (val) => Math.floor(val * bright * (1 - fogFactor) + fogColor.b * fogFactor);
+              
+              g.addColorStop(0, `rgba(${applyFog(res.c.r * 0.1 * fade)},${applyFogG(res.c.g * 0.1 * fade)},${applyFogB(res.c.b * 0.1 * fade)},0.85)`);
+              g.addColorStop(0.95, `rgba(${applyFog(res.c.r * fade)},${applyFogG(res.c.g * fade)},${applyFogB(res.c.b * fade)},0.85)`);
+              g.addColorStop(1, `rgba(${applyFog(255 * fade)},${applyFogG(255 * fade)},${applyFogB(255 * fade)},${fade})`);
+              ctx.fillStyle = g;
+              ctx.fillRect(rx, wy, rw, min(sh, h - wy));
+            } else {
+              const wp = res.x !== undefined ? res.x : res.y;
+              const hatch = floor(wp * 2) % 2;
+              
+              const baseR = hatch === 0 ? 0 : 0;
+              const baseG = hatch === 0 ? 100 : 0;
+              const baseB = hatch === 0 ? 120 : 0;
+              
+              const foggedR = Math.floor(baseR * (1 - fogFactor) + fogColor.r * fogFactor);
+              const foggedG = Math.floor(baseG * (1 - fogFactor) + fogColor.g * fogFactor);
+              const foggedB = Math.floor(baseB * (1 - fogFactor) + fogColor.b * fogFactor);
+              
+              ctx.fillStyle = `rgba(${foggedR},${foggedG},${foggedB},${alpha})`;
+              ctx.fillRect(rx, wy, rw, min(sh, h - wy));
+              
+              const g = ctx.createLinearGradient(0, wy, 0, min(h, wy + sh));
+              const gradAlpha = alpha * (1 - fogFactor * 0.7);
+              g.addColorStop(0, `rgba(0,150,180,${gradAlpha * 0.4})`);
+              g.addColorStop(0.5, `rgba(0,120,150,${gradAlpha * 0.2})`);
+              g.addColorStop(1, `rgba(0,80,100,${gradAlpha * 0.3})`);
+              ctx.fillStyle = g;
+              ctx.fillRect(rx, wy, rw, min(sh, h - wy));
+            }
+          }
+        }
+      }
+      
+      if (death > 0) {
+        ctx.fillStyle = `rgba(255,0,0,${death * 0.5})`;
+        ctx.fillRect(0, 0, w, h);
+        
+        ctx.save();
+        ctx.translate(w / 2, h / 2);
+        
+        for (let i = 0; i < 20; i++) {
+          const a = (i / 20) * PI * 2;
+          const len = max(w, h) * 1.5;
+          const rw = 3 + Math.random() * 5;
+          
+          const g = ctx.createLinearGradient(0, 0, cos(a) * len, sin(a) * len);
+          g.addColorStop(0, `rgba(255,255,255,${death * 0.9})`);
+          g.addColorStop(0.3, `rgba(255,100,100,${death * 0.6})`);
+          g.addColorStop(1, `rgba(255,0,0,0)`);
+          
+          ctx.strokeStyle = g;
+          ctx.lineWidth = rw;
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(cos(a) * len, sin(a) * len);
+          ctx.stroke();
+        }
+        
+        ctx.restore();
+        
+        for (let i = 0; i < 10; i++) {
+          ctx.fillStyle = `rgba(255,255,255,${death * 0.3})`;
+          ctx.fillRect(0, Math.random() * h, w, 2);
+        }
+      }
+      
+      if (winner !== null) {
+        const wc = winner === 0 ? 'rgba(100,180,255,1)' : 'rgba(255,150,50,1)';
+        const wt = winner === 0 ? 'BLUE WINS!' : 'ORANGE WINS!';
+        const winFontSize = Math.round(32 * min(1, w / 600));
+        ctx.font = `bold ${winFontSize}px Rajdhani, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = 'rgba(0,0,0,0.8)';
+        ctx.fillText(wt, w / 2 + 3, h / 2 + 3);
+        ctx.fillStyle = wc;
+        ctx.shadowColor = wc;
+        ctx.shadowBlur = 30;
+        ctx.fillText(wt, w / 2, h / 2);
+        ctx.shadowBlur = 0;
+      }
+      
+      const hc = r.color.r === 0 ? {r: 0, g: 150, b: 255} : {r: 255, g: 120, b: 0};
+      const rn = r.color.r === 0 ? 'BLUE RUNNER' : 'ORANGE RUNNER';
+      
+      const hudScale = max(1, min(1.5, w / 600));
+      const fontSize = Math.round(16 * hudScale);
+      
+      ctx.font = `bold ${fontSize}px Rajdhani, sans-serif`;
+      ctx.textAlign = 'left';
+      ctx.fillStyle = `rgba(${hc.r},${hc.g},${hc.b},0.9)`;
+      ctx.shadowColor = `rgba(${hc.r},${hc.g},${hc.b},0.5)`;
+      ctx.shadowBlur = 10;
+      ctx.fillText(rn, 15 * hudScale, 25 * hudScale);
+      ctx.shadowBlur = 0;
+      
+      const hy = h - 50 * hudScale, hx = w / 2;
+      const kmh = Math.round(r.spd * 500);
+      
+      const speedSize = 200 * hudScale;
+      const speedHeight = 80 * hudScale;
+      
+      speedCtx.clearRect(0, 0, 200, 80);
+      speedCtx.fillStyle = 'rgba(0,0,0,0.8)';
+      speedCtx.font = `bold ${60 * hudScale}px Rajdhani, sans-serif`;
+      speedCtx.textAlign = 'center';
+      speedCtx.textBaseline = 'middle';
+      speedCtx.fillText(kmh, 103, 43);
+      
+      const g = speedCtx.createLinearGradient(0, 0, 0, 80);
+      g.addColorStop(0, `rgba(${hc.r},${hc.g},${hc.b},1)`);
+      g.addColorStop(0.5, `rgba(${hc.r},${hc.g},${hc.b},0.95)`);
+      g.addColorStop(1, `rgba(${hc.r},${hc.g},${hc.b},0.85)`);
+      speedCtx.fillStyle = g;
+      speedCtx.fillText(kmh, 100, 40);
+      
+      ctx.save();
+      ctx.translate(hx, hy);
+      ctx.scale(1, 0.3);
+      ctx.shadowColor = `rgba(${hc.r},${hc.g},${hc.b},0.7)`;
+      ctx.shadowBlur = 30;
+      ctx.drawImage(speedCanvas, -speedSize / 2, -speedHeight / 2, speedSize, speedHeight);
+      ctx.restore();
+      
+      ctx.font = `${12 * hudScale}px Rajdhani, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = `rgba(${hc.r},${hc.g},${hc.b},0.8)`;
+      ctx.fillText('km/h', hx, hy + 12 * hudScale);
+      
+      const cy = hy - 40 * hudScale;
+      const cs = 120 * hudScale;
+      
+      compassCtx.clearRect(0, 0, 120, 120);
+      
+      const cx = 60, ccy = 60, rad = 45;
+      
+      compassCtx.fillStyle = 'rgba(0,0,0,0.5)';
+      compassCtx.beginPath();
+      compassCtx.arc(cx, ccy, rad, 0, PI * 2);
+      compassCtx.fill();
+      
+      compassCtx.strokeStyle = `rgba(${hc.r},${hc.g},${hc.b},0.5)`;
+      compassCtx.lineWidth = 2;
+      compassCtx.beginPath();
+      compassCtx.arc(cx, ccy, rad, 0, PI * 2);
+      compassCtx.stroke();
+      
+      const dirs = [
+        {a: 0, l: 'E', m: true},
+        {a: PI / 4, l: 'NE', m: false},
+        {a: PI / 2, l: 'N', m: true},
+        {a: 3 * PI / 4, l: 'NW', m: false},
+        {a: PI, l: 'W', m: true},
+        {a: 5 * PI / 4, l: 'SW', m: false},
+        {a: 3 * PI / 2, l: 'S', m: true},
+        {a: 7 * PI / 4, l: 'SE', m: false}
+      ];
+      
+      compassCtx.font = 'bold 14px Rajdhani, sans-serif';
+      compassCtx.textAlign = 'center';
+      compassCtx.textBaseline = 'middle';
+      
+      dirs.forEach(d => {
+        const x = cx + cos(d.a - PI / 2) * (rad - 15);
+        const y = ccy + sin(d.a - PI / 2) * (rad - 15);
+        
+        compassCtx.fillStyle = d.m ? 
+          `rgba(${hc.r},${hc.g},${hc.b},0.8)` :
+          `rgba(${hc.r},${hc.g},${hc.b},0.4)`;
+        
+        compassCtx.fillText(d.l, x, y);
+      });
+      
+      compassCtx.save();
+      compassCtx.translate(cx, ccy);
+      compassCtx.rotate(r.ca);
+      
+      compassCtx.fillStyle = `rgba(${hc.r},${hc.g},${hc.b},0.9)`;
+      compassCtx.shadowColor = `rgba(${hc.r},${hc.g},${hc.b},0.6)`;
+      compassCtx.shadowBlur = 10;
+      
+      compassCtx.beginPath();
+      compassCtx.moveTo(0, -rad + 12);
+      compassCtx.lineTo(-5, 0);
+      compassCtx.lineTo(5, 0);
+      compassCtx.closePath();
+      compassCtx.fill();
+      
+      compassCtx.restore();
+      
+      ctx.save();
+      ctx.translate(hx, cy);
+      ctx.scale(1, 0.3);
+      ctx.shadowColor = `rgba(${hc.r},${hc.g},${hc.b},0.7)`;
+      ctx.shadowBlur = 30;
+      ctx.drawImage(compassCanvas, -cs / 2, -cs / 2, cs, cs);
+      ctx.restore();
+      
+      const sz = min(150 * hudScale, w * 0.25), cell = sz / GRID_SIZE;
+      const mx = w - sz - 10 * hudScale, my = 10 * hudScale;
+      ctx.fillStyle = 'rgba(0,50,50,0.8)';
+      ctx.fillRect(mx, my, sz, sz);
+      
+      for (const rr of runners) {
+        const c = rr.color.r === 0 ? 
+          {r: 0, g: 150, b: 255} : 
+          {r: 255, g: 120, b: 0};
+        
+        for (let i = 0; i < rr.trail.length; i++) {
+          const p = rr.trail[i];
+          const isRecent = i >= rr.trail.length - 3;
+          
+          let alpha, brightness;
+          if (i === rr.trail.length - 1) {
+            alpha = 1;
+            brightness = 2.5;
+          } else if (i === rr.trail.length - 2) {
+            alpha = 0.9;
+            brightness = 1.8;
+          } else if (i === rr.trail.length - 3) {
+            alpha = 0.85;
+            brightness = 1.3;
+          } else {
+            alpha = 0.8;
+            brightness = 1;
+          }
+          
+          ctx.fillStyle = `rgba(${c.r * brightness},${c.g * brightness},${c.b * brightness},${alpha})`;
+          ctx.fillRect(mx + p.x * cell, my + p.y * cell, cell, cell);
+        }
+        
+        ctx.fillStyle = rr === r ? 
+          'rgba(255,255,255,1)' : 
+          `rgba(${c.r * 2},${c.g * 2},${c.b * 2},1)`;
+        ctx.shadowColor = rr === r ? 'rgba(255,255,255,0.8)' : `rgba(${c.r},${c.g},${c.b},0.8)`;
+        ctx.shadowBlur = 8;
+        ctx.fillRect(mx + rr.x * cell, my + rr.y * cell, cell * 1.5, cell * 1.5);
+        ctx.shadowBlur = 0;
+      }
+    }
+
+    function reset() {
+      grid.forEach(row => row.fill(false));
+      winner = null;
+      runners.forEach((r, i) => {
+        r.x = r.tx = r.rx = i === 0 ? 16 : 48;
+        r.y = r.ty = r.ry = 32;
+        r.dir = i === 0 ? 0 : 2;
+        r.ca = r.tca = DIRS[r.dir].angle;
+        r.fov = r.tfov = PI / 2.5;
+        r.ld = r.dir;
+        r.trail = [];
+        r.alive = true;
+        r.mt = 0;
+        r.nt = 0;
+        r.spd = 1.0;
+        r.tspd = 1.0;
+      });
+      ai = 0;
+      alive = 2;
+      death = 0;
+    }
+    
+    function anim() {
+      death = max(0, death - 0.03);
+      
+      for (let i = 0; i < runners.length; i++) {
+        const r = runners[i];
+        if (!r.alive) continue;
+        
+        if (move(r)) {
+          r.alive = false;
+          alive--;
+          death = 1;
+          
+          if (i === ai) {
+            for (let j = 0; j < runners.length; j++) {
+              if (runners[j].alive) {
+                ai = j;
+                break;
+              }
+            }
+          }
+          
+          if (alive <= 1) {
+            winner = runners.findIndex(r => r.alive);
+            setTimeout(reset, 3000);
+          }
+        }
+      }
+      
+      drawGL(runners[ai]);
+      drawOver(runners[ai]);
+      requestAnimationFrame(anim);
+    }
+    
+    const btn = (id, fn) => {
+      const el = document.getElementById(id);
+      el.addEventListener('click', fn);
+      el.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        fn();
+      });
+    };
+    
+    btn('left', () => {
+      if (runners[0].alive) runners[0].nt = 1;
+    });
+    
+    btn('right', () => {
+      if (runners[0].alive) runners[0].nt = -1;
+    });
+    
+    btn('camera', () => {
+      ai = (ai + 1) % runners.length;
+    });
+    
+    overlay.style.pointerEvents = 'auto';
+    
+    overlay.addEventListener('touchend', (e) => {
+      if (!runners[0].alive) return;
+      
+      const tx = e.changedTouches[0].clientX;
+      runners[0].nt = tx < overlay.width / 2 ? 1 : -1;
+    });
+    
+    document.addEventListener('keydown', (e) => {
+      if (!gameStarted) {
+        if (e.key === ' ' || e.key === 'Enter') {
+          e.preventDefault();
+          startGame();
+        }
+        return;
+      }
+      if (!runners[0].alive) return;
+      if (e.key === 'ArrowLeft' || e.key === 'a') runners[0].nt = 1;
+      if (e.key === 'ArrowRight' || e.key === 'd') runners[0].nt = -1;
+      if (e.key === 'c') ai = (ai + 1) % runners.length;
+    });
+    
+    reset();
+  </script>
+</body>
+</html>

@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<base href="/upstride/">
+    <title>Bloody Earth</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #0a0a0a;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // Scene setup
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setClearColor(0x0a0a0a, 1);
+        document.body.appendChild(renderer.domElement);
+
+        camera.position.z = 5;
+
+        // Étoiles avec scintillement individuel
+        const starsGeometry = new THREE.BufferGeometry();
+        const starsVertices = [];
+        const starsData = [];
+        
+        for (let i = 0; i < 1000; i++) {
+            const x = (Math.random() - 0.5) * 50;
+            const y = (Math.random() - 0.5) * 50;
+            const z = (Math.random() - 0.5) * 50;
+            starsVertices.push(x, y, z);
+            starsData.push({
+                phase: Math.random() * Math.PI * 2,
+                speed: 0.02 + Math.random() * 0.03,
+                baseOpacity: 0.5 + Math.random() * 0.5
+            });
+        }
+        
+        starsGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starsVertices, 3));
+        
+        const starsMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                time: { value: 0 }
+            },
+            vertexShader: `
+                attribute float phase;
+                attribute float speed;
+                attribute float baseOpacity;
+                varying float vOpacity;
+                uniform float time;
+                
+                void main() {
+                    vOpacity = baseOpacity + sin(time * speed + phase) * 0.3;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    gl_PointSize = 2.0;
+                }
+            `,
+            fragmentShader: `
+                varying float vOpacity;
+                void main() {
+                    gl_FragColor = vec4(1.0, 1.0, 1.0, vOpacity);
+                }
+            `,
+            transparent: true
+        });
+        
+        const phases = new Float32Array(starsData.map(s => s.phase));
+        const speeds = new Float32Array(starsData.map(s => s.speed));
+        const baseOpacities = new Float32Array(starsData.map(s => s.baseOpacity));
+        
+        starsGeometry.setAttribute('phase', new THREE.BufferAttribute(phases, 1));
+        starsGeometry.setAttribute('speed', new THREE.BufferAttribute(speeds, 1));
+        starsGeometry.setAttribute('baseOpacity', new THREE.BufferAttribute(baseOpacities, 1));
+        
+        const stars = new THREE.Points(starsGeometry, starsMaterial);
+        scene.add(stars);
+
+        // Sphère invisible pour l'éclairage/ombrage de fond
+        const earthGeometry = new THREE.SphereGeometry(2, 64, 64);
+        const earthMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                lightness: { value: 1.0 }
+            },
+            vertexShader: `
+                varying vec3 vNormal;
+                varying vec3 vPosition;
+                void main() {
+                    vNormal = normalize(normalMatrix * normal);
+                    vPosition = position;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                uniform float lightness;
+                varying vec3 vNormal;
+                varying vec3 vPosition;
+                void main() {
+                    vec3 lightDir = normalize(vec3(-1.0, 1.0, 1.0));
+                    float diff = max(dot(vNormal, lightDir), 0.0);
+                    float ambient = 0.15;
+                    float intensity = ambient + diff * 0.4;
+                    
+                    vec3 baseColor = vec3(0.05, 0.15, 0.25);
+                    vec3 color = baseColor * lightness * intensity;
+                    
+                    gl_FragColor = vec4(color, 0.3);
+                }
+            `,
+            transparent: true,
+            side: THREE.BackSide
+        });
+        const earth = new THREE.Mesh(earthGeometry, earthMaterial);
+        scene.add(earth);
+
+        // Créer les lignes de wireframe avec des tubes (méridiens et parallèles)
+        const wireframeGroup = new THREE.Group();
+        const sphereRadius = 2;
+        const tubeRadius = sphereRadius * 0.005; // 0.5% du rayon de la sphère
+        
+        // Méridiens (longitude)
+        const meridians = 16;
+        for (let m = 0; m < meridians; m++) {
+            const points = [];
+            const longitude = (m / meridians) * Math.PI * 2;
+            
+            for (let lat = 0; lat <= 180; lat += 5) {
+                const latitude = (lat / 180) * Math.PI;
+                const x = sphereRadius * Math.sin(latitude) * Math.cos(longitude);
+                const y = sphereRadius * Math.cos(latitude);
+                const z = sphereRadius * Math.sin(latitude) * Math.sin(longitude);
+                points.push(new THREE.Vector3(x, y, z));
+            }
+            
+            const curve = new THREE.CatmullRomCurve3(points);
+            const tubeGeometry = new THREE.TubeGeometry(curve, 64, tubeRadius, 8, false);
+            const tubeMaterial = new THREE.MeshBasicMaterial({ 
+                color: 0x5096c8, 
+                transparent: true, 
+                opacity: 0.6 
+            });
+            const tube = new THREE.Mesh(tubeGeometry, tubeMaterial);
+            wireframeGroup.add(tube);
+        }
+        
+        // Parallèles (latitude)
+        const parallels = 12;
+        for (let p = 1; p < parallels; p++) {
+            const points = [];
+            const latitude = (p / parallels) * Math.PI;
+            
+            for (let lon = 0; lon <= 360; lon += 5) {
+                const longitude = (lon / 180) * Math.PI;
+                const x = sphereRadius * Math.sin(latitude) * Math.cos(longitude);
+                const y = sphereRadius * Math.cos(latitude);
+                const z = sphereRadius * Math.sin(latitude) * Math.sin(longitude);
+                points.push(new THREE.Vector3(x, y, z));
+            }
+            
+            const curve = new THREE.CatmullRomCurve3(points);
+            const tubeGeometry = new THREE.TubeGeometry(curve, 64, tubeRadius, 8, true);
+            const tubeMaterial = new THREE.MeshBasicMaterial({ 
+                color: 0x5096c8, 
+                transparent: true, 
+                opacity: 0.6 
+            });
+            const tube = new THREE.Mesh(tubeGeometry, tubeMaterial);
+            wireframeGroup.add(tube);
+        }
+        
+        scene.add(wireframeGroup);
+
+        // Lumière
+        const ambientLight = new THREE.AmbientLight(0x404040, 0.5);
+        scene.add(ambientLight);
+        
+        const pointLight = new THREE.PointLight(0xffffff, 1, 100);
+        pointLight.position.set(-5, 5, 5);
+        scene.add(pointLight);
+
+        // Particules de sang
+        const bloodParticles = [];
+        const bloodGeometry = new THREE.BufferGeometry();
+        
+        // Matériau pour les particules avec différentes couleurs
+        const bloodMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                intensity: { value: 0.0 }
+            },
+            vertexShader: `
+                attribute float bloodType;
+                varying float vBloodType;
+                uniform float intensity;
+                
+                void main() {
+                    vBloodType = bloodType;
+                    float size = 3.0 + bloodType * 3.0;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    gl_PointSize = size * intensity;
+                }
+            `,
+            fragmentShader: `
+                varying float vBloodType;
+                
+                void main() {
+                    float dist = length(gl_PointCoord - vec2(0.5));
+                    if (dist > 0.5) discard;
+                    
+                    vec3 color;
+                    float alpha;
+                    
+                    if (vBloodType < 0.6) {
+                        color = vec3(0.5, 0.0, 0.0);
+                        alpha = 0.9;
+                    } else if (vBloodType < 0.85) {
+                        color = vec3(1.0, 0.1, 0.1);
+                        alpha = 1.0;
+                    } else {
+                        color = vec3(0.2, 0.0, 0.0);
+                        alpha = 0.8;
+                    }
+                    
+                    gl_FragColor = vec4(color, alpha * (1.0 - dist * 2.0));
+                }
+            `,
+            transparent: true,
+            depthWrite: false
+        });
+
+        const maxParticles = 800;
+        const bloodPositions = new Float32Array(maxParticles * 3);
+        const bloodTypes = new Float32Array(maxParticles);
+        
+        for (let i = 0; i < maxParticles; i++) {
+            const theta = Math.random() * Math.PI;
+            const phi = Math.random() * Math.PI * 2;
+            const radius = 2 + (Math.random() - 0.5) * 0.1;
+            
+            bloodPositions[i * 3] = radius * Math.sin(theta) * Math.cos(phi);
+            bloodPositions[i * 3 + 1] = radius * Math.cos(theta);
+            bloodPositions[i * 3 + 2] = radius * Math.sin(theta) * Math.sin(phi);
+            
+            bloodTypes[i] = Math.random();
+            
+            bloodParticles.push({
+                theta: theta,
+                phi: phi,
+                radius: radius,
+                vTheta: (Math.random() - 0.5) * 0.02,
+                vPhi: (Math.random() - 0.5) * 0.02
+            });
+        }
+        
+        bloodGeometry.setAttribute('position', new THREE.BufferAttribute(bloodPositions, 3));
+        bloodGeometry.setAttribute('bloodType', new THREE.BufferAttribute(bloodTypes, 1));
+        const bloodPoints = new THREE.Points(bloodGeometry, bloodMaterial);
+        scene.add(bloodPoints);
+        
+        // Connexions sanguines (lignes entre particules)
+        const maxConnections = 5000;
+        const connectionPositions = new Float32Array(maxConnections * 6);
+        const connectionGeometry = new THREE.BufferGeometry();
+        connectionGeometry.setAttribute('position', new THREE.BufferAttribute(connectionPositions, 3));
+        
+        const connectionMaterial = new THREE.LineBasicMaterial({
+            color: 0x660000,
+            transparent: true,
+            opacity: 0.6
+        });
+        
+        const connections = new THREE.LineSegments(connectionGeometry, connectionMaterial);
+        scene.add(connections);
+
+        // Atmosphère
+        const atmosphereGeometry = new THREE.SphereGeometry(2.15, 32, 32);
+        const atmosphereMaterial = new THREE.MeshBasicMaterial({
+            color: 0x6496ff,
+            transparent: true,
+            opacity: 0.15,
+            side: THREE.BackSide
+        });
+        const atmosphere = new THREE.Mesh(atmosphereGeometry, atmosphereMaterial);
+        scene.add(atmosphere);
+
+        let intensity = 0;
+        let time = 0;
+
+        // Animation
+        function animate() {
+            requestAnimationFrame(animate);
+            time++;
+            
+            // Scintillement individuel des étoiles
+            starsMaterial.uniforms.time.value = time;
+            
+            // Rotation
+            wireframeGroup.rotation.y += 0.005;
+            
+            // Intensité progressive
+            if (intensity < 1) {
+                intensity += 0.001;
+            }
+
+            // Noircir la Terre progressivement
+            const lightness = 1 - (intensity * 0.7);
+            earthMaterial.uniforms.lightness.value = lightness;
+
+            // Mettre à jour les particules de sang
+            const positions = bloodGeometry.attributes.position.array;
+            const activeCount = Math.floor(maxParticles * intensity);
+            
+            for (let i = 0; i < activeCount; i++) {
+                const p = bloodParticles[i];
+                
+                const noise = Math.sin(p.theta * 5 + time * 0.01) * Math.cos(p.phi * 5 + time * 0.01);
+                p.vTheta += noise * 0.0005;
+                p.vPhi += noise * 0.0005;
+                
+                p.theta += p.vTheta;
+                p.phi += p.vPhi;
+                
+                p.vTheta *= 0.98;
+                p.vPhi *= 0.98;
+                
+                if (p.theta < 0) p.theta = 0;
+                if (p.theta > Math.PI) p.theta = Math.PI;
+                
+                positions[i * 3] = p.radius * Math.sin(p.theta) * Math.cos(p.phi);
+                positions[i * 3 + 1] = p.radius * Math.cos(p.theta);
+                positions[i * 3 + 2] = p.radius * Math.sin(p.theta) * Math.sin(p.phi);
+            }
+            
+            bloodGeometry.attributes.position.needsUpdate = true;
+            bloodMaterial.uniforms.intensity.value = intensity;
+            
+            // Mettre à jour les connexions
+            const connPositions = connectionGeometry.attributes.position.array;
+            let connIndex = 0;
+            const connectionThreshold = 1.2 * (0.5 + intensity * 0.5);
+            
+            for (let i = 0; i < activeCount && connIndex < maxConnections * 6; i++) {
+                for (let j = i + 1; j < activeCount && connIndex < maxConnections * 6; j++) {
+                    const dx = positions[i * 3] - positions[j * 3];
+                    const dy = positions[i * 3 + 1] - positions[j * 3 + 1];
+                    const dz = positions[i * 3 + 2] - positions[j * 3 + 2];
+                    const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                    
+                    if (dist < connectionThreshold) {
+                        connPositions[connIndex++] = positions[i * 3];
+                        connPositions[connIndex++] = positions[i * 3 + 1];
+                        connPositions[connIndex++] = positions[i * 3 + 2];
+                        connPositions[connIndex++] = positions[j * 3];
+                        connPositions[connIndex++] = positions[j * 3 + 1];
+                        connPositions[connIndex++] = positions[j * 3 + 2];
+                    }
+                }
+            }
+            
+            // Remplir le reste avec des zéros
+            for (let i = connIndex; i < maxConnections * 6; i++) {
+                connPositions[i] = 0;
+            }
+            
+            connectionGeometry.attributes.position.needsUpdate = true;
+            connectionGeometry.setDrawRange(0, connIndex / 3);
+            connectionMaterial.opacity = 0.6 * intensity;
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        // Resize handler
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>

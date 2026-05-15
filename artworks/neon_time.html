@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Recursive Chronos</title>
+<style>
+  body { 
+    margin: 0; 
+    background: #0a0a0f; 
+    overflow: hidden;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+  }
+  canvas { 
+    display: block;
+    max-width: 100vmin;
+    max-height: 100vmin;
+    width: 100%;
+    height: 100%;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<script>
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d", { alpha: false });
+let w, h;
+
+function resize() {
+  const size = Math.min(window.innerWidth, window.innerHeight);
+  w = canvas.width = size;
+  h = canvas.height = size;
+}
+window.addEventListener("resize", resize);
+resize();
+
+let t = 0;
+
+function meshRotation(driverRot, driverTeeth, drivenTeeth, contactAngle) {
+  return -(driverTeeth / drivenTeeth) * driverRot
+       + contactAngle * (1 + driverTeeth / drivenTeeth)
+       + Math.PI / drivenTeeth;
+}
+
+function neonGlow(ctx, color, blur) {
+  ctx.shadowColor = color;
+  ctx.shadowBlur = blur;
+}
+function clearGlow(ctx) {
+  ctx.shadowColor = 'transparent';
+  ctx.shadowBlur = 0;
+}
+
+function neonStroke(ctx, hue, sat, lit, baseBlur, lineW) {
+  ctx.shadowColor = "hsla(" + hue + ", " + sat + "%, " + lit + "%, 0.5)";
+  ctx.shadowBlur = baseBlur * 2.5;
+  ctx.strokeStyle = "hsla(" + hue + ", " + sat + "%, " + lit + "%, 0.3)";
+  ctx.lineWidth = lineW + 4;
+  ctx.stroke();
+  ctx.shadowColor = "hsla(" + hue + ", " + sat + "%, " + lit + "%, 0.8)";
+  ctx.shadowBlur = baseBlur;
+  ctx.strokeStyle = "hsla(" + hue + ", " + sat + "%, " + lit + "%, 0.7)";
+  ctx.lineWidth = lineW + 1.5;
+  ctx.stroke();
+  ctx.shadowColor = "hsla(" + hue + ", 100%, " + Math.min(lit + 25, 95) + "%, 1)";
+  ctx.shadowBlur = baseBlur * 0.5;
+  ctx.strokeStyle = "hsla(" + hue + ", 100%, " + Math.min(lit + 30, 97) + "%, 1)";
+  ctx.lineWidth = lineW;
+  ctx.stroke();
+  clearGlow(ctx);
+}
+
+const cyberPalette = [
+  { h: 185, s: 100, l: 55 },
+  { h: 320, s: 100, l: 60 },
+  { h: 45,  s: 100, l: 55 },
+  { h: 270, s: 80,  l: 60 },
+  { h: 140, s: 90,  l: 50 },
+];
+
+function cyberColor(depth, index) {
+  return cyberPalette[(index + depth) % cyberPalette.length];
+}
+
+function drawGear(cx, cy, pitchR, teeth, rotation, colorIdx, depth) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(rotation);
+
+  var m = 2 * pitchR / teeth;
+  var outerR = pitchR + m * 0.7;
+  var rootR = pitchR - m * 0.9;
+  var pitch = (2 * Math.PI) / teeth;
+  var hw = pitch * 0.2;
+  var bw = pitch * 0.3;
+
+  var c = cyberColor(depth, colorIdx);
+  var dimF = Math.max(0.3, 1 - depth * 0.15);
+
+  ctx.beginPath();
+  for (var i = 0; i < teeth; i++) {
+    var a = i * pitch;
+    if (i === 0) ctx.moveTo(Math.cos(a - bw) * rootR, Math.sin(a - bw) * rootR);
+    else ctx.lineTo(Math.cos(a - bw) * rootR, Math.sin(a - bw) * rootR);
+    ctx.lineTo(Math.cos(a - hw) * outerR, Math.sin(a - hw) * outerR);
+    ctx.lineTo(Math.cos(a + hw) * outerR, Math.sin(a + hw) * outerR);
+    ctx.lineTo(Math.cos(a + bw) * rootR, Math.sin(a + bw) * rootR);
+  }
+  ctx.closePath();
+
+  var hubR = pitchR * 0.22;
+  ctx.moveTo(hubR, 0);
+  ctx.arc(0, 0, hubR, 0, Math.PI * 2, true);
+
+  var grad = ctx.createRadialGradient(-pitchR * 0.3, -pitchR * 0.3, 0, 0, 0, outerR);
+  grad.addColorStop(0, "hsla(" + c.h + ", 20%, " + (20 * dimF) + "%, 0.92)");
+  grad.addColorStop(0.4, "hsla(" + c.h + ", 12%, " + (13 * dimF) + "%, 0.92)");
+  grad.addColorStop(1, "hsla(" + c.h + ", 8%, " + (7 * dimF) + "%, 0.92)");
+  ctx.fillStyle = grad;
+  ctx.fill("evenodd");
+
+  ctx.beginPath();
+  for (var i = 0; i < teeth; i++) {
+    var a = i * pitch;
+    if (i === 0) ctx.moveTo(Math.cos(a - bw) * rootR, Math.sin(a - bw) * rootR);
+    else ctx.lineTo(Math.cos(a - bw) * rootR, Math.sin(a - bw) * rootR);
+    ctx.lineTo(Math.cos(a - hw) * outerR, Math.sin(a - hw) * outerR);
+    ctx.lineTo(Math.cos(a + hw) * outerR, Math.sin(a + hw) * outerR);
+    ctx.lineTo(Math.cos(a + bw) * rootR, Math.sin(a + bw) * rootR);
+  }
+  ctx.closePath();
+  neonStroke(ctx, c.h, c.s, c.l * dimF, 10 + (3 - depth) * 5, 1.2);
+
+  ctx.strokeStyle = "hsla(" + c.h + ", " + c.s + "%, " + c.l + "%, " + (0.25 * dimF) + ")";
+  ctx.lineWidth = 0.5;
+  neonGlow(ctx, "hsla(" + c.h + ", " + c.s + "%, " + c.l + "%, 0.4)", 3);
+  for (var i = 0; i < teeth; i++) {
+    var a = i * pitch;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a - bw) * rootR, Math.sin(a - bw) * rootR);
+    ctx.lineTo(Math.cos(a - hw) * outerR, Math.sin(a - hw) * outerR);
+    ctx.stroke();
+  }
+  clearGlow(ctx);
+
+  var spokeCount = Math.max(3, Math.floor(teeth / 4));
+  for (var i = 0; i < spokeCount; i++) {
+    var a = (i / spokeCount) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a) * hubR * 1.3, Math.sin(a) * hubR * 1.3);
+    ctx.lineTo(Math.cos(a) * rootR * 0.85, Math.sin(a) * rootR * 0.85);
+    neonGlow(ctx, "hsla(" + c.h + ", " + c.s + "%, " + c.l + "%, 0.5)", 6);
+    ctx.strokeStyle = "hsla(" + c.h + ", " + (c.s - 20) + "%, " + (c.l * 0.6 * dimF) + "%, 0.6)";
+    ctx.lineWidth = pitchR * 0.04;
+    ctx.stroke();
+    ctx.strokeStyle = "hsla(" + c.h + ", 100%, " + (c.l * 0.9) + "%, 0.3)";
+    ctx.lineWidth = pitchR * 0.015;
+    ctx.stroke();
+  }
+  clearGlow(ctx);
+
+  ctx.beginPath();
+  ctx.arc(0, 0, hubR, 0, Math.PI * 2);
+  neonStroke(ctx, c.h, c.s, c.l * dimF, 10, 1.2);
+
+  neonGlow(ctx, "hsla(" + c.h + ", " + c.s + "%, " + c.l + "%, 0.8)", 8);
+  ctx.beginPath();
+  ctx.arc(0, 0, hubR * 0.35, 0, Math.PI * 2);
+  ctx.fillStyle = "hsla(" + c.h + ", " + c.s + "%, " + Math.min(c.l + 15, 90) + "%, 0.95)";
+  ctx.fill();
+  clearGlow(ctx);
+
+  ctx.restore();
+}
+
+function drawGearTrain() {
+  var m = w * 0.009;
+  var sunT = 30;
+  var sunR = m * sunT / 2;
+  var sunRot = t * 0.4;
+
+  drawGear(w/2, h/2, sunR, sunT, sunRot, 0, 0);
+
+  var planetT = 18;
+  var planetR = m * planetT / 2;
+  var dist1 = sunR + planetR;
+
+  for (var i = 0; i < 5; i++) {
+    var angle = (i / 5) * Math.PI * 2 + Math.PI / 10;
+    var px = w/2 + Math.cos(angle) * dist1;
+    var py = h/2 + Math.sin(angle) * dist1;
+    var pRot = meshRotation(sunRot, sunT, planetT, angle);
+
+    drawGear(px, py, planetR, planetT, pRot, i + 1, 1);
+
+    var outerT = 12;
+    var outerR = m * outerT / 2;
+    var dist2 = planetR + outerR;
+    var outerAngle = angle + 0.45;
+    var ox = px + Math.cos(outerAngle) * dist2;
+    var oy = py + Math.sin(outerAngle) * dist2;
+    var oRot = meshRotation(pRot, planetT, outerT, outerAngle);
+
+    drawGear(ox, oy, outerR, outerT, oRot, i + 2, 2);
+
+    var tinyT = 8;
+    var tinyR = m * tinyT / 2;
+    var dist3 = outerR + tinyR;
+    var tinyAngle = outerAngle + 0.9;
+    var tx = ox + Math.cos(tinyAngle) * dist3;
+    var ty = oy + Math.sin(tinyAngle) * dist3;
+    var tRot = meshRotation(oRot, outerT, tinyT, tinyAngle);
+
+    drawGear(tx, ty, tinyR, tinyT, tRot, i + 3, 3);
+
+    var sm2T = 10;
+    var sm2R = m * sm2T / 2;
+    var dist2b = planetR + sm2R;
+    var angle2b = angle - 0.5;
+    var sx = px + Math.cos(angle2b) * dist2b;
+    var sy = py + Math.sin(angle2b) * dist2b;
+    var sRot = meshRotation(pRot, planetT, sm2T, angle2b);
+
+    drawGear(sx, sy, sm2R, sm2T, sRot, i + 4, 2);
+  }
+}
+
+function drawCircuitLines() {
+  ctx.save();
+  ctx.globalAlpha = 0.18;
+  var count = 30;
+  for (var i = 0; i < count; i++) {
+    var angle = (i / count) * Math.PI * 2;
+    var r1 = w * 0.18;
+    var r2 = w * 0.46;
+    var pulse = Math.sin(t * 2 + i * 0.7) * 0.5 + 0.5;
+    var cx2 = w/2 + Math.cos(angle) * r2;
+    var cy2 = h/2 + Math.sin(angle) * r2;
+
+    var c = cyberPalette[i % cyberPalette.length];
+    neonGlow(ctx, "hsla(" + c.h + ", " + c.s + "%, " + c.l + "%, " + (0.7 * pulse) + ")", 10);
+    ctx.strokeStyle = "hsla(" + c.h + ", " + c.s + "%, " + c.l + "%, " + (0.5 * pulse) + ")";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(w/2 + Math.cos(angle) * r1, h/2 + Math.sin(angle) * r1);
+    var mid = 0.5 + Math.sin(t + i) * 0.15;
+    var mx = w/2 + Math.cos(angle) * (r1 + (r2 - r1) * mid);
+    var my = h/2 + Math.sin(angle) * (r1 + (r2 - r1) * mid);
+    var offset = (i % 2 === 0 ? 1 : -1) * 8;
+    ctx.lineTo(mx + Math.cos(angle + Math.PI/2) * offset, my + Math.sin(angle + Math.PI/2) * offset);
+    ctx.lineTo(cx2, cy2);
+    ctx.stroke();
+
+    neonGlow(ctx, "hsla(" + c.h + ", " + c.s + "%, " + c.l + "%, " + (0.9 * pulse) + ")", 6);
+    ctx.fillStyle = "hsla(" + c.h + ", " + c.s + "%, " + Math.min(c.l + 20, 95) + "%, " + (0.8 * pulse) + ")";
+    ctx.beginPath();
+    ctx.arc(cx2, cy2, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  clearGlow(ctx);
+  ctx.restore();
+}
+
+function drawHexGrid() {
+  ctx.save();
+  ctx.globalAlpha = 0.06;
+  var s = 30;
+  var h6 = s * Math.sqrt(3);
+  for (var row = -1; row < h / h6 + 1; row++) {
+    for (var col = -1; col < w / (s * 1.5) + 1; col++) {
+      var cx2 = col * s * 1.5;
+      var cy2 = row * h6 + (col % 2) * h6 / 2;
+      var dist = Math.hypot(cx2 - w/2, cy2 - h/2);
+      if (dist > w * 0.48 || dist < w * 0.12) continue;
+      var pulse = Math.sin(t * 1.5 + dist * 0.01) * 0.5 + 0.5;
+      neonGlow(ctx, "hsla(185, 100%, 60%, " + (0.4 * pulse) + ")", 4);
+      ctx.strokeStyle = "hsla(185, 80%, 55%, " + (0.4 * pulse) + ")";
+      ctx.lineWidth = 0.5;
+      ctx.beginPath();
+      for (var k = 0; k < 6; k++) {
+        var a = (k / 6) * Math.PI * 2 - Math.PI / 6;
+        var px = cx2 + Math.cos(a) * s * 0.45;
+        var py = cy2 + Math.sin(a) * s * 0.45;
+        k === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.stroke();
+    }
+  }
+  clearGlow(ctx);
+  ctx.restore();
+}
+
+function drawScanRing() {
+  ctx.save();
+  var scanAngle = t * 1.2;
+  var rInner = w * 0.16;
+  var rOuter = w * 0.44;
+
+  for (var k = 0; k < 3; k++) {
+    var a = scanAngle + k * Math.PI * 2 / 3;
+    var spread = 0.15;
+    var grad2 = ctx.createConicGradient(a - spread, w/2, h/2);
+    grad2.addColorStop(0, 'hsla(185, 100%, 60%, 0)');
+    grad2.addColorStop(0.03, 'hsla(185, 100%, 60%, 0.12)');
+    grad2.addColorStop(0.06, 'hsla(185, 100%, 60%, 0)');
+    grad2.addColorStop(1, 'hsla(185, 100%, 60%, 0)');
+
+    ctx.fillStyle = grad2;
+    ctx.beginPath();
+    ctx.arc(w/2, h/2, rOuter, 0, Math.PI * 2);
+    ctx.arc(w/2, h/2, rInner, 0, Math.PI * 2, true);
+    ctx.fill("evenodd");
+  }
+
+  ctx.beginPath();
+  ctx.arc(w/2, h/2, rOuter, 0, Math.PI * 2);
+  neonStroke(ctx, 185, 100, 55, 14, 1);
+
+  ctx.beginPath();
+  ctx.arc(w/2, h/2, rInner, 0, Math.PI * 2);
+  neonStroke(ctx, 320, 100, 55, 12, 0.8);
+
+  ctx.restore();
+}
+
+function drawAmbientBloom() {
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+  var pulse1 = Math.sin(t * 0.8) * 0.3 + 0.5;
+  var pulse2 = Math.sin(t * 1.1 + 1) * 0.3 + 0.5;
+
+  var g1 = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, w * 0.35);
+  g1.addColorStop(0, "hsla(185, 100%, 60%, " + (0.04 * pulse1) + ")");
+  g1.addColorStop(0.5, "hsla(185, 100%, 50%, " + (0.02 * pulse1) + ")");
+  g1.addColorStop(1, 'hsla(185, 100%, 50%, 0)');
+  ctx.fillStyle = g1;
+  ctx.fillRect(0, 0, w, h);
+
+  var g2 = ctx.createRadialGradient(w/2, h/2, w*0.1, w/2, h/2, w * 0.45);
+  g2.addColorStop(0, "hsla(320, 100%, 55%, " + (0.03 * pulse2) + ")");
+  g2.addColorStop(0.6, "hsla(320, 100%, 45%, " + (0.015 * pulse2) + ")");
+  g2.addColorStop(1, 'hsla(320, 100%, 45%, 0)');
+  ctx.fillStyle = g2;
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.restore();
+}
+
+function draw() {
+  var grad = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, w/2);
+  grad.addColorStop(0, '#0d0815');
+  grad.addColorStop(0.4, '#080510');
+  grad.addColorStop(1, '#02010a');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+
+  drawHexGrid();
+  drawCircuitLines();
+  drawScanRing();
+  drawAmbientBloom();
+  drawGearTrain();
+
+  ctx.save();
+  ctx.translate(w/2, h/2);
+
+  var markerRadius = w * 0.35;
+
+  for (var i = 0; i < 60; i++) {
+    var angle = (i / 60) * Math.PI * 2 - Math.PI / 2;
+    var isMajor = i % 5 === 0;
+    var len = isMajor ? 15 : 5;
+    var x1 = Math.cos(angle) * (markerRadius + 10);
+    var y1 = Math.sin(angle) * (markerRadius + 10);
+    var x2 = Math.cos(angle) * (markerRadius + 10 - len);
+    var y2 = Math.sin(angle) * (markerRadius + 10 - len);
+
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+
+    if (isMajor) {
+      ctx.shadowColor = 'hsla(185, 100%, 60%, 0.9)';
+      ctx.shadowBlur = 18;
+      ctx.strokeStyle = 'hsla(185, 100%, 50%, 0.4)';
+      ctx.lineWidth = 5;
+      ctx.stroke();
+      ctx.shadowBlur = 8;
+      ctx.strokeStyle = 'hsla(185, 100%, 65%, 0.8)';
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+      ctx.shadowColor = 'hsla(185, 100%, 90%, 1)';
+      ctx.shadowBlur = 2;
+      ctx.strokeStyle = 'hsla(185, 100%, 90%, 1)';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+    } else {
+      neonGlow(ctx, 'hsla(185, 80%, 55%, 0.3)', 3);
+      ctx.strokeStyle = 'hsla(185, 60%, 50%, 0.4)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  }
+  clearGlow(ctx);
+
+  ctx.font = "bold " + (w * 0.032) + "px monospace";
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  var nums = ['XII','I','II','III','IV','V','VI','VII','VIII','IX','X','XI'];
+  for (var i = 0; i < 12; i++) {
+    var angle = (i / 12) * Math.PI * 2 - Math.PI / 2;
+    var r = markerRadius - 22;
+    var nx = Math.cos(angle) * r;
+    var ny = Math.sin(angle) * r;
+    neonGlow(ctx, 'hsla(45, 100%, 55%, 0.9)', 16);
+    ctx.fillStyle = 'hsla(45, 100%, 55%, 0.4)';
+    ctx.fillText(nums[i], nx, ny);
+    neonGlow(ctx, 'hsla(45, 100%, 75%, 0.8)', 4);
+    ctx.fillStyle = 'hsla(45, 100%, 85%, 0.95)';
+    ctx.fillText(nums[i], nx, ny);
+  }
+  clearGlow(ctx);
+
+  var now = new Date();
+  var hours = now.getHours() % 12;
+  var minutes = now.getMinutes();
+  var seconds = now.getSeconds();
+  var milliseconds = now.getMilliseconds();
+
+  var hourAngle = ((hours + minutes / 60) / 12) * Math.PI * 2 - Math.PI / 2;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(Math.cos(hourAngle + Math.PI) * 12, Math.sin(hourAngle + Math.PI) * 12);
+  ctx.lineTo(Math.cos(hourAngle) * (markerRadius - 85), Math.sin(hourAngle) * (markerRadius - 85));
+  neonGlow(ctx, 'hsla(320, 100%, 60%, 0.8)', 25);
+  ctx.strokeStyle = 'hsla(320, 100%, 55%, 0.3)';
+  ctx.lineWidth = 8;
+  ctx.stroke();
+  neonGlow(ctx, 'hsla(320, 100%, 65%, 0.9)', 12);
+  ctx.strokeStyle = 'hsla(320, 100%, 65%, 0.8)';
+  ctx.lineWidth = 4;
+  ctx.stroke();
+  neonGlow(ctx, 'hsla(320, 100%, 90%, 1)', 3);
+  ctx.strokeStyle = 'hsla(320, 100%, 90%, 1)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  var minuteAngle = ((minutes + seconds / 60) / 60) * Math.PI * 2 - Math.PI / 2;
+  ctx.beginPath();
+  ctx.moveTo(Math.cos(minuteAngle + Math.PI) * 15, Math.sin(minuteAngle + Math.PI) * 15);
+  ctx.lineTo(Math.cos(minuteAngle) * (markerRadius - 40), Math.sin(minuteAngle) * (markerRadius - 40));
+  neonGlow(ctx, 'hsla(185, 100%, 60%, 0.8)', 25);
+  ctx.strokeStyle = 'hsla(185, 100%, 55%, 0.3)';
+  ctx.lineWidth = 7;
+  ctx.stroke();
+  neonGlow(ctx, 'hsla(185, 100%, 65%, 0.9)', 12);
+  ctx.strokeStyle = 'hsla(185, 100%, 65%, 0.85)';
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+  neonGlow(ctx, 'hsla(185, 100%, 92%, 1)', 3);
+  ctx.strokeStyle = 'hsla(185, 100%, 92%, 1)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  var secondAngle = ((seconds + milliseconds / 1000) / 60) * Math.PI * 2 - Math.PI / 2;
+  ctx.beginPath();
+  ctx.moveTo(Math.cos(secondAngle + Math.PI) * 20, Math.sin(secondAngle + Math.PI) * 20);
+  ctx.lineTo(Math.cos(secondAngle) * (markerRadius - 25), Math.sin(secondAngle) * (markerRadius - 25));
+  neonGlow(ctx, 'hsla(45, 100%, 55%, 0.8)', 22);
+  ctx.strokeStyle = 'hsla(45, 100%, 50%, 0.3)';
+  ctx.lineWidth = 6;
+  ctx.stroke();
+  neonGlow(ctx, 'hsla(45, 100%, 60%, 0.9)', 10);
+  ctx.strokeStyle = 'hsla(45, 100%, 60%, 0.9)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  neonGlow(ctx, 'hsla(45, 100%, 92%, 1)', 3);
+  ctx.strokeStyle = 'hsla(45, 100%, 92%, 1)';
+  ctx.lineWidth = 0.8;
+  ctx.stroke();
+
+  var discX = Math.cos(secondAngle) * (markerRadius - 25);
+  var discY = Math.sin(secondAngle) * (markerRadius - 25);
+  neonGlow(ctx, 'hsla(45, 100%, 70%, 1)', 15);
+  ctx.fillStyle = 'hsla(45, 100%, 90%, 1)';
+  ctx.beginPath();
+  ctx.arc(discX, discY, 3.5, 0, Math.PI * 2);
+  ctx.fill();
+  clearGlow(ctx);
+
+  neonGlow(ctx, 'hsla(320, 100%, 60%, 0.9)', 20);
+  ctx.fillStyle = 'hsla(320, 100%, 70%, 0.95)';
+  ctx.beginPath();
+  ctx.arc(0, 0, 6, 0, Math.PI * 2);
+  ctx.fill();
+  neonGlow(ctx, 'hsla(185, 100%, 60%, 0.8)', 18);
+  ctx.strokeStyle = 'hsla(185, 100%, 70%, 0.7)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(0, 0, 10, 0, Math.PI * 2);
+  ctx.stroke();
+  neonGlow(ctx, 'hsla(320, 100%, 90%, 1)', 4);
+  ctx.fillStyle = 'hsla(0, 0%, 100%, 0.9)';
+  ctx.beginPath();
+  ctx.arc(0, 0, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+  clearGlow(ctx);
+
+  ctx.restore();
+
+  t += 0.01;
+  requestAnimationFrame(draw);
+}
+
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>

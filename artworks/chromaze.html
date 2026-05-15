@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Chromaze</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background: #1a1a1a;
+    height: 100%;
+    width: 100%;
+    cursor: none;
+  }
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #wrap {
+    position: relative;
+    aspect-ratio: 1 / 1;
+    width: min(100vw, 100vh);
+    height: min(100vw, 100vh);
+    border-radius: 6% / 6%;
+    overflow: hidden;
+    box-shadow:
+      inset 0 0 60px 10px rgba(0,0,0,0.85),
+      inset 0 0 120px 20px rgba(0,0,0,0.6),
+      0 0 40px rgba(80, 200, 120, 0.15);
+    background: #000;
+  }
+  #wrap::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(
+      ellipse at center,
+      rgba(255,255,255,0) 55%,
+      rgba(0,0,0,0.6) 100%
+    );
+    pointer-events: none;
+    z-index: 2;
+    border-radius: inherit;
+  }
+  #wrap::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+      to bottom,
+      rgba(0,0,0,0.25) 0px,
+      rgba(0,0,0,0.25) 1px,
+      rgba(255,255,255,0.02) 1px,
+      rgba(255,255,255,0.02) 3px
+    );
+    mix-blend-mode: multiply;
+    pointer-events: none;
+    z-index: 3;
+    border-radius: inherit;
+  }
+  #mire {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 3;
+    mix-blend-mode: screen;
+    opacity: 0.75;
+    border-radius: inherit;
+  }
+  #glare {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      115deg,
+      rgba(255,255,255,0.08) 0%,
+      rgba(255,255,255,0) 40%,
+      rgba(255,255,255,0) 60%,
+      rgba(255,255,255,0.04) 100%
+    );
+    pointer-events: none;
+    z-index: 4;
+    border-radius: inherit;
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    background: #000;
+    transform: scale(1.05);
+    transform-origin: center;
+    filter: contrast(1.05) saturate(1.1) url(#crtBulge);
+  }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <filter id="crtBulge">
+    <feGaussianBlur stdDeviation="0.3"/>
+  </filter>
+</svg>
+<div id="wrap">
+  <canvas id="c"></canvas>
+  <svg id="mire" viewBox="0 0 100 100" preserveAspectRatio="none">
+    <defs>
+      <g id="crosshair">
+        <!-- center crosshair -->
+        <line x1="50" y1="35" x2="50" y2="65" stroke="white" stroke-width="0.2" vector-effect="non-scaling-stroke"/>
+        <line x1="35" y1="50" x2="65" y2="50" stroke="white" stroke-width="0.2" vector-effect="non-scaling-stroke"/>
+      </g>
+    </defs>
+
+    <!-- outer frame -->
+    <rect x="2" y="2" width="96" height="96" fill="none" stroke="white" stroke-width="0.15" vector-effect="non-scaling-stroke"/>
+
+    <!-- concentric circles -->
+    <circle cx="50" cy="50" r="48" fill="none" stroke="white" stroke-width="0.15" vector-effect="non-scaling-stroke"/>
+    <circle cx="50" cy="50" r="35" fill="none" stroke="white" stroke-width="0.15" vector-effect="non-scaling-stroke"/>
+    <circle cx="50" cy="50" r="22" fill="none" stroke="white" stroke-width="0.15" vector-effect="non-scaling-stroke"/>
+    <circle cx="50" cy="50" r="10" fill="none" stroke="white" stroke-width="0.15" vector-effect="non-scaling-stroke"/>
+    <circle cx="50" cy="50" r="2" fill="none" stroke="white" stroke-width="0.2" vector-effect="non-scaling-stroke"/>
+
+    <!-- crosshairs -->
+    <line x1="50" y1="2" x2="50" y2="98" stroke="white" stroke-width="0.15" vector-effect="non-scaling-stroke"/>
+    <line x1="2" y1="50" x2="98" y2="50" stroke="white" stroke-width="0.15" vector-effect="non-scaling-stroke"/>
+
+    <!-- diagonal lines -->
+    <line x1="2" y1="2" x2="98" y2="98" stroke="white" stroke-width="0.1" stroke-dasharray="1 1" vector-effect="non-scaling-stroke"/>
+    <line x1="98" y1="2" x2="2" y2="98" stroke="white" stroke-width="0.1" stroke-dasharray="1 1" vector-effect="non-scaling-stroke"/>
+
+    <!-- tick marks every 10 units on the axes -->
+    <g stroke="white" stroke-width="0.15" vector-effect="non-scaling-stroke">
+      <line x1="10" y1="48" x2="10" y2="52"/>
+      <line x1="20" y1="48" x2="20" y2="52"/>
+      <line x1="30" y1="48" x2="30" y2="52"/>
+      <line x1="40" y1="48" x2="40" y2="52"/>
+      <line x1="60" y1="48" x2="60" y2="52"/>
+      <line x1="70" y1="48" x2="70" y2="52"/>
+      <line x1="80" y1="48" x2="80" y2="52"/>
+      <line x1="90" y1="48" x2="90" y2="52"/>
+
+      <line x1="48" y1="10" x2="52" y2="10"/>
+      <line x1="48" y1="20" x2="52" y2="20"/>
+      <line x1="48" y1="30" x2="52" y2="30"/>
+      <line x1="48" y1="40" x2="52" y2="40"/>
+      <line x1="48" y1="60" x2="52" y2="60"/>
+      <line x1="48" y1="70" x2="52" y2="70"/>
+      <line x1="48" y1="80" x2="52" y2="80"/>
+      <line x1="48" y1="90" x2="52" y2="90"/>
+    </g>
+
+    <!-- corner L-brackets -->
+    <g stroke="white" stroke-width="0.2" fill="none" vector-effect="non-scaling-stroke">
+      <polyline points="5,12 5,5 12,5"/>
+      <polyline points="88,5 95,5 95,12"/>
+      <polyline points="95,88 95,95 88,95"/>
+      <polyline points="12,95 5,95 5,88"/>
+    </g>
+
+    <!-- greyscale bars bottom -->
+    <g>
+      <rect x="20" y="82" width="8" height="3" fill="rgba(255,255,255,0.15)"/>
+      <rect x="28" y="82" width="8" height="3" fill="rgba(255,255,255,0.3)"/>
+      <rect x="36" y="82" width="8" height="3" fill="rgba(255,255,255,0.5)"/>
+      <rect x="44" y="82" width="8" height="3" fill="rgba(255,255,255,0.7)"/>
+      <rect x="52" y="82" width="8" height="3" fill="rgba(255,255,255,0.85)"/>
+      <rect x="60" y="82" width="8" height="3" fill="rgba(255,255,255,1)"/>
+    </g>
+  </svg>
+  <div id="glare"></div>
+</div>
+<script>
+const c = document.getElementById('c');
+const wrap = document.getElementById('wrap');
+const ctx = c.getContext('2d');
+let w, h, cx, cy;
+let mx = 0, my = 0, tx = 0, ty = 0;
+let t = 0;
+
+function resize() {
+  const size = Math.min(window.innerWidth, window.innerHeight);
+  w = c.width = size * devicePixelRatio;
+  h = c.height = size * devicePixelRatio;
+  cx = w / 2;
+  cy = h / 2;
+  tx = cx; ty = cy;
+  mx = cx; my = cy;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// Commodore 64 palette (16 couleurs officielles, en HSL approx)
+const bauhaus = [
+  { h: 0,   s: 0,   l: 0   }, // black
+  { h: 0,   s: 0,   l: 100 }, // white
+  { h: 0,   s: 60,  l: 41  }, // red
+  { h: 176, s: 47,  l: 66  }, // cyan
+  { h: 295, s: 42,  l: 46  }, // purple
+  { h: 120, s: 55,  l: 38  }, // green
+  { h: 240, s: 60,  l: 36  }, // blue
+  { h: 60,  s: 70,  l: 72  }, // yellow
+  { h: 24,  s: 60,  l: 44  }, // orange
+  { h: 30,  s: 55,  l: 28  }, // brown
+  { h: 0,   s: 55,  l: 62  }, // light red
+  { h: 0,   s: 0,   l: 31  }, // dark grey
+  { h: 0,   s: 0,   l: 46  }, // medium grey
+  { h: 120, s: 60,  l: 63  }, // light green
+  { h: 240, s: 60,  l: 62  }, // light blue
+  { h: 0,   s: 0,   l: 62  }, // light grey
+];
+
+function pickColor(i, tt) {
+  const idx = i % bauhaus.length;
+  return bauhaus[idx];
+}
+// trailing fade
+function fadeBackground() {
+  ctx.fillStyle = 'rgba(235, 228, 210, 0.08)';
+  ctx.fillRect(0, 0, w, h);
+}
+
+function draw() {
+  t += 0.012;
+
+  fadeBackground();
+
+  const maxR = Math.hypot(w, h) * 0.75;
+  const rings = 90;
+
+  // spiraling rings
+  for (let i = rings; i > 0; i--) {
+    const p = i / rings;
+    const r = maxR * p;
+    const wobble = Math.sin(t * 1.2 + p * 8) * 18 * devicePixelRatio;
+    const pulse = Math.sin(t * 2 + p * 12) * 0.5 + 0.5;
+
+    const offsetX = 0;
+    const offsetY = 0;
+
+    const col = pickColor(i, t);
+    const alpha = 0.4 + pulse * 0.4;
+
+    ctx.strokeStyle = `hsla(${col.h}, ${col.s}%, ${col.l}%, ${alpha})`;
+    ctx.lineWidth = (2 + pulse * 3) * devicePixelRatio;
+
+    ctx.beginPath();
+    const segs = 120;
+    for (let s = 0; s <= segs; s++) {
+      const a = (s / segs) * Math.PI * 2 + t * (p < 0.5 ? 1 : -1) * (0.3 + p);
+      const rr = r + Math.sin(a * 6 + t * 2 + p * 10) * wobble;
+      const x = cx + offsetX + Math.cos(a) * rr;
+      const y = cy + offsetY + Math.sin(a) * rr;
+      if (s === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.stroke();
+  }
+
+  requestAnimationFrame(draw);
+}
+
+draw();
+</script>
+</body>
+</html>

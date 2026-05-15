@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Genuary 2026 #15</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #1a1a1a;
+        }
+        canvas {
+            display: block;
+        }
+        #vignette {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            background: radial-gradient(ellipse at center, 
+                transparent 0%, 
+                transparent 50%,
+                rgba(20, 15, 10, 0.15) 80%,
+                rgba(15, 10, 5, 0.4) 100%);
+            mix-blend-mode: multiply;
+        }
+        #grain {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            opacity: 0.08;
+            animation: grain 2s steps(4) infinite;
+        }
+        @keyframes grain {
+            0%, 100% { transform: translate(0, 0); }
+            25% { transform: translate(-2%, -3%); }
+            50% { transform: translate(3%, 2%); }
+            75% { transform: translate(-1%, 3%); }
+        }
+    </style>
+</head>
+<body>
+    <div id="vignette"></div>
+    <canvas id="grain"></canvas>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // Create grain texture
+        const grainCanvas = document.getElementById('grain');
+        grainCanvas.width = window.innerWidth;
+        grainCanvas.height = window.innerHeight;
+        const grainCtx = grainCanvas.getContext('2d');
+        
+        function drawGrain() {
+            const imageData = grainCtx.createImageData(grainCanvas.width, grainCanvas.height);
+            const pixels = imageData.data;
+            for (let i = 0; i < pixels.length; i += 4) {
+                const value = Math.random() * 255;
+                pixels[i] = value;
+                pixels[i + 1] = value;
+                pixels[i + 2] = value;
+                pixels[i + 3] = 255;
+            }
+            grainCtx.putImageData(imageData, 0, 0);
+        }
+        drawGrain();
+        
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.2);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.7);
+        directionalLight.position.set(0, 10, 0);
+        directionalLight.castShadow = true;
+        directionalLight.shadow.mapSize.width = 2048;
+        directionalLight.shadow.mapSize.height = 2048;
+        directionalLight.shadow.camera.near = 0.5;
+        directionalLight.shadow.camera.far = 50;
+        directionalLight.shadow.radius = 20;
+        scene.add(directionalLight);
+
+        // Second colored light
+        const coloredLight = new THREE.DirectionalLight(0xffffff, 0.5);
+        coloredLight.position.set(5, 8, 5);
+        coloredLight.castShadow = true;
+        coloredLight.shadow.mapSize.width = 1024;
+        coloredLight.shadow.mapSize.height = 1024;
+        coloredLight.shadow.camera.near = 0.5;
+        coloredLight.shadow.camera.far = 50;
+        coloredLight.shadow.radius = 15;
+        scene.add(coloredLight);
+
+        // Fog
+        scene.fog = new THREE.FogExp2(0x1a1a1a, 0.08);
+
+        // Ground plane to receive shadows with tiles
+        const groundGeometry = new THREE.PlaneGeometry(20, 20);
+        
+        // Create tile texture using canvas
+        const canvas = document.createElement('canvas');
+        canvas.width = 1024;
+        canvas.height = 1024;
+        const ctx = canvas.getContext('2d');
+        
+        const tileSize = 512;
+        for (let x = 0; x < canvas.width; x += tileSize) {
+            for (let y = 0; y < canvas.height; y += tileSize) {
+                const isEven = ((x / tileSize) + (y / tileSize)) % 2 === 0;
+                ctx.fillStyle = isEven ? '#d0d0d0' : '#e8e8e8';
+                ctx.fillRect(x, y, tileSize, tileSize);
+                
+                // Add grain texture
+                const imageData = ctx.getImageData(x, y, tileSize, tileSize);
+                const pixels = imageData.data;
+                for (let i = 0; i < pixels.length; i += 4) {
+                    const noise = (Math.random() - 0.5) * 30;
+                    pixels[i] += noise;
+                    pixels[i + 1] += noise;
+                    pixels[i + 2] += noise;
+                }
+                ctx.putImageData(imageData, x, y);
+            }
+        }
+        
+        // Add grout lines
+        ctx.strokeStyle = '#a0a0a0';
+        ctx.lineWidth = 4;
+        for (let x = 0; x <= canvas.width; x += tileSize) {
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, canvas.height);
+            ctx.stroke();
+        }
+        for (let y = 0; y <= canvas.height; y += tileSize) {
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(canvas.width, y);
+            ctx.stroke();
+        }
+        
+        // Add stone particles
+        for (let i = 0; i < 800; i++) {
+            const px = Math.random() * canvas.width;
+            const py = Math.random() * canvas.height;
+            const size = Math.random() * 3 + 1;
+            const shade = Math.floor(Math.random() * 60) + 80;
+            
+            ctx.fillStyle = `rgb(${shade}, ${shade}, ${shade})`;
+            ctx.beginPath();
+            ctx.arc(px, py, size, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        
+        // Add pebbles
+        for (let i = 0; i < 150; i++) {
+            const px = Math.random() * canvas.width;
+            const py = Math.random() * canvas.height;
+            const sizeX = Math.random() * 8 + 4;
+            const sizeY = Math.random() * 6 + 3;
+            const shade = Math.floor(Math.random() * 80) + 60;
+            const rotation = Math.random() * Math.PI;
+            
+            ctx.save();
+            ctx.translate(px, py);
+            ctx.rotate(rotation);
+            ctx.fillStyle = `rgb(${shade}, ${shade}, ${shade})`;
+            ctx.beginPath();
+            ctx.ellipse(0, 0, sizeX, sizeY, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+        
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.wrapS = THREE.RepeatWrapping;
+        texture.wrapT = THREE.RepeatWrapping;
+        texture.repeat.set(4, 4);
+        
+        const groundMaterial = new THREE.MeshStandardMaterial({ 
+            map: texture,
+            roughness: 0.8,
+            metalness: 0.2
+        });
+        const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        // Add 3D pebbles
+        for (let i = 0; i < 150; i++) {
+            const pebbleGeometry = new THREE.SphereGeometry(
+                Math.random() * 0.2 + 0.12,
+                12,
+                10
+            );
+            
+            // Deform to make irregular
+            const positions = pebbleGeometry.attributes.position;
+            for (let j = 0; j < positions.count; j++) {
+                const x = positions.getX(j);
+                const y = positions.getY(j);
+                const z = positions.getZ(j);
+                positions.setXYZ(
+                    j,
+                    x * (1 + (Math.random() - 0.5) * 0.3),
+                    y * (1 + (Math.random() - 0.5) * 0.3),
+                    z * (1 + (Math.random() - 0.5) * 0.3)
+                );
+            }
+            
+            const shade = Math.floor(Math.random() * 40) + 180;
+            const roughness = Math.random() * 0.4 + 0.6;
+            const pebbleMaterial = new THREE.MeshStandardMaterial({
+                color: new THREE.Color(`rgb(${shade}, ${shade}, ${shade})`),
+                roughness: roughness,
+                metalness: Math.random() * 0.3
+            });
+            
+            const pebble = new THREE.Mesh(pebbleGeometry, pebbleMaterial);
+            pebble.position.x = (Math.random() - 0.5) * 6;
+            pebble.position.z = (Math.random() - 0.5) * 6;
+            pebble.position.y = 0.08;
+            pebble.rotation.x = Math.random() * Math.PI;
+            pebble.rotation.y = Math.random() * Math.PI;
+            pebble.rotation.z = Math.random() * Math.PI;
+            pebble.castShadow = true;
+            pebble.receiveShadow = true;
+            scene.add(pebble);
+        }
+
+        // Create cog shape with hole and spokes
+        function createCogGeometry(outerRadius, innerRadius, thickness, teethCount, toothHeight, spokeCount) {
+            const shape = new THREE.Shape();
+            const angleStep = (Math.PI * 2) / teethCount;
+            
+            // Outer profile with teeth
+            for (let i = 0; i < teethCount; i++) {
+                const angle1 = i * angleStep;
+                const angle2 = angle1 + angleStep * 0.35;
+                const angle3 = angle1 + angleStep * 0.65;
+                const angle4 = (i + 1) * angleStep;
+                
+                if (i === 0) {
+                    shape.moveTo(Math.cos(angle1) * outerRadius, Math.sin(angle1) * outerRadius);
+                }
+                
+                shape.lineTo(Math.cos(angle2) * outerRadius, Math.sin(angle2) * outerRadius);
+                shape.lineTo(Math.cos(angle2) * (outerRadius + toothHeight), Math.sin(angle2) * (outerRadius + toothHeight));
+                shape.lineTo(Math.cos(angle3) * (outerRadius + toothHeight), Math.sin(angle3) * (outerRadius + toothHeight));
+                shape.lineTo(Math.cos(angle3) * outerRadius, Math.sin(angle3) * outerRadius);
+                shape.lineTo(Math.cos(angle4) * outerRadius, Math.sin(angle4) * outerRadius);
+            }
+            
+            // Inner hole
+            const holePath = new THREE.Path();
+            holePath.absarc(0, 0, innerRadius, 0, Math.PI * 2, false);
+            shape.holes.push(holePath);
+            
+            // Spoke holes
+            const spokeAngleStep = (Math.PI * 2) / spokeCount;
+            const spokeDistance = (outerRadius + innerRadius) / 2;
+            const spokeHoleRadius = 0.15;
+            
+            for (let i = 0; i < spokeCount; i++) {
+                const angle = i * spokeAngleStep;
+                const holeX = Math.cos(angle) * spokeDistance;
+                const holeY = Math.sin(angle) * spokeDistance;
+                const spokePath = new THREE.Path();
+                spokePath.absarc(holeX, holeY, spokeHoleRadius, 0, Math.PI * 2, false);
+                shape.holes.push(spokePath);
+            }
+            
+            const extrudeSettings = {
+                depth: thickness,
+                bevelEnabled: true,
+                bevelThickness: 0.05,
+                bevelSize: 0.05,
+                bevelSegments: 2
+            };
+            
+            return new THREE.ExtrudeGeometry(shape, extrudeSettings);
+        }
+
+        // Invisible cog object that casts shadow
+        const cogGeometry = createCogGeometry(1.2, 0.4, 0.4, 16, 0.3, 6);
+        const invisibleMaterial = new THREE.MeshStandardMaterial({
+            transparent: true,
+            opacity: 0,
+            side: THREE.DoubleSide
+        });
+        const invisibleObject = new THREE.Mesh(cogGeometry, invisibleMaterial);
+        invisibleObject.position.y = 3;
+        invisibleObject.position.z = -0.2;
+        invisibleObject.rotation.x = Math.PI / 2;
+        invisibleObject.castShadow = true;
+        scene.add(invisibleObject);
+
+        // Dust particles
+        const particleCount = 300;
+        const particleGeometry = new THREE.BufferGeometry();
+        const particlePositions = new Float32Array(particleCount * 3);
+        const particleVelocities = [];
+
+        for (let i = 0; i < particleCount; i++) {
+            particlePositions[i * 3] = (Math.random() - 0.5) * 10;
+            particlePositions[i * 3 + 1] = Math.random() * 8;
+            particlePositions[i * 3 + 2] = (Math.random() - 0.5) * 10;
+            
+            particleVelocities.push({
+                x: (Math.random() - 0.5) * 0.01,
+                y: (Math.random() - 0.5) * 0.01,
+                z: (Math.random() - 0.5) * 0.01
+            });
+        }
+
+        particleGeometry.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+
+        // Create circular particle texture
+        const particleCanvas = document.createElement('canvas');
+        particleCanvas.width = 32;
+        particleCanvas.height = 32;
+        const particleCtx = particleCanvas.getContext('2d');
+        const gradient = particleCtx.createRadialGradient(16, 16, 0, 16, 16, 16);
+        gradient.addColorStop(0, 'rgba(255, 255, 255, 0.4)');
+        gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.2)');
+        gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        particleCtx.fillStyle = gradient;
+        particleCtx.fillRect(0, 0, 32, 32);
+        
+        const particleTexture = new THREE.CanvasTexture(particleCanvas);
+
+        const particleMaterial = new THREE.PointsMaterial({
+            map: particleTexture,
+            size: 0.08,
+            transparent: true,
+            opacity: 0.3,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false
+        });
+
+        const particles = new THREE.Points(particleGeometry, particleMaterial);
+        scene.add(particles);
+
+        camera.position.set(0, 6, 3);
+        camera.lookAt(0, 0, 0);
+
+        // Animation
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            invisibleObject.rotation.z += 0.003;
+            
+            const time = Date.now() * 0.0005;
+            directionalLight.position.x = Math.sin(time) * 3;
+            directionalLight.position.z = Math.cos(time) * 3;
+            
+            coloredLight.position.x = Math.sin(time * 0.7) * 4;
+            coloredLight.position.z = Math.cos(time * 0.7) * 4;
+            
+            // Animate dust particles
+            const positions = particles.geometry.attributes.position.array;
+            for (let i = 0; i < particleCount; i++) {
+                positions[i * 3] += particleVelocities[i].x;
+                positions[i * 3 + 1] += particleVelocities[i].y;
+                positions[i * 3 + 2] += particleVelocities[i].z;
+                
+                if (Math.abs(positions[i * 3]) > 5) particleVelocities[i].x *= -1;
+                if (positions[i * 3 + 1] > 8 || positions[i * 3 + 1] < 0) particleVelocities[i].y *= -1;
+                if (Math.abs(positions[i * 3 + 2]) > 5) particleVelocities[i].z *= -1;
+            }
+            particles.geometry.attributes.position.needsUpdate = true;
+            
+            renderer.render(scene, camera);
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>

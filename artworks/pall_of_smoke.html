@@ -1,0 +1,1738 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Pall of smoke</title>
+<style>
+  body {
+    margin: 0;
+    overflow: hidden;
+    background: #050810;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+  }
+  #wrap {
+    width: min(95vw, 95vh);
+    height: min(95vw, 95vh);
+    position: relative;
+    box-shadow: 0 0 60px rgba(0,0,0,0.8);
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    background: #0A1628;
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+<canvas id="c"></canvas>
+</div>
+<script>
+const canvas = document.getElementById('c');
+let ctx = canvas.getContext('2d');
+const wrap = document.getElementById('wrap');
+const realCtx = ctx;
+
+let W, H, horizonY, trainY;
+
+function resize() {
+  const rect = wrap.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  W = rect.width;
+  H = rect.height;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  horizonY = H * 0.55;
+  trainY = horizonY - 2;
+}
+resize();
+
+// utilitaire : random déterministe
+function seededRand(seed) {
+  let s = seed;
+  return () => {
+    s = (s * 9301 + 49297) % 233280;
+    return s / 233280;
+  };
+}
+
+// --- Ciel façon coups de pinceau tourbillonnants ---
+let skyBuf = null;
+let skyBufCtx = null;
+
+function buildSky() {
+  const dpr = window.devicePixelRatio || 1;
+  skyBuf = document.createElement('canvas');
+  skyBuf.width = W * dpr;
+  skyBuf.height = horizonY * dpr;
+  skyBufCtx = skyBuf.getContext('2d');
+  skyBufCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const c = skyBufCtx;
+
+  // fond gradient de base
+  const g = c.createLinearGradient(0, 0, 0, horizonY);
+  g.addColorStop(0, '#05091A');
+  g.addColorStop(0.6, '#0E1B36');
+  g.addColorStop(1, '#1A2D4A');
+  c.fillStyle = g;
+  c.fillRect(0, 0, W, horizonY);
+
+  const rand = seededRand(2024);
+
+  // tourbillons : champs de courbes locales
+  const swirls = [];
+  const swirlCount = 4 + Math.floor(W / 200);
+  for (let i = 0; i < swirlCount; i++) {
+    swirls.push({
+      cx: rand() * W,
+      cy: rand() * horizonY * 0.85,
+      radius: 80 + rand() * 140,
+      strength: (rand() < 0.5 ? -1 : 1) * (0.6 + rand() * 0.5)
+    });
+  }
+
+  function flowAngle(x, y) {
+    let ax = 0, ay = 0;
+    for (const s of swirls) {
+      const dx = x - s.cx;
+      const dy = y - s.cy;
+      const d = Math.hypot(dx, dy) + 1;
+      const fall = Math.exp(-d / s.radius);
+      ax += -dy / d * s.strength * fall;
+      ay +=  dx / d * s.strength * fall;
+    }
+    ax += 0.3;
+    return Math.atan2(ay, ax);
+  }
+
+  // coups de pinceau subtils, palette resserrée bleu-nuit
+  c.lineCap = 'round';
+  const strokeCount = Math.floor(W * horizonY / 60);
+  for (let i = 0; i < strokeCount; i++) {
+    const x = rand() * W;
+    const y = rand() * horizonY;
+    const ang = flowAngle(x, y);
+    const len = 6 + rand() * 14;
+    // variation très resserrée autour du gradient de base
+    const t = y / horizonY;
+    const baseR = 12 + t * 18 + (rand() - 0.5) * 8;
+    const baseG = 22 + t * 26 + (rand() - 0.5) * 10;
+    const baseB = 45 + t * 30 + (rand() - 0.5) * 14;
+    const alpha = 0.18 + rand() * 0.22;
+    c.strokeStyle = `rgba(${baseR | 0},${baseG | 0},${baseB | 0},${alpha})`;
+    c.lineWidth = 1.5 + rand() * 2;
+
+    const x2 = x + Math.cos(ang) * len;
+    const y2 = y + Math.sin(ang) * len;
+    const ang2 = flowAngle((x + x2) / 2, (y + y2) / 2);
+    const cx = (x + x2) / 2 + Math.cos(ang2 + Math.PI / 2) * len * 0.2;
+    const cy = (y + y2) / 2 + Math.sin(ang2 + Math.PI / 2) * len * 0.2;
+
+    c.beginPath();
+    c.moveTo(x, y);
+    c.quadraticCurveTo(cx, cy, x2, y2);
+    c.stroke();
+  }
+}
+
+function drawSky() {
+  if (!skyBuf) buildSky();
+  ctx.drawImage(skyBuf, 0, 0, W + 1, horizonY);
+}
+
+// --- Sol + arbres morts d'arrière-plan ---
+const deadTrees = [];
+function initDeadTrees() {
+  deadTrees.length = 0;
+  const count = 8 + Math.floor(W / 250);
+  const r = seededRand(99);
+  for (let i = 0; i < count; i++) {
+    deadTrees.push({
+      x: r() * W,
+      yOffset: 2 + r() * 12,
+      h: 12 + r() * 22
+    });
+  }
+}
+
+function drawGround() {
+  const g = ctx.createLinearGradient(0, horizonY, 0, H);
+  g.addColorStop(0, '#0E1A2E');
+  g.addColorStop(0.4, '#0A1424');
+  g.addColorStop(1, '#05080F');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, horizonY, W, H - horizonY);
+
+  ctx.fillStyle = 'rgba(5,8,18,0.5)';
+  ctx.beginPath();
+  ctx.moveTo(0, horizonY + 2);
+  for (let x = 0; x <= W; x += 8) {
+    const y = horizonY + 2 +
+      Math.sin(x * 0.005) * 6 +
+      Math.sin(x * 0.013 + 1.3) * 4;
+    ctx.lineTo(x, y);
+  }
+  ctx.lineTo(W, H);
+  ctx.lineTo(0, H);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = '#02040A';
+  ctx.strokeStyle = '#02040A';
+  ctx.lineWidth = 1;
+  for (const t of deadTrees) {
+    const tx = t.x;
+    const ty = horizonY + t.yOffset;
+    const th = t.h;
+    ctx.fillRect(tx - 0.5, ty - th, 1.5, th);
+    ctx.beginPath();
+    ctx.moveTo(tx, ty - th * 0.8);
+    ctx.lineTo(tx - th * 0.25, ty - th * 1.1);
+    ctx.moveTo(tx, ty - th * 0.6);
+    ctx.lineTo(tx + th * 0.3, ty - th * 0.85);
+    ctx.moveTo(tx, ty - th * 0.9);
+    ctx.lineTo(tx + th * 0.15, ty - th * 1.15);
+    ctx.stroke();
+  }
+}
+
+// --- Train ---
+function drawTrain(offset) {
+  const baseX = W * 0.55 + offset;
+  const ty = trainY;
+  const carH = Math.max(18, H * 0.028);
+  const carW = Math.max(70, W * 0.09);
+
+  ctx.save();
+  const carCount = 5;
+  for (let i = 0; i < carCount; i++) {
+    const x = baseX - (carCount - i) * (carW + 4);
+    ctx.fillStyle = '#1A2A40';
+    ctx.fillRect(x, ty - carH, carW, carH);
+    ctx.fillStyle = '#0E1A2C';
+    ctx.fillRect(x, ty - carH, carW, 3);
+
+    const winCount = 6;
+    const winW = carW / (winCount * 1.6);
+    const gap = (carW - winCount * winW) / (winCount + 1);
+    const winH = carH * 0.38;
+    const winY = ty - carH * 0.68;
+    for (let j = 0; j < winCount; j++) {
+      const wx = x + gap + j * (winW + gap);
+      const variation = ((i * 7 + j * 13) % 5) / 5;
+      const lit = ((i * 3 + j) % 7) !== 0;
+      if (!lit) {
+        ctx.fillStyle = '#0A1525';
+        ctx.fillRect(wx, winY, winW, winH);
+        continue;
+      }
+      ctx.save();
+      const halo = ctx.createRadialGradient(
+        wx + winW / 2, winY + winH / 2, 0,
+        wx + winW / 2, winY + winH / 2, winW * 1.6
+      );
+      halo.addColorStop(0, `rgba(255,190,110,${0.35 + variation * 0.15})`);
+      halo.addColorStop(1, 'rgba(255,180,100,0)');
+      ctx.fillStyle = halo;
+      ctx.fillRect(wx - winW, winY - winH, winW * 3, winH * 3);
+      ctx.restore();
+      const warmth = 200 + Math.floor(variation * 40);
+      ctx.fillStyle = `rgb(${warmth + 30},${warmth - 20},${warmth - 100})`;
+      ctx.fillRect(wx, winY, winW, winH);
+      ctx.fillStyle = 'rgba(40,20,5,0.6)';
+      ctx.fillRect(wx, winY, winW, 1);
+      ctx.fillRect(wx, winY + winH - 1, winW, 1);
+      if (((i * 5 + j * 11) % 9) === 0) {
+        ctx.fillStyle = 'rgba(20,10,5,0.7)';
+        const sw = winW * 0.35;
+        const sh = winH * 0.7;
+        ctx.fillRect(wx + winW * 0.3, winY + winH - sh, sw, sh);
+      }
+    }
+    ctx.fillStyle = '#070C18';
+    ctx.fillRect(x, ty - 3, carW, 3);
+  }
+
+  // locomotive
+  const lx = baseX;
+  const lH = carH * 1.35;
+  const lW = carW * 0.95;
+
+  // cabine (à l'arrière de la loco)
+  ctx.fillStyle = '#15181F';
+  ctx.fillRect(lx, ty - lH, lW * 0.38, lH);
+  // toit de cabine qui dépasse
+  ctx.fillStyle = '#0A0C12';
+  ctx.fillRect(lx - 1, ty - lH - 1, lW * 0.4, 2);
+
+  // chaudière (cylindre principal) — dessin avec arrondi
+  const boilerX = lx + lW * 0.38;
+  const boilerW = lW * 0.55;
+  const boilerY = ty - lH * 0.85;
+  const boilerH = lH * 0.85;
+  ctx.fillStyle = '#0C0E14';
+  ctx.fillRect(boilerX, boilerY, boilerW, boilerH);
+  // bande supérieure plus claire (reflet sur le cylindre)
+  ctx.fillStyle = '#1A1E26';
+  ctx.fillRect(boilerX, boilerY, boilerW, 1.5);
+  // bande de rivets (petits points alignés)
+  ctx.fillStyle = '#2A2E36';
+  for (let rv = 0; rv < 5; rv++) {
+    const rvx = boilerX + 4 + rv * (boilerW / 5);
+    ctx.fillRect(rvx, boilerY + boilerH * 0.5, 1, 1);
+  }
+  // anneau de chaudière (séparation décorative)
+  ctx.fillStyle = '#5A1F1A';
+  ctx.fillRect(boilerX + boilerW * 0.35, boilerY, 1, boilerH);
+
+  // dôme à vapeur (petite bosse au-dessus de la chaudière)
+  const domeX = boilerX + boilerW * 0.45;
+  const domeW = lW * 0.1;
+  const domeH = lH * 0.18;
+  ctx.fillStyle = '#0A0C12';
+  ctx.beginPath();
+  ctx.moveTo(domeX, boilerY);
+  ctx.lineTo(domeX, boilerY - domeH * 0.7);
+  ctx.quadraticCurveTo(domeX + domeW / 2, boilerY - domeH, domeX + domeW, boilerY - domeH * 0.7);
+  ctx.lineTo(domeX + domeW, boilerY);
+  ctx.closePath();
+  ctx.fill();
+
+  // cheminée (élargie en haut)
+  const chimX = boilerX + boilerW * 0.78;
+  const chimW = lW * 0.08;
+  const chimH = lH * 0.32;
+  const chimY = boilerY - chimH;
+  ctx.fillStyle = '#05070C';
+  ctx.beginPath();
+  ctx.moveTo(chimX, boilerY);
+  ctx.lineTo(chimX - 1, chimY);
+  ctx.lineTo(chimX + chimW + 1, chimY);
+  ctx.lineTo(chimX + chimW, boilerY);
+  ctx.closePath();
+  ctx.fill();
+  // évasement supérieur
+  ctx.fillStyle = '#080A10';
+  ctx.fillRect(chimX - 2, chimY, chimW + 4, 2);
+
+  // phare avant
+  const headlightX = boilerX + boilerW - 3;
+  const headlightY = boilerY + 3;
+  ctx.fillStyle = 'rgba(255,210,140,0.9)';
+  ctx.beginPath();
+  ctx.arc(headlightX, headlightY, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+  // halo du phare
+  const headHalo = ctx.createRadialGradient(headlightX, headlightY, 0, headlightX, headlightY, 12);
+  headHalo.addColorStop(0, 'rgba(255,200,120,0.5)');
+  headHalo.addColorStop(1, 'rgba(255,180,100,0)');
+  ctx.fillStyle = headHalo;
+  ctx.beginPath();
+  ctx.arc(headlightX, headlightY, 12, 0, Math.PI * 2);
+  ctx.fill();
+
+  // chasse-pierres triangulaire à l'avant
+  const cowX = boilerX + boilerW;
+  ctx.fillStyle = '#0A0C12';
+  ctx.beginPath();
+  ctx.moveTo(cowX, ty);
+  ctx.lineTo(cowX + lW * 0.08, ty);
+  ctx.lineTo(cowX, ty - boilerH * 0.55);
+  ctx.closePath();
+  ctx.fill();
+
+  // foyer rougeoyant (entre cabine et chaudière)
+  ctx.fillStyle = 'rgba(255,140,60,0.85)';
+  ctx.fillRect(lx + lW * 0.4, ty - lH * 0.25, lW * 0.05, lH * 0.18);
+
+  // roues motrices : 2 grandes roues + bielles
+  const wheelY = ty - 1;
+  const wheelR = lH * 0.22;
+  const wheel1X = boilerX + boilerW * 0.25;
+  const wheel2X = boilerX + boilerW * 0.7;
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  ctx.arc(wheel1X, wheelY, wheelR, 0, Math.PI * 2);
+  ctx.arc(wheel2X, wheelY, wheelR, 0, Math.PI * 2);
+  ctx.fill();
+  // moyeu plus clair
+  ctx.fillStyle = '#1A1E26';
+  ctx.beginPath();
+  ctx.arc(wheel1X, wheelY, wheelR * 0.35, 0, Math.PI * 2);
+  ctx.arc(wheel2X, wheelY, wheelR * 0.35, 0, Math.PI * 2);
+  ctx.fill();
+  // bielle horizontale qui relie les deux roues
+  ctx.strokeStyle = '#2A2E36';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(wheel1X, wheelY - wheelR * 0.4);
+  ctx.lineTo(wheel2X, wheelY - wheelR * 0.4);
+  ctx.stroke();
+
+  // base
+  ctx.fillStyle = '#02040A';
+  ctx.fillRect(lx, ty - 3, lW * 0.95, 3);
+
+  ctx.restore();
+  return { chimneyX: chimX + chimW * 0.5, chimneyY: chimY };
+}
+
+function drawTrainGlow(offset) {
+  const baseX = W * 0.55 + offset;
+  const cy = trainY;
+  const carW = Math.max(70, W * 0.09);
+  const carCount = 5;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, cy + 1, W, H - cy);
+  ctx.clip();
+  ctx.globalCompositeOperation = 'lighter';
+
+  for (let i = 0; i < carCount; i++) {
+    const wagonX = baseX - (carCount - i) * (carW + 4);
+    const px = wagonX + carW / 2;
+    const py = cy + 6;
+    const rx = carW * 0.6;
+    const ry = H * 0.09;
+
+    const grad = ctx.createRadialGradient(px, py, 0, px, py, rx);
+    grad.addColorStop(0, 'rgba(220,150,70,0.32)');
+    grad.addColorStop(0.5, 'rgba(150,80,40,0.15)');
+    grad.addColorStop(1, 'rgba(60,25,15,0)');
+    ctx.fillStyle = grad;
+
+    ctx.beginPath();
+    const seg = 24;
+    for (let s = 0; s < seg; s++) {
+      const ang = (s / seg) * Math.PI * 2;
+      const noise = 1 + Math.sin(ang * 3 + i) * 0.18 + Math.cos(ang * 5 + i * 2) * 0.1;
+      const x = px + Math.cos(ang) * rx * noise;
+      const y = py + Math.sin(ang) * ry * noise;
+      if (s === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  const fx = baseX + carW * 0.45;
+  const fy = cy + 5;
+  const fire = ctx.createRadialGradient(fx, fy, 0, fx, fy, carW * 1.0);
+  fire.addColorStop(0, 'rgba(255,130,55,0.5)');
+  fire.addColorStop(0.4, 'rgba(200,75,35,0.22)');
+  fire.addColorStop(1, 'rgba(80,25,10,0)');
+  ctx.fillStyle = fire;
+  ctx.beginPath();
+  const seg2 = 28;
+  for (let s = 0; s < seg2; s++) {
+    const ang = (s / seg2) * Math.PI * 2;
+    const noise = 1 + Math.sin(ang * 4 + fx * 0.01) * 0.22 + Math.cos(ang * 7) * 0.08;
+    const x = fx + Math.cos(ang) * carW * 1.0 * noise;
+    const y = fy + Math.sin(ang) * H * 0.075 * noise;
+    if (s === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.restore();
+}
+
+// --- Fumée + dithering ---
+const smokePuffs = [];
+let smokeTimer = 0;
+const bayer4 = [
+  [ 0,  8,  2, 10],
+  [12,  4, 14,  6],
+  [ 3, 11,  1,  9],
+  [15,  7, 13,  5]
+];
+const smokeBuf = document.createElement('canvas');
+const smokeCtx = smokeBuf.getContext('2d');
+
+function spawnSmoke(x, y) {
+  smokePuffs.push({
+    x: x, y: y,
+    r: 8 + Math.random() * 6,
+    vx: -3.5 - Math.random() * 1.5,
+    vy: -0.5 - Math.random() * 0.4,
+    life: 1,
+    decay: 0.0008 + Math.random() * 0.0005,
+    grow: 0.35 + Math.random() * 0.25,
+    seed: Math.random() * 1000,
+    age: 0,
+    wobble: Math.random() * Math.PI * 2
+  });
+}
+
+function updateSmoke() {
+  for (let i = smokePuffs.length - 1; i >= 0; i--) {
+    const p = smokePuffs[i];
+    p.age++;
+    p.vx *= 0.985;
+    p.vy *= 0.99;
+    p.vx += Math.sin(p.age * 0.02 + p.wobble) * 0.04;
+    p.vy += Math.cos(p.age * 0.015 + p.wobble) * 0.02 - 0.005;
+    p.x += p.vx;
+    p.y += p.vy;
+    p.r += p.grow;
+    p.grow *= 0.992;
+    // décroissance accélérée avec l'âge pour garantir la dissipation
+    p.life -= p.decay * (1 + p.age / 400);
+    if (p.life <= 0) smokePuffs.splice(i, 1);
+  }
+}
+
+// pré-calcul de la LUT du dithering Bayer (évite la division à chaque pixel)
+const bayerLUT = new Float32Array(16);
+for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) bayerLUT[y * 4 + x] = bayer4[y][x] / 16;
+
+function drawSmoke() {
+  if (smokePuffs.length === 0) return;
+  const scale = 0.4;
+  const bw = Math.max(1, Math.floor(W * scale));
+  const bh = Math.max(1, Math.floor(H * scale));
+  if (smokeBuf.width !== bw || smokeBuf.height !== bh) {
+    smokeBuf.width = bw;
+    smokeBuf.height = bh;
+  }
+  smokeCtx.setTransform(1, 0, 0, 1, 0, 0);
+  smokeCtx.clearRect(0, 0, bw, bh);
+  smokeCtx.setTransform(scale, 0, 0, scale, 0, 0);
+
+  // bounding box des puffs : on ne traite que la zone utile
+  let minX = bw, minY = bh, maxX = 0, maxY = 0;
+  for (const p of smokePuffs) {
+    const px = p.x * scale, py = p.y * scale, pr = p.r * scale * 1.5;
+    if (px - pr < minX) minX = px - pr;
+    if (py - pr < minY) minY = py - pr;
+    if (px + pr > maxX) maxX = px + pr;
+    if (py + pr > maxY) maxY = py + pr;
+  }
+  minX = Math.max(0, Math.floor(minX));
+  minY = Math.max(0, Math.floor(minY));
+  maxX = Math.min(bw, Math.ceil(maxX));
+  maxY = Math.min(bh, Math.ceil(maxY));
+  const dw = maxX - minX, dh = maxY - minY;
+  if (dw <= 0 || dh <= 0) return;
+
+  for (const p of smokePuffs) {
+    const decay = 1 - p.life;
+    const baseR = 180 - decay * 100;
+    const baseG = 190 - decay * 110;
+    const baseB = 210 - decay * 110;
+
+    const grad = smokeCtx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r);
+    grad.addColorStop(0, `rgba(${baseR},${baseG},${baseB},${0.45 * p.life})`);
+    grad.addColorStop(0.3, `rgba(${baseR-20},${baseG-20},${baseB-15},${0.28 * p.life})`);
+    grad.addColorStop(0.6, `rgba(${baseR-40},${baseG-40},${baseB-30},${0.12 * p.life})`);
+    grad.addColorStop(0.85, `rgba(${baseR-50},${baseG-50},${baseB-40},${0.04 * p.life})`);
+    grad.addColorStop(1, `rgba(40,55,80,0)`);
+    smokeCtx.fillStyle = grad;
+
+    smokeCtx.beginPath();
+    const seg = 16;
+    const distort = 0.15 + decay * 0.55;
+    for (let i = 0; i < seg; i++) {
+      const ang = (i / seg) * Math.PI * 2;
+      const noise =
+        Math.sin(p.seed + ang * 3 + p.age * 0.04) * distort +
+        Math.cos(p.seed * 2 + ang * 5 + p.age * 0.03) * distort * 0.6 + 1;
+      const rx = Math.cos(ang) * p.r * noise;
+      const ry = Math.sin(ang) * p.r * noise * (0.85 - decay * 0.3);
+      if (i === 0) smokeCtx.moveTo(p.x + rx, p.y + ry);
+      else smokeCtx.lineTo(p.x + rx, p.y + ry);
+    }
+    smokeCtx.closePath();
+    smokeCtx.fill();
+  }
+
+  // dithering : limité à la bounding box
+  const img = smokeCtx.getImageData(minX, minY, dw, dh);
+  const d = img.data;
+  const levels = 16;
+  for (let y = 0; y < dh; y++) {
+    const by = (y + minY) & 3;
+    for (let x = 0; x < dw; x++) {
+      const i = (y * dw + x) * 4;
+      const a = d[i + 3];
+      if (a === 0) continue;
+      const bayerVal = bayerLUT[by * 4 + ((x + minX) & 3)];
+      const lum = (d[i] + d[i + 1] + d[i + 2]) * 0.001307; // /3/255
+      const quantized = Math.floor(lum * levels + bayerVal) / levels;
+      const clamped = quantized < 0 ? 0 : (quantized > 1 ? 1 : quantized);
+      d[i]     = (clamped * 230) | 0;
+      d[i + 1] = (clamped * 235) | 0;
+      d[i + 2] = (clamped * 245 + 10) | 0;
+      const aQuant = Math.floor(a / 255 * levels + bayerVal) / levels;
+      d[i + 3] = ((aQuant < 0 ? 0 : (aQuant > 1 ? 1 : aQuant)) * 255) | 0;
+    }
+  }
+  smokeCtx.putImageData(img, minX, minY);
+
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(smokeBuf, 0, 0, bw, bh, 0, 0, W, H);
+  ctx.imageSmoothingEnabled = true;
+}
+
+// --- Granit (texture) ---
+let granitePattern = null;
+let granitePatternDark = null;
+
+function makeGranite(baseR, baseG, baseB) {
+  const size = 64;
+  const off = document.createElement('canvas');
+  off.width = off.height = size;
+  const octx = off.getContext('2d');
+  const img = octx.createImageData(size, size);
+  const d = img.data;
+  for (let i = 0; i < size * size; i++) {
+    const x = i % size, y = Math.floor(i / size);
+    const slow = Math.sin(x * 0.15) * Math.cos(y * 0.12) * 12;
+    const grain = (Math.random() * 0.7 + Math.random() * 0.3 - 0.5) * 35;
+    const fleck = Math.random() < 0.06 ? -25 : (Math.random() < 0.025 ? 18 : 0);
+    d[i*4]   = Math.max(0, Math.min(255, baseR + grain + fleck + slow));
+    d[i*4+1] = Math.max(0, Math.min(255, baseG + grain + fleck + slow));
+    d[i*4+2] = Math.max(0, Math.min(255, baseB + grain + fleck * 0.8 + slow));
+    d[i*4+3] = 255;
+  }
+  octx.putImageData(img, 0, 0);
+  return ctx.createPattern(off, 'repeat');
+}
+
+function ensureGranite() {
+  if (!granitePattern) {
+    granitePattern = makeGranite(45, 50, 60);       // rangée avant
+    granitePatternDark = makeGranite(35, 40, 50);   // rangées arrière (plus claires qu'avant)
+  }
+}
+
+// --- Cimetière ---
+const graves = [];
+const fgTrees = [];
+const fenceBars = [];
+
+function initGraveyard() {
+  graves.length = 0;
+  fgTrees.length = 0;
+  fenceBars.length = 0;
+
+  const rand = seededRand(42);
+  const styles = ['cross', 'arch', 'rect', 'broken', 'celtic', 'cross', 'arch'];
+
+  // rangée la plus lointaine (toute petite, près de l'horizon dans la brume)
+  for (let i = 0; i < 14; i++) {
+    const t = i / 13;
+    graves.push({
+      x: t * W + (rand() - 0.5) * W * 0.06,
+      y: H * 0.7 + rand() * 4,
+      w: 9 + rand() * 5,
+      h: 14 + rand() * 8,
+      tilt: (rand() - 0.5) * 0.12,
+      style: styles[Math.floor(rand() * styles.length)],
+      shade: 0.35 + rand() * 0.1,
+      row: 0
+    });
+  }
+
+  // rangée arrière intermédiaire
+  for (let i = 0; i < 11; i++) {
+    const t = (i + 0.5) / 11;
+    graves.push({
+      x: t * W + (rand() - 0.5) * W * 0.07,
+      y: H * 0.76 + rand() * 6,
+      w: 13 + rand() * 7,
+      h: 20 + rand() * 12,
+      tilt: (rand() - 0.5) * 0.16,
+      style: styles[Math.floor(rand() * styles.length)],
+      shade: 0.5 + rand() * 0.12,
+      row: 0
+    });
+  }
+
+  // rangée arrière proche
+  for (let i = 0; i < 9; i++) {
+    const t = i / 8;
+    graves.push({
+      x: t * W + (rand() - 0.5) * W * 0.08,
+      y: H * 0.81 + rand() * 6,
+      w: 16 + rand() * 8,
+      h: 26 + rand() * 14,
+      tilt: (rand() - 0.5) * 0.18,
+      style: styles[Math.floor(rand() * styles.length)],
+      shade: 0.6 + rand() * 0.15,
+      row: 0
+    });
+  }
+
+  // rangée avant
+  for (let i = 0; i < 7; i++) {
+    const t = (i + 0.5) / 7;
+    graves.push({
+      x: t * W + (rand() - 0.5) * W * 0.1,
+      y: H * 0.88 + rand() * 8,
+      w: 26 + rand() * 14,
+      h: 44 + rand() * 22,
+      tilt: (rand() - 0.5) * 0.28,
+      style: styles[Math.floor(rand() * styles.length)],
+      shade: 0.7 + rand() * 0.2,
+      row: 1
+    });
+  }
+  graves.sort((a, b) => a.y - b.y);
+
+  fgTrees.push({ x: W * 0.06, baseY: H * 0.95, h: H * 0.62, seed: 17, side: -1 });
+  fgTrees.push({ x: W * 0.95, baseY: H * 0.97, h: H * 0.5,  seed: 91, side:  1 });
+
+  const fenceY = H * 0.97;
+  const barCount = Math.floor(W / 16);
+  const r2 = seededRand(123);
+  for (let i = 0; i < barCount; i++) {
+    fenceBars.push({
+      x: (i + 0.5) * (W / barCount) + (r2() - 0.5) * 3,
+      h: 26 + r2() * 14,
+      tilt: (r2() - 0.5) * 0.12,
+      broken: r2() < 0.12,
+      missing: r2() < 0.05
+    });
+  }
+}
+
+function drawMoss(g) {
+  const r = seededRand(Math.floor(g.x * 13 + g.y * 7));
+  const patches = 4 + Math.floor(r() * 3);
+  for (let i = 0; i < patches; i++) {
+    const px = (r() - 0.5) * g.w * 0.9;
+    const py = -r() * g.h * 0.3;
+    const pr = 2 + r() * 4;
+    const greenness = 30 + r() * 25;
+    ctx.fillStyle = `rgba(${20 + r() * 15},${greenness},${15 + r() * 10},0.55)`;
+    ctx.beginPath();
+    const seg = 8;
+    for (let s = 0; s < seg; s++) {
+      const a = (s / seg) * Math.PI * 2;
+      const rr = pr * (0.7 + r() * 0.6);
+      const x = px + Math.cos(a) * rr;
+      const y = py + Math.sin(a) * rr * 0.7;
+      if (s === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
+function drawIvy(g) {
+  const r = seededRand(Math.floor(g.x * 31 + g.y * 17));
+  if (r() < 0.75) return; // seulement ~25% des tombes ont du lierre
+  const startSide = r() < 0.5 ? -1 : 1;
+  let x = startSide * g.w * 0.45;
+  let y = -2;
+  const targetY = -g.h * (0.6 + r() * 0.3);
+  const steps = 18 + Math.floor(r() * 10);
+
+  ctx.save();
+  ctx.strokeStyle = 'rgba(8,15,8,0.9)';
+  ctx.lineWidth = 1.2;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  const points = [{x, y}];
+  for (let i = 0; i < steps; i++) {
+    x += -startSide * (0.5 + r() * 1.2);
+    y -= (Math.abs(targetY - y) / (steps - i + 1)) + r() * 1.2;
+    x += Math.sin(i * 0.7) * 1.5;
+    points.push({x, y});
+    ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  for (let i = 2; i < points.length; i += 2) {
+    const p = points[i];
+    const leafSize = 2 + r() * 1.8;
+    ctx.fillStyle = `rgba(${5 + r() * 10},${15 + r() * 12},${8 + r() * 8},0.9)`;
+    ctx.beginPath();
+    ctx.ellipse(p.x - leafSize * 0.8, p.y, leafSize, leafSize * 0.6, r() * Math.PI, 0, Math.PI * 2);
+    ctx.fill();
+    if (r() < 0.6) {
+      ctx.beginPath();
+      ctx.ellipse(p.x + leafSize * 0.8, p.y, leafSize * 0.9, leafSize * 0.55, r() * Math.PI, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
+function drawGrave(g) {
+  ensureGranite();
+  ctx.save();
+  ctx.translate(g.x, g.y);
+  ctx.rotate(g.tilt);
+
+  const pattern = g.row === 0 ? granitePatternDark : granitePattern;
+  const sideShade = g.row === 0 ? '#0A0D14' : '#15181F';
+  const groundShade = '#020308';
+  const w = g.w;
+  const h = g.h;
+  const path = new Path2D();
+
+  switch (g.style) {
+    case 'cross': {
+      const tw = Math.max(3, w * 0.20);
+      const ah = h * 0.68;
+      const aw = w;
+      path.moveTo(-tw/2, 0);
+      path.lineTo(-tw/2, -ah + tw/2);
+      path.lineTo(-aw/2, -ah + tw/2);
+      path.lineTo(-aw/2, -ah - tw/2);
+      path.lineTo(-tw/2, -ah - tw/2);
+      path.lineTo(-tw/2, -h);
+      path.lineTo(tw/2, -h);
+      path.lineTo(tw/2, -ah - tw/2);
+      path.lineTo(aw/2, -ah - tw/2);
+      path.lineTo(aw/2, -ah + tw/2);
+      path.lineTo(tw/2, -ah + tw/2);
+      path.lineTo(tw/2, 0);
+      path.closePath();
+      break;
+    }
+    case 'arch': {
+      path.moveTo(-w/2, 0);
+      path.lineTo(-w/2, -h * 0.65);
+      path.bezierCurveTo(-w/2, -h * 0.95, w/2, -h * 0.95, w/2, -h * 0.65);
+      path.lineTo(w/2, 0);
+      path.closePath();
+      break;
+    }
+    case 'rect': {
+      path.moveTo(-w/2, 0);
+      path.lineTo(-w/2, -h * 0.92);
+      path.quadraticCurveTo(-w/2, -h, -w/2 + 4, -h);
+      path.lineTo(w/2 - 4, -h);
+      path.quadraticCurveTo(w/2, -h, w/2, -h * 0.92);
+      path.lineTo(w/2, 0);
+      path.closePath();
+      break;
+    }
+    case 'broken': {
+      path.moveTo(-w/2, 0);
+      path.lineTo(-w/2, -h * 0.55);
+      path.lineTo(-w * 0.25, -h * 0.7);
+      path.lineTo(-w * 0.05, -h * 0.5);
+      path.lineTo(w * 0.15, -h * 0.75);
+      path.lineTo(w * 0.35, -h * 0.55);
+      path.lineTo(w/2, -h * 0.65);
+      path.lineTo(w/2, 0);
+      path.closePath();
+      break;
+    }
+    case 'celtic': {
+      const tw = Math.max(3, w * 0.20);
+      const cy = -h * 0.62;
+      const cr = w * 0.42;
+      const ah = h * 0.62;
+      path.moveTo(-tw/2, 0);
+      path.lineTo(-tw/2, -h);
+      path.lineTo(tw/2, -h);
+      path.lineTo(tw/2, 0);
+      path.closePath();
+      path.moveTo(-w/2, -ah - tw/2);
+      path.lineTo(w/2, -ah - tw/2);
+      path.lineTo(w/2, -ah + tw/2);
+      path.lineTo(-w/2, -ah + tw/2);
+      path.closePath();
+      path.moveTo(cr, cy);
+      path.arc(0, cy, cr, 0, Math.PI * 2);
+      path.moveTo(cr - tw * 0.6, cy);
+      path.arc(0, cy, cr - tw * 0.6, 0, Math.PI * 2, true);
+      break;
+    }
+  }
+
+  // tranche latérale
+  ctx.save();
+  ctx.translate(2, 1);
+  ctx.fillStyle = sideShade;
+  ctx.fill(path, 'evenodd');
+  ctx.restore();
+
+  // face granit
+  ctx.fillStyle = pattern;
+  ctx.fill(path, 'evenodd');
+
+  // érosion + assombrissement du pied
+  ctx.save();
+  ctx.clip(path, 'evenodd');
+  const er = seededRand(Math.floor(g.x * 11 + g.y));
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  for (let i = 0; i < 8; i++) {
+    const ex = (er() - 0.5) * w * 1.2;
+    const ey = -er() * h;
+    ctx.beginPath();
+    ctx.arc(ex, ey, 2 + er() * 5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  const footGrad = ctx.createLinearGradient(0, -h * 0.3, 0, 4);
+  footGrad.addColorStop(0, 'rgba(0,0,0,0)');
+  footGrad.addColorStop(1, 'rgba(0,0,0,0.7)');
+  ctx.fillStyle = footGrad;
+  ctx.fillRect(-w, -h, w * 2, h + 6);
+  // bord inférieur grignoté par l'herbe (clippé à la silhouette)
+  const gr = seededRand(Math.floor(g.x * 23 + g.y * 5));
+  ctx.fillStyle = groundShade;
+  const teeth = Math.floor(w / 2) + 4;
+  ctx.beginPath();
+  ctx.moveTo(-w, 6);
+  for (let i = 0; i <= teeth; i++) {
+    const t = i / teeth;
+    const x = -w + t * w * 2;
+    const depth = -1 - gr() * 5;
+    const peak = -2 - gr() * 4;
+    ctx.lineTo(x - 0.5, depth);
+    ctx.lineTo(x, peak);
+    ctx.lineTo(x + 0.5, depth);
+  }
+  ctx.lineTo(w, 6);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+
+  // tas de terre devant
+  ctx.fillStyle = groundShade;
+  ctx.beginPath();
+  ctx.ellipse(0, 2, w * 0.6, 2.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  drawMoss(g);
+  drawIvy(g);
+
+  ctx.restore();
+}
+
+function drawDeadTree(t) {
+  ctx.save();
+  ctx.fillStyle = '#000';
+  ctx.strokeStyle = '#000';
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  const rand = seededRand(t.seed);
+
+  function branch(x1, y1, ang, len, depth, width) {
+    if (depth === 0 || len < 4) return;
+    const bend = (rand() - 0.5) * 0.4;
+    const x2 = x1 + Math.cos(ang) * len;
+    const y2 = y1 + Math.sin(ang) * len;
+    const cx = (x1 + x2) / 2 + Math.cos(ang + Math.PI / 2) * len * bend;
+    const cy = (y1 + y2) / 2 + Math.sin(ang + Math.PI / 2) * len * bend;
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.quadraticCurveTo(cx, cy, x2, y2);
+    ctx.stroke();
+    const splits = depth > 4 ? 2 : (rand() < 0.4 ? 3 : 2);
+    for (let i = 0; i < splits; i++) {
+      const spread = 0.55 + rand() * 0.35;
+      const offset = (i - (splits - 1) / 2) * spread;
+      const newAng = ang * 0.4 + (-Math.PI / 2) * 0.6 + offset;
+      const newLen = len * (0.65 + rand() * 0.15);
+      branch(x2, y2, newAng, newLen, depth - 1, Math.max(0.6, width * 0.68));
+    }
+  }
+  const baseAng = -Math.PI / 2 + t.side * 0.08;
+  branch(t.x, t.baseY, baseAng, t.h * 0.4, 7, 7);
+  ctx.restore();
+}
+
+function drawFence() {
+  const fenceY = H;
+  const topY = fenceY - 32;
+  ctx.save();
+  ctx.fillStyle = '#000';
+  ctx.strokeStyle = '#000';
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  // --- Portail central avec arc ornementé ---
+  const gateW = Math.min(W * 0.18, 140);
+  const gateCx = W * 0.5;
+  const gateLeft = gateCx - gateW / 2;
+  const gateRight = gateCx + gateW / 2;
+  const gateBottom = H + 10; // descend sous le canvas
+  const archHeight = 35;
+
+  // 2 piliers du portail (épais, solides) — vont jusqu'en bas du canvas
+  const pillarW = 7;
+  const pillarTop = fenceY - 70;
+  // pilier gauche
+  ctx.fillRect(gateLeft - pillarW, pillarTop, pillarW, gateBottom - pillarTop);
+  // chapiteau gauche
+  ctx.fillRect(gateLeft - pillarW - 2, pillarTop - 2, pillarW + 4, 4);
+  ctx.fillRect(gateLeft - pillarW - 4, pillarTop - 6, pillarW + 8, 3);
+  // pilier droit
+  ctx.fillRect(gateRight, pillarTop, pillarW, gateBottom - pillarTop);
+  ctx.fillRect(gateRight - 2, pillarTop - 2, pillarW + 4, 4);
+  ctx.fillRect(gateRight - 4, pillarTop - 6, pillarW + 8, 3);
+
+  // arc ornemental au-dessus du portail
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(gateLeft - pillarW, pillarTop - 6);
+  ctx.bezierCurveTo(
+    gateLeft - 4, pillarTop - 6 - archHeight,
+    gateRight + 4, pillarTop - 6 - archHeight,
+    gateRight + pillarW, pillarTop - 6
+  );
+  ctx.stroke();
+
+  // arc intérieur (double)
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(gateLeft, pillarTop);
+  ctx.bezierCurveTo(
+    gateLeft + 4, pillarTop - archHeight * 0.85,
+    gateRight - 4, pillarTop - archHeight * 0.85,
+    gateRight, pillarTop
+  );
+  ctx.stroke();
+
+  // entrelacs entre les deux arcs (fleurons)
+  const entrelacs = 7;
+  for (let i = 1; i < entrelacs; i++) {
+    const t = i / entrelacs;
+    const ang = Math.PI + Math.PI * t;
+    const ax = gateCx + Math.cos(ang) * (gateW / 2 + pillarW / 2);
+    const ay = pillarTop - 6 + Math.sin(ang) * archHeight * 0.95;
+    const bx = gateCx + Math.cos(ang) * (gateW / 2 - 2);
+    const by = pillarTop + Math.sin(ang) * archHeight * 0.8;
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(bx, by);
+    ctx.stroke();
+    if (i === Math.floor(entrelacs / 2)) {
+      const mx = (ax + bx) / 2;
+      const my = (ay + by) / 2;
+      ctx.beginPath();
+      ctx.moveTo(mx, my - 3);
+      ctx.lineTo(mx + 2, my);
+      ctx.lineTo(mx, my + 3);
+      ctx.lineTo(mx - 2, my);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
+  // fleurons décoratifs sur les chapiteaux des piliers
+  for (const px of [gateLeft - pillarW / 2, gateRight + pillarW / 2]) {
+    const fy = pillarTop - 10;
+    ctx.beginPath();
+    ctx.moveTo(px - 2, fy);
+    ctx.lineTo(px, fy - 6);
+    ctx.lineTo(px + 2, fy);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // --- Battants du portail FERMÉS, alignés verticalement ---
+  ctx.lineWidth = 1.5;
+  const gateBaseY = H + 10; // descend sous le canvas
+  const gateInnerTop = pillarTop;
+  const battantW = (gateW - 4) / 2;
+
+  // battant gauche
+  const lLeft = gateLeft + 1;
+  const lRight = gateLeft + 1 + battantW;
+  // cadre du battant
+  ctx.fillRect(lLeft, gateInnerTop, 2, gateBaseY - gateInnerTop);
+  ctx.fillRect(lRight - 2, gateInnerTop, 2, gateBaseY - gateInnerTop);
+  ctx.fillRect(lLeft, gateBaseY - 2, battantW, 2);
+  ctx.fillRect(lLeft, gateInnerTop, battantW, 2);
+  // barreaux verticaux avec pointes
+  const barsPerSide = 5;
+  for (let i = 1; i < barsPerSide; i++) {
+    const bx = lLeft + (battantW * i) / barsPerSide;
+    ctx.fillRect(bx - 0.8, gateInnerTop, 1.6, gateBaseY - gateInnerTop + 4);
+    // pointe
+    ctx.beginPath();
+    ctx.moveTo(bx - 2, gateInnerTop);
+    ctx.lineTo(bx, gateInnerTop - 5);
+    ctx.lineTo(bx + 2, gateInnerTop);
+    ctx.closePath();
+    ctx.fill();
+  }
+  // ornement central : volute décorative
+  const lCx = (lLeft + lRight) / 2;
+  const ornY = gateInnerTop + (gateBaseY - gateInnerTop) * 0.45;
+  ctx.beginPath();
+  ctx.arc(lCx, ornY, 6, 0, Math.PI * 2);
+  ctx.stroke();
+  // anneau (poignée) côté intérieur
+  ctx.beginPath();
+  ctx.arc(lRight - 5, ornY + 8, 3, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // battant droit (miroir)
+  const rLeft = gateRight - 1 - battantW;
+  const rRight = gateRight - 1;
+  ctx.fillRect(rLeft, gateInnerTop, 2, gateBaseY - gateInnerTop);
+  ctx.fillRect(rRight - 2, gateInnerTop, 2, gateBaseY - gateInnerTop);
+  ctx.fillRect(rLeft, gateBaseY - 2, battantW, 2);
+  ctx.fillRect(rLeft, gateInnerTop, battantW, 2);
+  for (let i = 1; i < barsPerSide; i++) {
+    const bx = rLeft + (battantW * i) / barsPerSide;
+    ctx.fillRect(bx - 0.8, gateInnerTop, 1.6, gateBaseY - gateInnerTop + 4);
+    ctx.beginPath();
+    ctx.moveTo(bx - 2, gateInnerTop);
+    ctx.lineTo(bx, gateInnerTop - 5);
+    ctx.lineTo(bx + 2, gateInnerTop);
+    ctx.closePath();
+    ctx.fill();
+  }
+  const rCx = (rLeft + rRight) / 2;
+  ctx.beginPath();
+  ctx.arc(rCx, ornY, 6, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(rLeft + 5, ornY + 8, 3, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // serrure / verrou central où les deux battants se rencontrent
+  ctx.fillRect(gateCx - 2, ornY + 6, 4, 6);
+
+  // --- Grille horizontale (rails haut et bas) ---
+  ctx.fillRect(0, fenceY - 3, gateLeft - pillarW, 2);
+  ctx.fillRect(gateRight + pillarW, fenceY - 3, W - (gateRight + pillarW) - 1, 2);
+  ctx.fillRect(0, fenceY - 35, gateLeft - pillarW, 2);
+  ctx.fillRect(gateRight + pillarW, fenceY - 35, W - (gateRight + pillarW) - 1, 2);
+
+  // --- Barreaux verticaux avec pointes en lance ---
+  for (const b of fenceBars) {
+    if (b.missing) continue;
+    // ne dessine pas les barreaux dans la zone du portail
+    if (b.x > gateLeft - pillarW - 4 && b.x < gateRight + pillarW + 4) continue;
+
+    ctx.save();
+    ctx.translate(b.x, fenceY);
+    ctx.rotate(b.tilt);
+
+    if (b.broken) {
+      // moitié basse seulement, le sommet est cassé
+      ctx.fillRect(-1.3, -b.h * 0.4, 2.6, b.h * 0.4 + 6);
+    } else {
+      // tige
+      ctx.fillRect(-1.3, -b.h, 2.6, b.h + 6);
+
+      // pointe en fer de lance (forme allongée, pas un simple triangle)
+      const pH = 8;
+      ctx.beginPath();
+      ctx.moveTo(-2.8, -b.h);
+      ctx.lineTo(0, -b.h - pH);
+      ctx.lineTo(2.8, -b.h);
+      ctx.closePath();
+      ctx.fill();
+
+      // bague décorative juste sous la pointe
+      ctx.fillRect(-2.5, -b.h + 1, 5, 2);
+
+      // boule décorative au tiers supérieur (variante esthétique)
+      if ((b.x | 0) % 4 === 0) {
+        ctx.beginPath();
+        ctx.arc(0, -b.h * 0.55, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+
+  // ornements en S entre certains barreaux (volutes décoratives sur le rail haut)
+  ctx.lineWidth = 1.2;
+  for (let x = 20; x < W; x += 60) {
+    if (x > gateLeft - pillarW - 20 && x < gateRight + pillarW + 20) continue;
+    ctx.beginPath();
+    ctx.moveTo(x, fenceY - 35);
+    ctx.bezierCurveTo(
+      x + 8, fenceY - 30,
+      x + 12, fenceY - 18,
+      x + 20, fenceY - 22
+    );
+    ctx.bezierCurveTo(
+      x + 28, fenceY - 25,
+      x + 32, fenceY - 32,
+      x + 40, fenceY - 35
+    );
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+function drawGraveyard() {
+  const mist = ctx.createLinearGradient(0, H * 0.55, 0, H * 0.85);
+  mist.addColorStop(0, 'rgba(15,25,45,0)');
+  mist.addColorStop(0.6, 'rgba(20,30,50,0.35)');
+  mist.addColorStop(1, 'rgba(10,15,28,0.7)');
+  ctx.fillStyle = mist;
+  ctx.fillRect(0, H * 0.55, W, H * 0.35);
+
+  ctx.fillStyle = '#04060B';
+  ctx.beginPath();
+  ctx.moveTo(0, H * 0.68);
+  for (let x = 0; x <= W; x += 10) {
+    const y = H * 0.68 + Math.sin(x * 0.011) * 5 + Math.sin(x * 0.045 + 1.5) * 2;
+    ctx.lineTo(x, y);
+  }
+  ctx.lineTo(W, H);
+  ctx.lineTo(0, H);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = '#020308';
+  ctx.beginPath();
+  ctx.moveTo(0, H * 0.88);
+  for (let x = 0; x <= W; x += 10) {
+    const y = H * 0.88 + Math.sin(x * 0.02 + 0.7) * 3;
+    ctx.lineTo(x, y);
+  }
+  ctx.lineTo(W, H);
+  ctx.lineTo(0, H);
+  ctx.closePath();
+  ctx.fill();
+
+  for (const g of graves) drawGrave(g);
+  for (const t of fgTrees) drawDeadTree(t);
+  drawFence();
+}
+
+// --- Sol mis en cache (derrière le train) ---
+let groundBuf = null;
+function buildGround() {
+  const dpr = window.devicePixelRatio || 1;
+  groundBuf = document.createElement('canvas');
+  groundBuf.width = W * dpr;
+  groundBuf.height = H * dpr;
+  const gctx = groundBuf.getContext('2d');
+  gctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const realCtx2 = ctx;
+  ctx = gctx;
+  drawGround();
+  ctx = realCtx2;
+}
+
+// --- Cimetière mis en cache (devant le train) ---
+let graveyardBuf = null;
+function buildGraveyardCache() {
+  const dpr = window.devicePixelRatio || 1;
+  graveyardBuf = document.createElement('canvas');
+  graveyardBuf.width = W * dpr;
+  graveyardBuf.height = H * dpr;
+  const gctx = graveyardBuf.getContext('2d');
+  gctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const realCtx2 = ctx;
+  ctx = gctx;
+  drawGraveyard();
+  ctx = realCtx2;
+}
+
+// --- Vignettage en cache (statique) ---
+let vignetteBuf = null;
+function buildVignette() {
+  const dpr = window.devicePixelRatio || 1;
+  vignetteBuf = document.createElement('canvas');
+  vignetteBuf.width = W * dpr;
+  vignetteBuf.height = H * dpr;
+  const vc = vignetteBuf.getContext('2d');
+  vc.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const grad = vc.createRadialGradient(W/2, H/2, H*0.3, W/2, H/2, H*0.85);
+  grad.addColorStop(0, 'rgba(0,0,0,0)');
+  grad.addColorStop(1, 'rgba(0,0,0,0.45)');
+  vc.fillStyle = grad;
+  vc.fillRect(0, 0, W, H);
+}
+
+// --- Vent global (souffle la neige et influence la fumée) ---
+let windTime = 0;
+function getWind() {
+  // souffle lent qui varie sur ~30 secondes
+  return Math.sin(windTime * 0.0003) * 0.6 + Math.sin(windTime * 0.0011) * 0.25;
+}
+
+// --- Neige ---
+const flakes = [];
+function initFlakes() {
+  flakes.length = 0;
+  for (let i = 0; i < 80; i++) {
+    flakes.push({
+      x: Math.random() * W,
+      y: Math.random() * H,
+      r: 0.8 + Math.random() * 1.8,
+      vy: 0.3 + Math.random() * 0.8,
+      vx: -0.2 - Math.random() * 0.4,
+      a: 0.4 + Math.random() * 0.5
+    });
+  }
+}
+initFlakes();
+
+function updateFlakes() {
+  const wind = getWind();
+  for (const f of flakes) {
+    f.x += f.vx + wind;
+    f.y += f.vy;
+    if (f.y > H) { f.y = -5; f.x = Math.random() * W; }
+    if (f.x < -5) f.x = W + 5;
+    if (f.x > W + 5) f.x = -5;
+  }
+}
+
+function drawFlakes() {
+  for (const f of flakes) {
+    ctx.fillStyle = `rgba(220,230,245,${f.a * 0.85})`;
+    ctx.beginPath();
+    ctx.arc(f.x, f.y, f.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// --- Vapeur des tombes (déclenchée pendant le passage du train) ---
+const graveMists = [];
+
+function spawnGraveMist() {
+  // bouffée subtile de vapeur froide qui rampe au sol entre les tombes
+  const candidates = graves.filter(g => g.row === 1);
+  const g = candidates[Math.floor(Math.random() * candidates.length)];
+  if (!g) return;
+  graveMists.push({
+    x: g.x + (Math.random() - 0.5) * g.w * 0.8,
+    y: g.y + 2,
+    r: 8 + Math.random() * 6,
+    vx: (Math.random() - 0.5) * 0.15,
+    vy: -0.05 - Math.random() * 0.08, // monte très lentement
+    life: 1,
+    decay: 0.0025 + Math.random() * 0.001,
+    grow: 0.4 + Math.random() * 0.3,
+    seed: Math.random() * 1000,
+    age: 0
+  });
+}
+
+function updateGraveMist() {
+  for (let i = graveMists.length - 1; i >= 0; i--) {
+    const m = graveMists[i];
+    m.age++;
+    m.x += m.vx;
+    m.y += m.vy;
+    m.vy *= 0.995;
+    m.vx += Math.sin(m.age * 0.03 + m.seed) * 0.008;
+    m.r += m.grow;
+    m.grow *= 0.985;
+    m.life -= m.decay;
+    if (m.life <= 0) graveMists.splice(i, 1);
+  }
+}
+
+function drawGraveMist() {
+  for (const m of graveMists) {
+    const grad = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, m.r);
+    // brume très diaphane, blanc-bleuté froid
+    const alpha = 0.12 * m.life;
+    grad.addColorStop(0, `rgba(200,215,230,${alpha})`);
+    grad.addColorStop(0.4, `rgba(170,190,210,${alpha * 0.6})`);
+    grad.addColorStop(0.75, `rgba(140,160,185,${alpha * 0.2})`);
+    grad.addColorStop(1, `rgba(100,120,150,0)`);
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    const seg = 16;
+    for (let i = 0; i < seg; i++) {
+      const ang = (i / seg) * Math.PI * 2;
+      // forme étirée horizontalement (comme une nappe basse)
+      const noise = 1 + Math.sin(m.seed + ang * 2 + m.age * 0.02) * 0.3 +
+                       Math.cos(m.seed * 2 + ang * 4) * 0.15;
+      const rx = Math.cos(ang) * m.r * noise * 1.3;
+      const ry = Math.sin(ang) * m.r * noise * 0.5;
+      if (i === 0) ctx.moveTo(m.x + rx, m.y + ry);
+      else ctx.lineTo(m.x + rx, m.y + ry);
+    }
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
+// --- Feu follet ---
+const willOWisp = {
+  x: 0,
+  y: 0,
+  targetX: 0,
+  targetY: 0,
+  flickerPhase: 0,
+  driftPhase: 0,
+  age: 0,
+  active: false,
+  fade: 0,
+  initialized: false
+};
+
+function initWillOWisp() {
+  const candidates = graves.filter(g => g.row === 1);
+  const g = candidates[Math.floor(Math.random() * candidates.length)];
+  willOWisp.x = g ? g.x : W * 0.3;
+  willOWisp.y = g ? g.y - 10 : H * 0.85;
+  willOWisp.targetX = willOWisp.x;
+  willOWisp.targetY = willOWisp.y;
+  willOWisp.flickerPhase = Math.random() * Math.PI * 2;
+  willOWisp.driftPhase = Math.random() * Math.PI * 2;
+  willOWisp.initialized = true;
+}
+
+function updateWillOWisp(trainPresent) {
+  if (!willOWisp.initialized) initWillOWisp();
+
+  // apparaît seulement quand le train passe — fade in/out doux
+  if (trainPresent) {
+    willOWisp.active = true;
+    willOWisp.fade = Math.min(1, willOWisp.fade + 0.015);
+  } else {
+    willOWisp.fade = Math.max(0, willOWisp.fade - 0.02);
+    if (willOWisp.fade <= 0) {
+      willOWisp.active = false;
+      // reposition pour la prochaine apparition
+      const candidates = graves.filter(g => g.row === 1);
+      const g = candidates[Math.floor(Math.random() * candidates.length)];
+      if (g) {
+        willOWisp.x = g.x;
+        willOWisp.y = g.y - 10;
+      }
+    }
+  }
+
+  if (!willOWisp.active) return;
+
+  willOWisp.age++;
+  willOWisp.flickerPhase += 0.08;
+  willOWisp.driftPhase += 0.012;
+
+  if (willOWisp.age % 180 === 0 || Math.hypot(willOWisp.x - willOWisp.targetX, willOWisp.y - willOWisp.targetY) < 5) {
+    const candidates = graves.filter(g => g.row === 1);
+    const g = candidates[Math.floor(Math.random() * candidates.length)];
+    if (g) {
+      willOWisp.targetX = g.x + (Math.random() - 0.5) * g.w * 1.5;
+      willOWisp.targetY = g.y - 8 - Math.random() * 25;
+    }
+  }
+
+  const dx = willOWisp.targetX - willOWisp.x;
+  const dy = willOWisp.targetY - willOWisp.y;
+  willOWisp.x += dx * 0.008 + Math.sin(willOWisp.driftPhase) * 0.4;
+  willOWisp.y += dy * 0.008 + Math.cos(willOWisp.driftPhase * 1.3) * 0.3;
+}
+
+function drawWillOWisp() {
+  if (!willOWisp.initialized || !willOWisp.active) return;
+  // intensité pulsante (clignote comme une flamme), avec fade in/out
+  const fade = Math.min(willOWisp.fade, 1);
+  const flicker = (0.6 + Math.sin(willOWisp.flickerPhase) * 0.2 +
+                  Math.sin(willOWisp.flickerPhase * 2.7) * 0.15 +
+                  Math.sin(willOWisp.flickerPhase * 5.1) * 0.1 +
+                  Math.sin(willOWisp.flickerPhase * 11.3) * 0.08) * fade;
+  const baseR = 5;
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+
+  // halo extérieur très large, blanc-bleu cadavérique (plus inquiétant que vert vif)
+  const halo = ctx.createRadialGradient(willOWisp.x, willOWisp.y, 0, willOWisp.x, willOWisp.y, baseR * 9);
+  halo.addColorStop(0, `rgba(180,220,200,${0.2 * flicker})`);
+  halo.addColorStop(0.3, `rgba(100,160,150,${0.09 * flicker})`);
+  halo.addColorStop(0.7, `rgba(50,90,90,${0.03 * flicker})`);
+  halo.addColorStop(1, 'rgba(20,40,50,0)');
+  ctx.fillStyle = halo;
+  ctx.beginPath();
+  ctx.arc(willOWisp.x, willOWisp.y, baseR * 9, 0, Math.PI * 2);
+  ctx.fill();
+
+  // halo médian, vert-bleuté froid
+  const mid = ctx.createRadialGradient(willOWisp.x, willOWisp.y, 0, willOWisp.x, willOWisp.y, baseR * 3.5);
+  mid.addColorStop(0, `rgba(200,240,220,${0.5 * flicker})`);
+  mid.addColorStop(0.5, `rgba(120,200,180,${0.22 * flicker})`);
+  mid.addColorStop(1, 'rgba(40,100,90,0)');
+  ctx.fillStyle = mid;
+  ctx.beginPath();
+  ctx.arc(willOWisp.x, willOWisp.y, baseR * 3.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // cœur lumineux blanc froid
+  const core = ctx.createRadialGradient(willOWisp.x, willOWisp.y, 0, willOWisp.x, willOWisp.y, baseR);
+  core.addColorStop(0, `rgba(230,250,240,${flicker})`);
+  core.addColorStop(0.5, `rgba(170,220,200,${0.7 * flicker})`);
+  core.addColorStop(1, 'rgba(80,160,150,0)');
+  ctx.fillStyle = core;
+  ctx.beginPath();
+  ctx.arc(willOWisp.x, willOWisp.y, baseR, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+// --- Chauve-souris ---
+let bat = null;
+
+function spawnBat() {
+  const g = graves[Math.floor(Math.random() * graves.length)];
+  const startX = g.x;
+  const startY = g.y - g.h * 0.5;
+  // cible : loin vers l'horizon, au-dessus du train (point de fuite)
+  const endX = W * 0.5 + (Math.random() - 0.5) * W * 0.3;
+  const endY = horizonY * 0.4; // haut dans le ciel, près de l'horizon
+
+  const path = [{ x: startX, y: startY }];
+  const ctrlCount = 5;
+  for (let i = 1; i <= ctrlCount; i++) {
+    const t = i / (ctrlCount + 1);
+    const baseX = startX + (endX - startX) * t;
+    const baseY = startY + (endY - startY) * t;
+    const dev = 60 * (1 - t);
+    const sign = i % 2 === 0 ? 1 : -1;
+    path.push({
+      x: baseX + sign * (40 + Math.random() * dev),
+      y: baseY - Math.random() * 20
+    });
+  }
+  path.push({ x: endX, y: endY });
+
+  bat = {
+    path,
+    t: 0,
+    speed: 1 / (60 * 6), // 6 secondes pour s'éloigner
+    age: 0,
+    flapPhase: 0,
+    angle: 0
+  };
+}
+
+function catmullRom(p0, p1, p2, p3, t) {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  return {
+    x: 0.5 * ((2 * p1.x) +
+              (-p0.x + p2.x) * t +
+              (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 +
+              (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3),
+    y: 0.5 * ((2 * p1.y) +
+              (-p0.y + p2.y) * t +
+              (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 +
+              (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3)
+  };
+}
+
+function batPositionAt(u) {
+  const path = bat.path;
+  // map u ∈ [0,1] sur les segments de la spline
+  const segments = path.length - 1;
+  const seg = Math.min(Math.floor(u * segments), segments - 1);
+  const localT = u * segments - seg;
+  const p0 = path[Math.max(0, seg - 1)];
+  const p1 = path[seg];
+  const p2 = path[seg + 1];
+  const p3 = path[Math.min(path.length - 1, seg + 2)];
+  return catmullRom(p0, p1, p2, p3, localT);
+}
+
+function drawBat() {
+  if (!bat) return;
+  const pos = batPositionAt(bat.t);
+  ctx.save();
+  ctx.translate(pos.x, pos.y);
+  ctx.rotate(bat.angle);
+
+  // taille décroît à mesure qu'elle s'éloigne (perspective)
+  // 0..0.2 : grossit (sort de l'ombre), 0.2..1 : rétrécit jusqu'à disparaître
+  let size;
+  let alpha;
+  if (bat.t < 0.2) {
+    const k = bat.t / 0.2;
+    size = 5 + k * 8;
+    alpha = k;
+  } else {
+    const k = (bat.t - 0.2) / 0.8;
+    size = 13 * (1 - k * 0.92); // rétrécit jusqu'à ~1px
+    alpha = 1 - k * k; // s'estompe doucement (carré pour fade plus vers la fin)
+  }
+
+  ctx.globalAlpha = alpha;
+
+  const flap = Math.sin(bat.flapPhase);
+  const wingLift = flap * 0.6 + 0.1;
+  const span = size * 1.3;
+  const wingY = -wingLift * size * 0.4;
+
+  ctx.fillStyle = '#000';
+
+  ctx.beginPath();
+  ctx.ellipse(0, 0, size * 0.13, size * 0.32, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(-size * 0.05, -size * 0.25);
+  ctx.quadraticCurveTo(-size * 0.4, wingY - size * 0.1, -span, wingY);
+  ctx.quadraticCurveTo(-span * 0.78, wingY + size * 0.18, -span * 0.62, wingY + size * 0.05);
+  ctx.quadraticCurveTo(-span * 0.55, wingY + size * 0.28, -span * 0.42, wingY + size * 0.12);
+  ctx.quadraticCurveTo(-span * 0.32, wingY + size * 0.32, -span * 0.22, wingY + size * 0.18);
+  ctx.quadraticCurveTo(-span * 0.12, wingY + size * 0.32, 0, size * 0.18);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(size * 0.05, -size * 0.25);
+  ctx.quadraticCurveTo(size * 0.4, wingY - size * 0.1, span, wingY);
+  ctx.quadraticCurveTo(span * 0.78, wingY + size * 0.18, span * 0.62, wingY + size * 0.05);
+  ctx.quadraticCurveTo(span * 0.55, wingY + size * 0.28, span * 0.42, wingY + size * 0.12);
+  ctx.quadraticCurveTo(span * 0.32, wingY + size * 0.32, span * 0.22, wingY + size * 0.18);
+  ctx.quadraticCurveTo(span * 0.12, wingY + size * 0.32, 0, size * 0.18);
+  ctx.closePath();
+  ctx.fill();
+
+  // tête + oreilles seulement quand elle est encore assez grosse
+  if (size > 4) {
+    ctx.beginPath();
+    ctx.arc(0, -size * 0.32, size * 0.1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(-size * 0.08, -size * 0.38);
+    ctx.lineTo(-size * 0.04, -size * 0.5);
+    ctx.lineTo(0, -size * 0.4);
+    ctx.lineTo(size * 0.04, -size * 0.5);
+    ctx.lineTo(size * 0.08, -size * 0.38);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+function updateBat() {
+  if (!bat) return;
+  bat.age++;
+  bat.flapPhase += 0.35;
+  bat.t += bat.speed;
+
+  // angle = direction tangente à la spline
+  const ahead = batPositionAt(Math.min(bat.t + 0.01, 1));
+  const here = batPositionAt(bat.t);
+  // l'image du dessin est orientée comme si la chauve-souris regardait vers le haut
+  // donc on tourne pour que -PI/2 corresponde à la direction du mouvement
+  bat.angle = Math.atan2(ahead.y - here.y, ahead.x - here.x) + Math.PI / 2;
+
+  if (bat.t >= 1) {
+    bat = null;
+  }
+}
+
+// --- Init après que les fonctions sont définies ---
+initDeadTrees();
+initGraveyard();
+
+window.addEventListener('resize', () => {
+  resize();
+  initDeadTrees();
+  initGraveyard();
+  granitePattern = null;
+  granitePatternDark = null;
+  skyBuf = null;
+  vignetteBuf = null;
+  groundBuf = null;
+  graveyardBuf = null;
+});
+
+// --- Boucle ---
+let trainOffset = -W * 0.8;
+let trainVisible = true;
+let batSpawned = false;
+let mistTimer = 0;
+
+function loop() {
+  drawSky();
+
+  // sol statique en cache
+  if (!groundBuf) buildGround();
+  ctx.drawImage(groundBuf, 0, 0, W, H);
+
+  if (trainVisible) {
+    trainOffset += 4;
+
+    if (!batSpawned && trainOffset > W * 0.2 && trainOffset < W * 0.6) {
+      batSpawned = true;
+      spawnBat();
+    }
+
+    // train sorti à droite → on le cache, on attend que la fumée se dissipe
+    if (trainOffset > W * 2) {
+      trainVisible = false;
+    }
+  } else {
+    // attend que la fumée résiduelle redescende sous 25 particules
+    if (smokePuffs.length < 25) {
+      trainOffset = -W * 0.8;
+      trainVisible = true;
+      batSpawned = false;
+      bat = null;
+    }
+  }
+
+  if (trainVisible) {
+    drawTrainGlow(trainOffset);
+    const chim = drawTrain(trainOffset);
+    smokeTimer++;
+    if (smokeTimer > 1) {
+      smokeTimer = 0;
+      spawnSmoke(chim.chimneyX, chim.chimneyY);
+    }
+    // vapeur des tombes pendant le passage
+    mistTimer++;
+    if (mistTimer > 8) {
+      mistTimer = 0;
+      spawnGraveMist();
+    }
+  }
+
+  updateSmoke();
+  drawSmoke();
+
+  updateGraveMist();
+
+  updateBat();
+  drawBat();
+
+  // cimetière statique en cache
+  if (!graveyardBuf) buildGraveyardCache();
+  ctx.drawImage(graveyardBuf, 0, 0, W, H);
+
+  // vapeur des tombes par-dessus le cimetière
+  drawGraveMist();
+
+  // feu follet par-dessus le cimetière
+  updateWillOWisp(trainVisible);
+  drawWillOWisp();
+
+  updateFlakes();
+  drawFlakes();
+
+  // vignettage : assombrissement des bords (cache statique)
+  if (!vignetteBuf) buildVignette();
+  ctx.drawImage(vignetteBuf, 0, 0, W, H);
+
+  // grain léger
+  ctx.fillStyle = 'rgba(255,255,255,0.012)';
+  ctx.fillRect(0, 0, W, H);
+
+  windTime++;
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>

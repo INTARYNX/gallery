@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Genuary 2026 #20</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: #000;
+        }
+        canvas {
+            display: block;
+            width: 90vmin;
+            height: 90vmin;
+            background: #000;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas" width="1600" height="1600"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        const offscreenCanvas = document.createElement('canvas');
+        offscreenCanvas.width = 1600;
+        offscreenCanvas.height = 1600;
+        const offscreenCtx = offscreenCanvas.getContext('2d');
+        
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+
+        const imageData = {"width":64,"height":64,"levels":16,"format":"Chaque caractère hexadécimal (0-F) représente un niveau de gris","data":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeedddddeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeedddddeeeeeeeeeeeeeeee51114eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee41115eeeeeeeeeeeeeec75555579eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee97555567aeeeeeeeeeeeeb16888714eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee517888616eeeeeeeeeeeeb1688885569eeeeeeeeeeeeeeeeeeeeeeeeeeeeee96657888616eeeeeeeeeeeeb1688888616eeeeeeeeeeeeeeeeeeeeeeeeeeeeee61688888616eeeeeeeeeeeeb17bb88876416eeeeeeeeeeeeeeeeeeeeeeeeee71467888bb816eeeeeeeeeeeeb18cc88888617deeeeeedddeeeeeeeeeeeeeeee71688888cc916eeeeeeeeeeeeb19ccba77887529eeee92223333333336eeeeb3578876bccc916eeeeeeeeeeeeb19cccb77788627cccc81222222232225cccc92688877bccc916eeeeeeeeeeeeb18ccccca5788851111245885557884431111388865accccc916eeeeeeeeeeeeb18ccccca5688851112356875556884443223588865accccc916eeeeeeeeeeeeb18ccabccc96788865568887555688556865888769cccaacc916eeeeeeeeeeeeb18ccaabba86788876468887555688556876888758abbaacc916eeeeeeeeeeeeb18ccaaa967888888856888755568855688888865669aaacc916eeeeeeeeeeeeb18bbaa88778888888568887567788567888888777788aabb916eeeeeeeeeeeeb17aaa9568888888886788875688885788888888888669aaa716eeeeeeeeeeeec766a877788888888877778877888857887788888887788a6416eeeeeeeeeeeeee52a66888888888888756888888885788768888888886691116eeeeeeeeeeeeee51777888888877888756889988886787778888888887771116eeeeeeeeeeeeee51588888888876888756889988886775788888888888851116eeeeeeeeeeeeee51788888888887778777889999888875788888888888873216eeeeeeeeeeeeed52888888888888778888889999888875788888888888885316deeeeeeeeeeeb1688888888888888888889999998888888888888888888887531ceeeeeeeeeeb16888888777777688889999aa999988887777777778888887531ceeeeeeeeeeb1688888611111118889999aed999988884111111116888887531ceeeeeeeedc9268887762211111778899abedaa9988874211111226788887542aceeeeeeeb12555565139ac812211899aeeeeec998871681112269315655555521ceeeeeeb1245556513a86411156469aeeeeec9965318b111117a416765555521ceeeeeeb1244446514b711111791599eeeeec9953119d111117b417775444411ceeeeeeb1246777756b7111118915aaeeeeedba532665111118b757887776421ceeeeeeb1257888868b7111118915bbeeeeedcb533941111118b868888887521ceeeee6445788888877896111ac16ddeeeeeeeda53b98111598778888888875547eeee42568888888768c7111bd16eeeeeeeeeec74bba1117b8678888888886625eeee425666688888877899977cdeebbbbbceeedb567aaa877888888666665525eeee4255656888888768bbb76eeedaaaaaceeeec567ccc967888888656665615eeee439997666699999beeeeeeeed9aaa9beeeeeeeeeeeb99999666568887725eeee76778654446778bceeeeeeeeebaaabceeeeeeeeaaa877766446778886558eeeeeb125551111116eeeeeeeeeeeedabeeeeeeeeed1111111111188888831ceeeeeeb125664445558ddeeeeeeeeeec79eeeeeeeddd6666666665588877631ceeeeeeb12478888bbbbbcdddeeeeeeeb15eeeeeeecccccccccccccc99965421ceeeeeec76367778a9677aeddee9bee87138bed9ceddc7778888aaaa98875357deeeeeeeea156767971117eeeef37ec127416ec29eeed111233378888888519eeeeeeeeeea13555534778beeeeeb834aadca734aceeeeabb622234655567419eeeeeeeeeea13555414cdeeeeeeee913ddddd913eeeeeeeee711111444446419eeeeeeeeeeee513ccccccccceeeeeeeeeeeeeeeeeeeeeeeeedccca99992116eeeeeeeeeeeeee512ccccccccceeeeeeeeeeeeeeeeeeeeeeeeddccca99992116eeeeeeeeeeeeeecaa4446cccccddddeeeeeeeeeeeeeeeeddcccccccba33311bceeeeeeeeeeeeeeeed2114ccccccccceeeeeeeeeeeeeeeedcccccccccb11111eeeeeeeeeeeeeeeeeeeca113337ccccccccdeeeeeeeecccccccccba9853111bbeeeeeeeeeeeeeeeeeeeec111116ccccccccdeeeeeeeeccccccccca98731111deeeeeeeeeeeeeeeeeeed33458889aaaccccccccccccccccccccaaaa9997666634eeeeeeeeeeeeeeeeeed2246999aaaaccccccccccccccccccccaaa99997777713eeeeeeeeeeeeeeeeeed226778999bccccccccccccccceeeeeeccca9999977712eeeeeeeeeeeeeeeeeb934777899acddddcccccccccddeeeeeedccba9988777339beeeeeeeeeeeeeee616777999aceeeeedcccccccdeeeeeeeeeeccca9777777716eeeeeeeeeeeeeee61677799abcddeeeeddccccddeeeeeeddddcbaa9888777616eeeeeeeeeeeeeee6167779acccccdeeeeecccdeeeeeeeedcccca999999877616eeeeeeeeeeeeee854677899abccccdeeeedddeeeeeeeedccccca9988888777357deeeeeeeeeeee1477788888accccceeeeeeeeeeeeeeecccccca8888888777431ceeeeeeeeeeee14777888889abcccddeeeeeeeeeedddcccaaa98888888887541ceeeeeeeeeeee147778888888accccdeeeeeeeeeecccccc88888888888888641ceeee"};
+
+        const gridSize = imageData.width;
+        const squareSize = 1600 / gridSize;
+        let zoom = 0.5;
+        let zoomDirection = 1;
+        let rotation = 0;
+        let zoomSpeed = 0.005;
+        let rotationSpeed = 0;
+        let startTime = Date.now();
+        
+        let pathData = null;
+        
+        function parseImageData() {
+            const data = imageData.data;
+            const grid = [];
+            let idx = 0;
+            
+            for (let row = 0; row < gridSize; row++) {
+                grid[row] = [];
+                for (let col = 0; col < gridSize; col++) {
+                    const char = data[idx++];
+                    const value = parseInt(char, 16);
+                    grid[row][col] = value / 15;
+                }
+            }
+            
+            return grid;
+        }
+        
+        const grayLevels = parseImageData();
+
+        function generatePath() {
+            let lastPoint = null;
+            let path = [];
+
+            for (let row = 0; row < gridSize; row++) {
+                const rowDirection = row % 2 === 0 ? 1 : -1;
+                const startCol = rowDirection === 1 ? 0 : gridSize - 1;
+
+                for (let colStep = 0; colStep < gridSize; colStep++) {
+                    const col = startCol + colStep * rowDirection;
+                    const isHorizontal = (row + col) % 2 === 0;
+
+                    const density = grayLevels[row][col];
+                    const numLines = Math.floor(2 + density * 8);
+                    const amplitude = squareSize * (0.1 + Math.random() * 0.2);
+                    const frequency = 0.3 + Math.random() * 0.5;
+                    const phaseOffset = (row * gridSize + col) * 0.5;
+                    const step = density > 0.6 ? 1 : (density > 0.3 ? 2 : 3);
+
+                    let squareLines = [];
+
+                    if (isHorizontal) {
+                        for (let n = 0; n < numLines; n++) {
+                            const y = row * squareSize + (n + 1) * squareSize / (numLines + 1);
+                            let line = [];
+
+                            for (let x = col * squareSize; x <= (col + 1) * squareSize; x += step) {
+                                const wave = Math.sin(x * frequency + phaseOffset) * amplitude;
+                                line.push({x: x, y: y + wave});
+                            }
+
+                            squareLines.push(line);
+                        }
+                    } else {
+                        for (let n = 0; n < numLines; n++) {
+                            const x = col * squareSize + (n + 1) * squareSize / (numLines + 1);
+                            let line = [];
+
+                            for (let y = row * squareSize; y <= (row + 1) * squareSize; y += step) {
+                                const wave = Math.sin(y * frequency + phaseOffset) * amplitude;
+                                line.push({x: x + wave, y: y});
+                            }
+
+                            squareLines.push(line);
+                        }
+                    }
+
+                    if (lastPoint && squareLines.length > 0) {
+                        let bestLineIdx = 0;
+                        let bestReverse = false;
+                        let minDist = Infinity;
+
+                        for (let i = 0; i < squareLines.length; i++) {
+                            const line = squareLines[i];
+                            const distStart = Math.hypot(lastPoint.x - line[0].x, lastPoint.y - line[0].y);
+                            const distEnd = Math.hypot(lastPoint.x - line[line.length-1].x, lastPoint.y - line[line.length-1].y);
+
+                            if (distStart < minDist) {
+                                minDist = distStart;
+                                bestLineIdx = i;
+                                bestReverse = false;
+                            }
+                            if (distEnd < minDist) {
+                                minDist = distEnd;
+                                bestLineIdx = i;
+                                bestReverse = true;
+                            }
+                        }
+
+                        const firstLine = squareLines[bestLineIdx];
+                        const targetPoint = bestReverse ? firstLine[firstLine.length-1] : firstLine[0];
+                        
+                        if (minDist > 5) {
+                            const corners = [
+                                {x: col * squareSize, y: row * squareSize},
+                                {x: (col + 1) * squareSize, y: row * squareSize},
+                                {x: (col + 1) * squareSize, y: (row + 1) * squareSize},
+                                {x: col * squareSize, y: (row + 1) * squareSize}
+                            ];
+                            
+                            let closestCorner = 0;
+                            let minCornerDist = Infinity;
+                            for (let i = 0; i < corners.length; i++) {
+                                const d = Math.hypot(lastPoint.x - corners[i].x, lastPoint.y - corners[i].y);
+                                if (d < minCornerDist) {
+                                    minCornerDist = d;
+                                    closestCorner = i;
+                                }
+                            }
+                            
+                            path.push(corners[closestCorner]);
+                            
+                            let targetCorner = 0;
+                            minCornerDist = Infinity;
+                            for (let i = 0; i < corners.length; i++) {
+                                const d = Math.hypot(targetPoint.x - corners[i].x, targetPoint.y - corners[i].y);
+                                if (d < minCornerDist) {
+                                    minCornerDist = d;
+                                    targetCorner = i;
+                                }
+                            }
+                            
+                            if (closestCorner !== targetCorner) {
+                                path.push(corners[targetCorner]);
+                            }
+                            path.push(targetPoint);
+                        }
+
+                        const firstL = squareLines.splice(bestLineIdx, 1)[0];
+                        if (bestReverse) firstL.reverse();
+                        
+                        for (let p of firstL) {
+                            path.push(p);
+                        }
+                        lastPoint = firstL[firstL.length - 1];
+
+                        while (squareLines.length > 0) {
+                            let closestIdx = 0;
+                            let closestReverse = false;
+                            let minD = Infinity;
+
+                            for (let i = 0; i < squareLines.length; i++) {
+                                const line = squareLines[i];
+                                const d1 = Math.hypot(lastPoint.x - line[0].x, lastPoint.y - line[0].y);
+                                const d2 = Math.hypot(lastPoint.x - line[line.length-1].x, lastPoint.y - line[line.length-1].y);
+
+                                if (d1 < minD) {
+                                    minD = d1;
+                                    closestIdx = i;
+                                    closestReverse = false;
+                                }
+                                if (d2 < minD) {
+                                    minD = d2;
+                                    closestIdx = i;
+                                    closestReverse = true;
+                                }
+                            }
+
+                            const nextLine = squareLines.splice(closestIdx, 1)[0];
+                            if (closestReverse) nextLine.reverse();
+
+                            for (let p of nextLine) {
+                                path.push(p);
+                            }
+                            lastPoint = nextLine[nextLine.length - 1];
+                        }
+                    } else if (squareLines.length > 0) {
+                        for (let line of squareLines) {
+                            for (let p of line) {
+                                path.push(p);
+                                lastPoint = p;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            return path;
+        }
+
+        function drawPath() {
+            requestAnimationFrame(drawPath);
+            
+            ctx.save();
+            ctx.clearRect(0, 0, 1600, 1600);
+            
+            ctx.translate(800, 800);
+            ctx.rotate(rotation);
+            ctx.scale(zoom, zoom);
+            ctx.translate(-800, -800);
+            
+            ctx.drawImage(offscreenCanvas, 0, 0);
+            
+            ctx.restore();
+            
+            const elapsed = (Date.now() - startTime) / 1000;
+            
+            zoom += zoomSpeed * zoomDirection;
+            
+            if (zoom >= 4) {
+                zoomDirection = -1;
+            }
+            if (zoom <= 0.5) {
+                zoomDirection = 1;
+            }
+            
+            if (elapsed > 10) {
+                rotation += 0.003;
+            }
+        }
+
+        pathData = generatePath();
+        
+        offscreenCtx.strokeStyle = '#fff';
+        offscreenCtx.lineWidth = 1;
+        offscreenCtx.globalAlpha = 0.8;
+        offscreenCtx.beginPath();
+        
+        if (pathData.length > 0) {
+            offscreenCtx.moveTo(pathData[0].x, pathData[0].y);
+            for (let i = 1; i < pathData.length; i++) {
+                offscreenCtx.lineTo(pathData[i].x, pathData[i].y);
+            }
+        }
+        
+        offscreenCtx.stroke();
+        
+        drawPath();
+    </script>
+</body>
+</html>

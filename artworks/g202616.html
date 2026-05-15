@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Genuary 2026 #16</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #1a1a1a;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        canvas {
+            border: 1px solid #333;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        canvas.width = 800;
+        canvas.height = 600;
+        
+        const rows = 20;
+        const cols = 25;
+        const spacingX = 15;
+        const spacingY = 12;
+        const dotRadius = 3;
+        const speed = 2;
+        const avoidRadius = 25;
+        const tirednessGain = 0.012;
+        const tirednessLoss = 0.011;
+        const maxTiredness = 0.85;
+        const driftMultiplier = 2.5;
+        
+        const startX = (canvas.width - (cols - 1) * spacingX) / 2;
+        
+        const soldiers = [];
+        for (let row = 0; row < rows; row++) {
+            for (let col = 0; col < cols; col++) {
+                soldiers.push({
+                    x: startX + col * spacingX,
+                    y: row * spacingY,
+                    targetX: startX + col * spacingX,
+                    vx: 0,
+                    col: col,
+                    row: row,
+                    tiredness: 0
+                });
+            }
+        }
+        
+        const obstacles = [];
+        let cameraY = 0;
+        let lastObstacleY = 0;
+        let gameTime = 0;
+        
+        function addObstacle() {
+            const spawnChance = 0.02 + (gameTime / 10000);
+            const minDistance = Math.max(50, 100 - gameTime / 100);
+            
+            if (cameraY - lastObstacleY > minDistance && Math.random() < spawnChance) {
+                const points = 5 + Math.floor(Math.random() * 4);
+                const angles = [];
+                for (let i = 0; i < points; i++) {
+                    angles.push(Math.random() * Math.PI * 2);
+                }
+                angles.sort((a, b) => a - b);
+                
+                obstacles.push({
+                    x: 100 + Math.random() * 600,
+                    y: cameraY + 700,
+                    radius: 8 + Math.random() * 12,
+                    phase: Math.random() * Math.PI * 2,
+                    wobbleSpeed: 0.05 + Math.random() * 0.05,
+                    angles: angles
+                });
+                lastObstacleY = cameraY;
+            }
+        }
+        
+        function animate() {
+            ctx.fillStyle = '#1a1a1a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            cameraY += speed;
+            gameTime += 1;
+            
+            addObstacle();
+            
+            ctx.strokeStyle = 'rgba(100, 100, 100, 0.2)';
+            ctx.lineWidth = 1;
+            const gridSize = 50;
+            const offsetY = (cameraY % gridSize);
+            
+            for (let y = -offsetY; y < canvas.height + gridSize; y += gridSize) {
+                ctx.beginPath();
+                ctx.moveTo(0, y + 200);
+                ctx.lineTo(canvas.width, y + 200);
+                ctx.stroke();
+            }
+            
+            for (let x = 0; x < canvas.width; x += gridSize) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, canvas.height);
+                ctx.stroke();
+            }
+            
+            obstacles.forEach((obs, i) => {
+                obs.screenY = obs.y - cameraY;
+                
+                if (obs.screenY < -100) {
+                    obstacles.splice(i, 1);
+                }
+            });
+            
+            soldiers.forEach((s) => {
+                s.y += speed;
+                s.targetX = startX + s.col * spacingX;
+                s.vx = 0;
+                
+                let needsAvoid = false;
+                let avoidanceForce = 0;
+                
+                obstacles.forEach((obs) => {
+                    const dx = s.x - obs.x;
+                    const dy = s.y - obs.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (dist < obs.radius + avoidRadius && dy > -20 && dy < 30) {
+                        s.vx += dx > 0 ? 2 : -2;
+                        needsAvoid = true;
+                        avoidanceForce += 1;
+                    }
+                });
+                
+                soldiers.forEach((other) => {
+                    if (s !== other) {
+                        const dx = s.x - other.x;
+                        const dy = s.y - other.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        const minDist = 10;
+                        
+                        if (dist < minDist && dist > 0 && Math.abs(dy) < 20) {
+                            const push = (minDist - dist) * 0.5;
+                            s.vx += (dx / dist) * push;
+                            needsAvoid = true;
+                            avoidanceForce += 0.5;
+                        }
+                    }
+                });
+                
+                if (needsAvoid && avoidanceForce > 0) {
+                    s.tiredness = Math.min(s.tiredness + tirednessGain * avoidanceForce, maxTiredness);
+                } else {
+                    s.tiredness = Math.max(s.tiredness - tirednessLoss, 0);
+                }
+                
+                const returnSpeed = 0.08 * (1 - s.tiredness * 0.7);
+                const driftX = s.tiredness * s.tiredness * (Math.random() - 0.5) * driftMultiplier;
+                const driftY = s.tiredness * s.tiredness * (Math.random() - 0.5) * (driftMultiplier * 0.5);
+                
+                s.x += s.vx;
+                s.x += (s.targetX - s.x) * returnSpeed + driftX;
+                s.y += driftY;
+                
+                const screenY = s.y - cameraY + 200;
+                
+                if (screenY > -10 && screenY < canvas.height + 10) {
+                    const tired = s.tiredness;
+                    
+                    const rowColor = s.row / (rows - 1);
+                    const baseR = Math.floor(50 + rowColor * 80);
+                    const baseG = Math.floor(150 + rowColor * 80);
+                    const baseB = Math.floor(220 - rowColor * 50);
+                    
+                    const r = Math.floor(baseR + tired * (255 - baseR));
+                    const g = Math.floor(baseG - tired * baseG);
+                    const b = Math.floor(baseB - tired * baseB);
+                    
+                    ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+                    ctx.beginPath();
+                    ctx.arc(s.x, screenY, dotRadius, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            });
+            
+            obstacles.forEach((obs) => {
+                obs.phase += obs.wobbleSpeed;
+                const screenY = obs.y - cameraY + 200;
+                const pulse = Math.sin(obs.phase * 2) * 0.2 + 1;
+                
+                ctx.save();
+                ctx.translate(obs.x, screenY);
+                ctx.rotate(obs.phase * 0.5);
+                
+                ctx.shadowBlur = 20;
+                ctx.shadowColor = 'rgba(100, 255, 100, 0.5)';
+                
+                ctx.beginPath();
+                for (let i = 0; i < obs.angles.length; i++) {
+                    const angle = obs.angles[i];
+                    const nextAngle = obs.angles[(i + 1) % obs.angles.length];
+                    const r = obs.radius * (0.7 + Math.random() * 0.6) * pulse;
+                    
+                    const x = Math.cos(angle) * r;
+                    const y = Math.sin(angle) * r;
+                    
+                    if (i === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
+                ctx.closePath();
+                
+                const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, obs.radius * pulse);
+                gradient.addColorStop(0, 'rgba(150, 255, 150, 0.7)');
+                gradient.addColorStop(0.5, 'rgba(80, 220, 100, 0.5)');
+                gradient.addColorStop(1, 'rgba(50, 180, 80, 0.2)');
+                ctx.fillStyle = gradient;
+                ctx.fill();
+                
+                ctx.strokeStyle = 'rgba(100, 255, 100, 0.8)';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                
+                ctx.restore();
+            });
+            
+            requestAnimationFrame(animate);
+        }
+        
+        animate();
+    </script>
+</body>
+</html>

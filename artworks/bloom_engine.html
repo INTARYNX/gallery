@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shard Automata</title>
+    <style>
+        body { margin:0; overflow:hidden; background:#000; display:flex; justify-content:center; align-items:center; height:100vh; }
+        canvas { max-width:100vmin; max-height:100vmin; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        function resize() { const s = Math.min(window.innerWidth, window.innerHeight); canvas.width = s; canvas.height = s; }
+        resize();
+        window.addEventListener('resize', resize);
+
+        const gridSize = 20;
+        const cols = Math.floor(canvas.width / gridSize);
+        const rows = Math.floor(canvas.height / gridSize);
+        let grid = [], nextGrid = [];
+        const shards = [];
+        for (let i = 0; i < rows; i++) { grid[i] = []; nextGrid[i] = []; for (let j = 0; j < cols; j++) { grid[i][j] = Math.random() > 0.7 ? 1 : 0; nextGrid[i][j] = 0; } }
+
+        function countNeighbors(x, y) {
+            let c = 0;
+            for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) { if (!i && !j) continue; c += grid[(y+i+rows)%rows][(x+j+cols)%cols]; }
+            return c;
+        }
+
+        function update() {
+            for (let i = 0; i < rows; i++) for (let j = 0; j < cols; j++) {
+                const n = countNeighbors(j, i), c = grid[i][j];
+                nextGrid[i][j] = (c===1&&(n===2||n===3))||(c===0&&n===3)?1:0;
+            }
+            [grid, nextGrid] = [nextGrid, grid];
+        }
+
+        const palette = [[175,70,40],[160,55,38],[345,60,35],[200,50,55],[15,75,50],[85,80,45],[270,55,40],[190,65,42]];
+
+        function drawShard(s) {
+            ctx.save();
+            ctx.translate(s.x, s.y);
+            ctx.rotate(s.rotation);
+            const c = palette[Math.floor(Math.abs(s.hue * 1.7)) % palette.length];
+            const h = c[0] + ((s.hue * 0.5) % 12 - 6);
+            ctx.fillStyle = `hsla(${h},${c[1]}%,${c[2]}%,${s.alpha * 0.75})`;
+            ctx.beginPath();
+            const p = Math.max(3, Math.floor(s.sides / 2) + 2);
+            const st = p * 20;
+            for (let i = 0; i <= st; i++) {
+                const a = (Math.PI * 2 / st) * i;
+                const r = s.size * (0.3 + 0.7 * Math.pow(Math.abs(Math.cos(p * a * 0.5)), 0.4));
+                const x = Math.cos(a) * r;
+                const y = Math.sin(a) * r;
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            }
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+        }
+
+        function getMorphPath(t, cx, cy, w) {
+            const steps = 300;
+            const breathe = 0.95 + Math.sin(t * 0.008) * 0.05;
+            const radius = w * 0.4 * breathe;
+            const points = 6;
+            const rot = t * 0.005 + Math.sin(t * 0.003) * 0.8 + Math.sin(t * 0.0071) * 0.4 + Math.cos(t * 0.0023) * 0.3;
+            const innerRatio = 0.55 + Math.sin(t * 0.025) * 0.12;
+            const bulge = Math.max(0, 0.06 + Math.sin(t * 0.018) * 0.04);
+            const pts = [];
+            for (let i = 0; i <= steps; i++) {
+                const a = (Math.PI * 2 / steps) * i + rot;
+                const segAngle = Math.PI / points;
+                const localA = ((a - rot) % (segAngle * 2) + segAngle * 2) % (segAngle * 2);
+                const frac = localA / segAngle;
+                let r;
+                if (frac < 1) {
+                    const t2 = frac;
+                    r = radius * (1 - t2 * (1 - innerRatio) + Math.sin(t2 * Math.PI) * bulge);
+                } else {
+                    const t2 = frac - 1;
+                    r = radius * (innerRatio + t2 * (1 - innerRatio) + Math.sin(t2 * Math.PI) * bulge);
+                }
+                pts.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]);
+            }
+            return pts;
+        }
+
+        let frame = 0, stuckCounter = 0, lastAlive = 0, hueBase = 0, lightnessShift = 0;
+        const borderTrails = [];
+        let sp = [
+            { a: 0, r: 0, g: true, d: 1 },
+            { a: Math.PI * 2 / 3, r: 150, g: false, d: -1 },
+            { a: Math.PI * 4 / 3, r: 100, g: true, d: 1 }
+        ];
+
+        function animate() {
+            const bgP = [[175,50,18],[345,40,16],[200,40,18],[270,40,16],[160,45,17]];
+            const bg = bgP[Math.floor(hueBase * 0.02) % bgP.length];
+            ctx.fillStyle = `hsla(${bg[0]},${bg[1]}%,${bg[2]}%,0.15)`;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            lightnessShift += 0.6;
+            hueBase += 2.0;
+
+            let alive = 0;
+            for (let i = 0; i < rows; i++) for (let j = 0; j < cols; j++) if (grid[i][j]) alive++;
+            if (alive === lastAlive) stuckCounter++; else stuckCounter = 0;
+            lastAlive = alive;
+
+            if (stuckCounter > 120 || alive === 0) {
+                for (let i = 0; i < rows; i++) for (let j = 0; j < cols; j++) grid[i][j] = Math.random() > 0.7 ? 1 : 0;
+                stuckCounter = 0;
+                sp.forEach(function(s) { s.a = Math.random() * Math.PI * 2; s.r = Math.random() * 100; s.g = Math.random() > 0.5; s.d = Math.random() > 0.5 ? 1 : -1; });
+            }
+
+            const maxR = Math.min(canvas.width, canvas.height) / 2 - 50;
+            const cx = canvas.width / 2;
+            const cy = canvas.height / 2;
+
+            if (alive > 0) {
+                const speeds = [2.4, 2.0, 2.8];
+                const radSpeeds = [3.5, 4.0, 3.0];
+                const hueOffsets = [0, 120, 240];
+                for (let idx = 0; idx < sp.length; idx++) {
+                    const s = sp[idx];
+                    s.a += (speeds[idx] + Math.sin(frame * (0.01 + idx * 0.003)) * 0.6) * s.d;
+                    if (s.g) { s.r += radSpeeds[idx]; if (s.r >= maxR) { s.g = false; s.d *= -1; } }
+                    else { s.r -= radSpeeds[idx]; if (s.r <= 0) { s.g = true; s.a += Math.random() * Math.PI / 3; } }
+                    const sx = cx + Math.cos(s.a) * s.r;
+                    const sy = cy + Math.sin(s.a) * s.r;
+                    for (let i = 0; i < 3; i++) {
+                        shards.push({ x: sx + (Math.random() - 0.5) * 15, y: sy + (Math.random() - 0.5) * 15, angle: s.a + Math.PI / 2 + (Math.random() - 0.5) * 0.5, speed: Math.random() * 5 + 3, rotation: Math.random() * Math.PI * 2, rotSpeed: (Math.random() - 0.5) * 0.4, size: Math.random() * 40 + 6, sides: Math.floor(Math.random() * 6) + 3, alpha: 1, hue: hueBase + hueOffsets[idx] + Math.random() * 60 });
+                    }
+                }
+                // Center bloom
+                for (let i = 0; i < 2; i++) {
+                    const ca = Math.random() * Math.PI * 2;
+                    shards.push({ x: cx + (Math.random() - 0.5) * 30, y: cy + (Math.random() - 0.5) * 30, angle: ca, speed: Math.random() * 2 + 0.5, rotation: Math.random() * Math.PI * 2, rotSpeed: (Math.random() - 0.5) * 0.3, size: Math.random() * 35 + 10, sides: Math.floor(Math.random() * 6) + 3, alpha: 1, hue: hueBase + 180 + Math.random() * 60 });
+                }
+            }
+
+            // Draw shards with organic global rotation
+            const gr = frame * 0.008 + Math.sin(frame * 0.004) * 0.6 + Math.sin(frame * 0.009) * 0.3;
+            const cosR = Math.cos(gr);
+            const sinR = Math.sin(gr);
+            for (let i = shards.length - 1; i >= 0; i--) {
+                const s = shards[i];
+                s.x += Math.cos(s.angle) * s.speed;
+                s.y += Math.sin(s.angle) * s.speed;
+                s.rotation += s.rotSpeed;
+                s.alpha -= 0.02 + Math.random() * 0.008;
+                const dx = s.x - cx;
+                const dy = s.y - cy;
+                drawShard({ x: cx + dx * cosR - dy * sinR, y: cy + dx * sinR + dy * cosR, rotation: s.rotation + gr, hue: s.hue, alpha: s.alpha, size: s.size, sides: s.sides });
+                if (s.alpha <= 0) shards.splice(i, 1);
+            }
+
+            // Morphing mask
+            const pts = getMorphPath(frame, cx, cy, canvas.width);
+
+            // Store for trails
+            if (frame % 3 === 0) {
+                borderTrails.push(pts.slice());
+                if (borderTrails.length > 20) borderTrails.shift();
+            }
+
+            // Black out outside
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(0, 0, canvas.width, canvas.height);
+            ctx.moveTo(pts[0][0], pts[0][1]);
+            for (let i = pts.length - 1; i >= 0; i--) ctx.lineTo(pts[i][0], pts[i][1]);
+            ctx.closePath();
+            ctx.fillStyle = '#000';
+            ctx.fill();
+            ctx.restore();
+
+            // Draw trailing borders
+            for (let t = 0; t < borderTrails.length; t++) {
+                const trail = borderTrails[t];
+                const alpha = (t / borderTrails.length) * 0.3;
+                ctx.beginPath();
+                ctx.moveTo(trail[0][0], trail[0][1]);
+                for (let i = 1; i < trail.length; i++) ctx.lineTo(trail[i][0], trail[i][1]);
+                ctx.closePath();
+                ctx.strokeStyle = `rgba(220,225,235,${alpha})`;
+                ctx.lineWidth = 1;
+                ctx.stroke();
+            }
+
+            // Current border
+            ctx.beginPath();
+            ctx.moveTo(pts[0][0], pts[0][1]);
+            for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+            ctx.closePath();
+            ctx.strokeStyle = 'rgba(220,225,235,0.6)';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+
+            // Edge sparkles
+            if (frame % 2 === 0) {
+                const ri = Math.floor(Math.random() * (pts.length - 1));
+                const ep = pts[ri];
+                for (let i = 0; i < 2; i++) {
+                    const ea = Math.atan2(ep[1] - cy, ep[0] - cx) + (Math.random() - 0.5) * 1.5;
+                    shards.push({ x: ep[0] + (Math.random() - 0.5) * 8, y: ep[1] + (Math.random() - 0.5) * 8, angle: ea, speed: Math.random() * 1.5 + 0.3, rotation: Math.random() * Math.PI * 2, rotSpeed: (Math.random() - 0.5) * 0.5, size: Math.random() * 12 + 4, sides: Math.floor(Math.random() * 4) + 3, alpha: 0.9, hue: hueBase + 90 + Math.random() * 40 });
+                }
+            }
+
+            if (frame % 2 === 0) update();
+            frame++;
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+    </script>
+</body>
+</html>

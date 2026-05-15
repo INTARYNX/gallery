@@ -1,0 +1,982 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Generative Art Moderne</title>
+<style>
+  body { margin: 0; overflow: hidden; background: #000; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+class Cell {
+    constructor(x,y,w,h){
+        this.x = x; this.y = y; this.w = w; this.h = h;
+        this.reset();
+    }
+    reset(){
+        this.type = Math.floor(Math.random()*12);
+        this.hue = Math.random()*360;
+        this.phase = Math.random()*Math.PI*2;
+        this.speed = 0.3 + Math.random()*0.5;
+        this.bandOffset = 0;
+        this.bandSpeed = 1 + Math.random()*3;
+        this.glitchTime = 0;
+        this.waveFreq1 = 0.05 + Math.random()*0.15;
+        this.waveFreq2 = 0.03 + Math.random()*0.1;
+        this.waveAmp1 = 10 + Math.random()*30;
+        this.waveAmp2 = 10 + Math.random()*30;
+        this.zoom = 1;
+        this.hasZoom = Math.random() > 0.3;
+        this.zoomIntensity = this.hasZoom ? 0.3 + Math.random()*0.9 : 0;
+        this.zoomSpeed = 0.005 + Math.random()*0.025;
+        this.zoomDir = Math.random() > 0.5 ? 1 : -1;
+        this.spiralFreq = 0.05 + Math.random()*0.1;
+        this.spiralAmp = 5 + Math.random()*15;
+        this.pulseSpeed1 = 0.02 + Math.random()*0.05;
+        this.pulseSpeed2 = 0.03 + Math.random()*0.07;
+        this.pulsePhase1 = Math.random()*Math.PI*2;
+        this.pulsePhase2 = Math.random()*Math.PI*2;
+        this.vSyncGlitch = false;
+        this.vSyncOffset = 0;
+        this.vSyncSpeed = 0;
+        this.rotX = Math.random()*Math.PI*2;
+        this.rotY = Math.random()*Math.PI*2;
+        this.rotZ = Math.random()*Math.PI*2;
+        const speedMode = Math.random();
+        if(speedMode < 0.3){
+            this.rotSpeedX = 0;
+            this.rotSpeedY = 0;
+            this.rotSpeedZ = 0;
+        } else if(speedMode < 0.6){
+            this.rotSpeedX = (Math.random()-0.5)*0.01;
+            this.rotSpeedY = (Math.random()-0.5)*0.01;
+            this.rotSpeedZ = (Math.random()-0.5)*0.01;
+        } else {
+            this.rotSpeedX = (Math.random()-0.5)*0.04;
+            this.rotSpeedY = (Math.random()-0.5)*0.04;
+            this.rotSpeedZ = (Math.random()-0.5)*0.04;
+        }
+        this.morphPhase = 0;
+        this.morphSpeed = 0.01 + Math.random()*0.02;
+        this.gradientOffset = Math.random()*360;
+        this.staticMode = false;
+        this.staticIntensity = 0;
+        this.glassFragments = [];
+        this.exploding = false;
+        this.explosionProgress = 0;
+        this.explosionComplete = false;
+        
+        // Couleur de cadre aléatoire (différents gris et beiges)
+        const greyValue = 30 + Math.floor(Math.random() * 50);
+        const tint = Math.random();
+        if(tint < 0.4){
+            // Gris neutre
+            this.frameColor = `rgb(${greyValue}, ${greyValue}, ${greyValue})`;
+        } else if(tint < 0.7){
+            // Gris légèrement beige
+            this.frameColor = `rgb(${greyValue + 10}, ${greyValue + 5}, ${greyValue})`;
+        } else {
+            // Gris légèrement bleuté
+            this.frameColor = `rgb(${greyValue}, ${greyValue + 5}, ${greyValue + 10})`;
+        }
+        this.innerFrameColor = `rgb(${greyValue - 10}, ${greyValue - 10}, ${greyValue - 10})`;
+    }
+    update(){
+        this.phase += 0.01 * this.speed;
+        this.bandOffset += this.bandSpeed;
+        this.glitchTime++;
+        this.rotX += this.rotSpeedX;
+        this.rotY += this.rotSpeedY;
+        this.rotZ += this.rotSpeedZ;
+        this.morphPhase += this.morphSpeed;
+        this.gradientOffset += 0.5;
+        
+        if(this.hasZoom){
+            const pulse1 = Math.sin(this.pulsePhase1)*0.5 + 0.5;
+            const pulse2 = Math.cos(this.pulsePhase2)*0.5 + 0.5;
+            this.zoom = 1 - this.zoomIntensity*0.4 + pulse1*this.zoomIntensity*0.4 + pulse2*this.zoomIntensity*0.6;
+            this.pulsePhase1 += this.pulseSpeed1;
+            this.pulsePhase2 += this.pulseSpeed2;
+            
+            if(Math.random() > 0.98){
+                this.pulseSpeed1 = 0.02 + Math.random()*0.05;
+                this.pulseSpeed2 = 0.03 + Math.random()*0.07;
+            }
+        }
+        
+        if(!this.vSyncGlitch && Math.random() > 0.995){
+            this.vSyncGlitch = true;
+            this.vSyncOffset = Math.random()*this.h;
+            this.vSyncSpeed = 3 + Math.random()*8;
+        }
+        
+        if(this.vSyncGlitch){
+            this.vSyncOffset += this.vSyncSpeed;
+            this.vSyncSpeed *= 0.92;
+            
+            if(Math.abs(this.vSyncSpeed) < 0.3){
+                this.vSyncGlitch = false;
+                this.vSyncOffset = 0;
+                this.vSyncSpeed = 0;
+            }
+        }
+        
+        if(this.exploding){
+            this.explosionProgress++;
+            this.glassFragments.forEach(frag => {
+                frag.vx *= 0.99;
+                frag.vy *= 0.99;
+                frag.vy += 0.3;
+                frag.x += frag.vx;
+                frag.y += frag.vy;
+                frag.rotation += frag.rotSpeed;
+                frag.alpha = Math.max(0, 1 - this.explosionProgress / 180);
+            });
+            
+            // Quand l'animation d'explosion est terminée, marquer comme terminé
+            if(this.explosionProgress > 180){
+                this.explosionComplete = true;
+            }
+        }
+    }
+    draw(){
+        ctx.save();
+        
+        // Dessiner le cadre de la TV (boîtier en plastique beige/gris)
+        const frameThickness = 15;
+        const cornerRadius = 8;
+        
+        // Ombre du cadre
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+        ctx.shadowBlur = 20;
+        ctx.shadowOffsetX = 8;
+        ctx.shadowOffsetY = 8;
+        
+        // Cadre extérieur (rectangle sans coins arrondis)
+        ctx.fillStyle = this.frameColor;
+        ctx.fillRect(this.x - frameThickness, this.y - frameThickness, 
+                     this.w + frameThickness * 2, this.h + frameThickness * 2);
+        
+        // Reset shadow
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+        
+        // Cadre intérieur (biseauté) avec coins arrondis
+        ctx.fillStyle = this.innerFrameColor;
+        this.roundRect(ctx, this.x - frameThickness/2, this.y - frameThickness/2, 
+                     this.w + frameThickness, this.h + frameThickness, cornerRadius);
+        ctx.fill();
+        
+        // Reflets sur le cadre
+        const gradient = ctx.createLinearGradient(this.x, this.y, this.x, this.y + this.h);
+        gradient.addColorStop(0, 'rgba(100, 100, 100, 0.3)');
+        gradient.addColorStop(0.5, 'rgba(60, 60, 60, 0.1)');
+        gradient.addColorStop(1, 'rgba(30, 30, 30, 0.3)');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(this.x - frameThickness, this.y - frameThickness, 
+                     this.w + frameThickness * 2, this.h + frameThickness * 2);
+        
+        // Clipper le contenu pour qu'il ne déborde pas
+        ctx.save();
+        this.roundRect(ctx, this.x, this.y, this.w, this.h, cornerRadius * 0.5);
+        ctx.clip();
+        
+        ctx.translate(this.x + this.w/2, this.y + this.h/2);
+        
+        // Si en mode explosion complète, juste fond noir
+        if(this.explosionComplete){
+            ctx.fillStyle = '#000';
+            ctx.fillRect(-this.w/2,-this.h/2,this.w,this.h);
+        }
+        // Si en mode explosion, fond noir
+        else if(this.exploding){
+            ctx.fillStyle = '#000';
+            ctx.fillRect(-this.w/2,-this.h/2,this.w,this.h);
+        }
+        // Si en mode parasites, afficher uniquement les parasites
+        else if(this.staticMode){
+            ctx.fillStyle = '#000';
+            ctx.fillRect(-this.w/2,-this.h/2,this.w,this.h);
+            this.drawStatic();
+        } else {
+            // Dégradé de fond animé
+            const bgGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, Math.max(this.w, this.h)*0.7);
+            const hue1 = (this.hue + this.gradientOffset) % 360;
+            const hue2 = (this.hue + this.gradientOffset + 60) % 360;
+            const brightness = 15 + (Math.sin(this.phase) * 0.5 + 0.5) * 30;
+            bgGradient.addColorStop(0, `hsl(${hue1}, 80%, ${brightness}%)`);
+            bgGradient.addColorStop(1, `hsl(${hue2}, 70%, ${brightness*0.6}%)`);
+            ctx.fillStyle = bgGradient;
+            ctx.fillRect(-this.w/2,-this.h/2,this.w,this.h);
+
+            const alpha = 0.3 + (Math.sin(this.phase) * 0.5 + 0.5) * 0.4;
+            ctx.strokeStyle = `rgba(255,255,255,${alpha})`;
+            ctx.lineWidth = 1;
+
+            if(this.vSyncGlitch){
+                ctx.save();
+                ctx.translate(0, this.vSyncOffset % this.h - this.h/2);
+                
+                switch(this.type){
+                    case 0: this.drawGrid(); break;
+                    case 1: this.drawCube(); break;
+                    case 2: this.drawWaves(); break;
+                    case 3: this.drawDiagonals(); break;
+                    case 4: this.drawSpiral(); break;
+                    case 5: this.drawTestPattern(); break;
+                    case 6: this.drawComplexWaves(); break;
+                    case 7: this.drawPlasma(); break;
+                    case 8: this.drawWaveSpiral(); break;
+                    case 9: this.drawPyramid(); break;
+                    case 10: this.drawSphere(); break;
+                    case 11: this.drawTorus(); break;
+                }
+                
+                ctx.restore();
+            } else {
+                switch(this.type){
+                    case 0: this.drawGrid(); break;
+                    case 1: this.drawCube(); break;
+                    case 2: this.drawWaves(); break;
+                    case 3: this.drawDiagonals(); break;
+                    case 4: this.drawSpiral(); break;
+                    case 5: this.drawTestPattern(); break;
+                    case 6: this.drawComplexWaves(); break;
+                    case 7: this.drawPlasma(); break;
+                    case 8: this.drawWaveSpiral(); break;
+                    case 9: this.drawPyramid(); break;
+                    case 10: this.drawSphere(); break;
+                    case 11: this.drawTorus(); break;
+                }
+            }
+        }
+        
+        // Reflet sur l'écran
+        if(!this.exploding && !this.explosionComplete){
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
+            ctx.fillRect(-this.w/2, -this.h/2, this.w/3, this.h/2);
+        }
+        
+        ctx.restore(); // Restaurer le clip
+        
+        // Dessiner les fragments APRÈS avoir restauré le clip (pour qu'ils sortent)
+        // Mais seulement si l'explosion n'est pas complète
+        if(this.exploding && !this.explosionComplete){
+            ctx.save();
+            ctx.translate(this.x + this.w/2, this.y + this.h/2);
+            this.drawGlassFragments();
+            ctx.restore();
+        }
+        
+        ctx.restore(); // Restaurer le contexte principal
+    }
+
+    roundRect(ctx, x, y, width, height, radius){
+        ctx.beginPath();
+        ctx.moveTo(x + radius, y);
+        ctx.lineTo(x + width - radius, y);
+        ctx.arcTo(x + width, y, x + width, y + radius, radius);
+        ctx.lineTo(x + width, y + height - radius);
+        ctx.arcTo(x + width, y + height, x + width - radius, y + height, radius);
+        ctx.lineTo(x + radius, y + height);
+        ctx.arcTo(x, y + height, x, y + height - radius, radius);
+        ctx.lineTo(x, y + radius);
+        ctx.arcTo(x, y, x + radius, y, radius);
+        ctx.closePath();
+    }
+
+    explodeGlass(){
+        this.exploding = true;
+        this.explosionProgress = 0;
+        
+        const centerX = 0;
+        const centerY = 0;
+        const numFragments = 15 + Math.floor(Math.random() * 10);
+        
+        for(let i = 0; i < numFragments; i++){
+            const angle = Math.random() * Math.PI * 2;
+            const dist = Math.random() * Math.min(this.w, this.h) * 0.3;
+            const x = centerX + Math.cos(angle) * dist;
+            const y = centerY + Math.sin(angle) * dist;
+            
+            const size = 20 + Math.random() * 60;
+            const points = [];
+            const numPoints = 3 + Math.floor(Math.random() * 3);
+            
+            for(let j = 0; j < numPoints; j++){
+                const pAngle = (j / numPoints) * Math.PI * 2 + Math.random() * 0.5;
+                const pDist = size * (0.5 + Math.random() * 0.5);
+                points.push({
+                    x: x + Math.cos(pAngle) * pDist,
+                    y: y + Math.sin(pAngle) * pDist
+                });
+            }
+            
+            const speed = 2 + Math.random() * 4;
+            const vx = Math.cos(angle) * speed;
+            const vy = Math.sin(angle) * speed - 2;
+            
+            this.glassFragments.push({
+                x, y,
+                points,
+                vx, vy,
+                rotation: Math.random() * Math.PI * 2,
+                rotSpeed: (Math.random() - 0.5) * 0.15,
+                alpha: 1
+            });
+        }
+    }
+
+    drawGlassFragments(){
+        this.glassFragments.forEach(frag => {
+            ctx.save();
+            ctx.translate(frag.x, frag.y);
+            ctx.rotate(frag.rotation);
+            
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+            ctx.shadowBlur = 8;
+            ctx.shadowOffsetX = 3;
+            ctx.shadowOffsetY = 3;
+            
+            const gradient = ctx.createLinearGradient(
+                frag.points[0].x - frag.x, frag.points[0].y - frag.y,
+                frag.points[1].x - frag.x, frag.points[1].y - frag.y
+            );
+            gradient.addColorStop(0, `rgba(200, 230, 255, ${frag.alpha * 0.4})`);
+            gradient.addColorStop(1, `rgba(160, 200, 255, ${frag.alpha * 0.2})`);
+            
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.moveTo(frag.points[0].x - frag.x, frag.points[0].y - frag.y);
+            for(let i = 1; i < frag.points.length; i++){
+                ctx.lineTo(frag.points[i].x - frag.x, frag.points[i].y - frag.y);
+            }
+            ctx.closePath();
+            ctx.fill();
+            
+            ctx.shadowColor = 'transparent';
+            ctx.strokeStyle = `rgba(100, 150, 200, ${frag.alpha * 0.6})`;
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            
+            ctx.strokeStyle = `rgba(235, 245, 255, ${frag.alpha * 0.8})`;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(frag.points[0].x - frag.x, frag.points[0].y - frag.y);
+            ctx.lineTo(frag.points[1].x - frag.x, frag.points[1].y - frag.y);
+            ctx.stroke();
+            
+            ctx.restore();
+        });
+    }
+
+    drawStatic(){
+        const pixelSize = 2;
+        const cols = Math.floor(this.w / pixelSize);
+        const rows = Math.floor(this.h / pixelSize);
+        
+        for(let i=0;i<cols;i++){
+            for(let j=0;j<rows;j++){
+                const x = -this.w/2 + i*pixelSize;
+                const y = -this.h/2 + j*pixelSize;
+                
+                const noise = Math.random() * 255;
+                ctx.fillStyle = `rgb(${noise},${noise},${noise})`;
+                ctx.fillRect(x, y, pixelSize, pixelSize);
+            }
+        }
+    }
+
+    drawGrid(){
+        const step = 15;
+        for(let i=-this.w/2;i<this.w/2;i+=step){
+            ctx.beginPath();
+            ctx.moveTo(i,-this.h/2);
+            ctx.lineTo(i,this.h/2);
+            ctx.stroke();
+        }
+        for(let i=-this.h/2;i<this.h/2;i+=step){
+            ctx.beginPath();
+            ctx.moveTo(-this.w/2,i);
+            ctx.lineTo(this.w/2,i);
+            ctx.stroke();
+        }
+    }
+
+    drawCircles(){
+        ctx.save();
+        ctx.scale(this.zoom, this.zoom);
+        
+        const numCircles = 8;
+        const maxR = Math.min(this.w,this.h)*0.4;
+        for(let i=0;i<numCircles;i++){
+            const r = (maxR/numCircles)*(i+1);
+            ctx.beginPath();
+            ctx.arc(0,0,r,0,Math.PI*2);
+            ctx.stroke();
+        }
+        
+        ctx.restore();
+    }
+
+    drawCube(){
+        const size = Math.min(this.w, this.h) * 0.3;
+        const morph = Math.sin(this.morphPhase) * 0.3;
+        const vertices = [
+            [-1,-1,-1], [1,-1,-1], [1,1,-1], [-1,1,-1],
+            [-1,-1,1], [1,-1,1], [1,1,1], [-1,1,1]
+        ];
+        
+        const rotated = vertices.map(v => {
+            let [x,y,z] = v;
+            x *= (1 + morph * 0.2);
+            y *= (1 - morph * 0.15);
+            z *= (1 + morph * 0.1);
+            
+            let temp;
+            temp = y;
+            y = y*Math.cos(this.rotX) - z*Math.sin(this.rotX);
+            z = temp*Math.sin(this.rotX) + z*Math.cos(this.rotX);
+            
+            temp = x;
+            x = x*Math.cos(this.rotY) + z*Math.sin(this.rotY);
+            z = -temp*Math.sin(this.rotY) + z*Math.cos(this.rotY);
+            
+            temp = x;
+            x = x*Math.cos(this.rotZ) - y*Math.sin(this.rotZ);
+            y = temp*Math.sin(this.rotZ) + y*Math.cos(this.rotZ);
+            
+            return [x*size, y*size, z*size];
+        });
+        
+        const edges = [
+            [0,1],[1,2],[2,3],[3,0],
+            [4,5],[5,6],[6,7],[7,4],
+            [0,4],[1,5],[2,6],[3,7]
+        ];
+        
+        ctx.strokeStyle = `rgba(255,255,255,0.8)`;
+        ctx.lineWidth = 2;
+        edges.forEach(([a,b]) => {
+            ctx.beginPath();
+            ctx.moveTo(rotated[a][0], rotated[a][1]);
+            ctx.lineTo(rotated[b][0], rotated[b][1]);
+            ctx.stroke();
+        });
+    }
+
+    drawPyramid(){
+        const size = Math.min(this.w, this.h) * 0.35;
+        const morph = Math.sin(this.morphPhase * 1.3) * 0.4;
+        const vertices = [
+            [0,1 + morph * 0.3,0],
+            [-1,-1,-1], [1,-1,-1], [1,-1,1], [-1,-1,1]
+        ];
+        
+        const rotated = vertices.map(v => {
+            let [x,y,z] = v;
+            let temp;
+            temp = y;
+            y = y*Math.cos(this.rotX) - z*Math.sin(this.rotX);
+            z = temp*Math.sin(this.rotX) + z*Math.cos(this.rotX);
+            
+            temp = x;
+            x = x*Math.cos(this.rotY) + z*Math.sin(this.rotY);
+            z = -temp*Math.sin(this.rotY) + z*Math.cos(this.rotY);
+            
+            temp = x;
+            x = x*Math.cos(this.rotZ) - y*Math.sin(this.rotZ);
+            y = temp*Math.sin(this.rotZ) + y*Math.cos(this.rotZ);
+            
+            return [x*size, y*size, z*size];
+        });
+        
+        const edges = [
+            [0,1],[0,2],[0,3],[0,4],
+            [1,2],[2,3],[3,4],[4,1]
+        ];
+        
+        ctx.strokeStyle = `rgba(255,255,255,0.8)`;
+        ctx.lineWidth = 2;
+        edges.forEach(([a,b]) => {
+            ctx.beginPath();
+            ctx.moveTo(rotated[a][0], rotated[a][1]);
+            ctx.lineTo(rotated[b][0], rotated[b][1]);
+            ctx.stroke();
+        });
+    }
+
+    drawSphere(){
+        const radius = Math.min(this.w, this.h) * 0.35;
+        const morph = Math.sin(this.morphPhase * 0.7) * 0.2;
+        const rings = 12;
+        const segments = 16;
+        
+        ctx.strokeStyle = `rgba(255,255,255,0.7)`;
+        ctx.lineWidth = 1;
+        
+        for(let i=0;i<rings;i++){
+            const lat = (i/rings) * Math.PI;
+            const y = Math.cos(lat) * radius * (1 + morph);
+            const r = Math.sin(lat) * radius * (1 - morph * 0.5);
+            
+            ctx.beginPath();
+            for(let j=0;j<=segments;j++){
+                const lon = (j/segments) * Math.PI * 2;
+                let x = Math.cos(lon) * r;
+                let z = Math.sin(lon) * r;
+                
+                let temp;
+                temp = y;
+                let yRot = y*Math.cos(this.rotX) - z*Math.sin(this.rotX);
+                let zRot = temp*Math.sin(this.rotX) + z*Math.cos(this.rotX);
+                
+                temp = x;
+                x = x*Math.cos(this.rotY) + zRot*Math.sin(this.rotY);
+                
+                if(j===0) ctx.moveTo(x, yRot);
+                else ctx.lineTo(x, yRot);
+            }
+            ctx.stroke();
+        }
+        
+        for(let j=0;j<segments;j++){
+            ctx.beginPath();
+            for(let i=0;i<=rings;i++){
+                const lat = (i/rings) * Math.PI;
+                const y = Math.cos(lat) * radius * (1 + morph);
+                const r = Math.sin(lat) * radius * (1 - morph * 0.5);
+                const lon = (j/segments) * Math.PI * 2;
+                let x = Math.cos(lon) * r;
+                let z = Math.sin(lon) * r;
+                
+                let temp;
+                temp = y;
+                let yRot = y*Math.cos(this.rotX) - z*Math.sin(this.rotX);
+                let zRot = temp*Math.sin(this.rotX) + z*Math.cos(this.rotX);
+                
+                temp = x;
+                x = x*Math.cos(this.rotY) + zRot*Math.sin(this.rotY);
+                
+                if(i===0) ctx.moveTo(x, yRot);
+                else ctx.lineTo(x, yRot);
+            }
+            ctx.stroke();
+        }
+    }
+
+    drawTorus(){
+        const R = Math.min(this.w, this.h) * 0.25;
+        const r = R * 0.4;
+        const morph = Math.sin(this.morphPhase * 1.5) * 0.3;
+        const segments = 24;
+        const tubes = 16;
+        
+        ctx.strokeStyle = `rgba(255,255,255,0.7)`;
+        ctx.lineWidth = 1;
+        
+        for(let i=0;i<segments;i++){
+            ctx.beginPath();
+            for(let j=0;j<=tubes;j++){
+                const u = (i/segments) * Math.PI * 2;
+                const v = (j/tubes) * Math.PI * 2;
+                
+                let x = (R + r*Math.cos(v) * (1 + morph)) * Math.cos(u);
+                let y = (R + r*Math.cos(v) * (1 + morph)) * Math.sin(u);
+                let z = r * Math.sin(v) * (1 - morph * 0.5);
+                
+                let temp;
+                temp = y;
+                y = y*Math.cos(this.rotX) - z*Math.sin(this.rotX);
+                z = temp*Math.sin(this.rotX) + z*Math.cos(this.rotX);
+                
+                temp = x;
+                x = x*Math.cos(this.rotY) + z*Math.sin(this.rotY);
+                z = -temp*Math.sin(this.rotY) + z*Math.cos(this.rotY);
+                
+                if(j===0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+        }
+        
+        for(let j=0;j<tubes;j++){
+            ctx.beginPath();
+            for(let i=0;i<=segments;i++){
+                const u = (i/segments) * Math.PI * 2;
+                const v = (j/tubes) * Math.PI * 2;
+                
+                let x = (R + r*Math.cos(v) * (1 + morph)) * Math.cos(u);
+                let y = (R + r*Math.cos(v) * (1 + morph)) * Math.sin(u);
+                let z = r * Math.sin(v) * (1 - morph * 0.5);
+                
+                let temp;
+                temp = y;
+                y = y*Math.cos(this.rotX) - z*Math.sin(this.rotX);
+                z = temp*Math.sin(this.rotX) + z*Math.cos(this.rotX);
+                
+                temp = x;
+                x = x*Math.cos(this.rotY) + z*Math.sin(this.rotY);
+                z = -temp*Math.sin(this.rotY) + z*Math.cos(this.rotY);
+                
+                if(i===0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+        }
+    }
+
+    drawWaves(){
+        const amplitude = 20;
+        const frequency = 0.1;
+        ctx.beginPath();
+        for(let x=-this.w/2;x<this.w/2;x+=2){
+            const y = Math.sin(x*frequency + this.phase)*amplitude;
+            if(x===-this.w/2) ctx.moveTo(x,y);
+            else ctx.lineTo(x,y);
+        }
+        ctx.stroke();
+    }
+
+    drawDiagonals(){
+        const step = 10;
+        for(let i=-this.w;i<this.w;i+=step){
+            ctx.beginPath();
+            ctx.moveTo(i,-this.h/2);
+            ctx.lineTo(i+this.w,this.h/2);
+            ctx.stroke();
+        }
+    }
+
+    drawSpiral(){
+        ctx.save();
+        ctx.scale(this.zoom, this.zoom);
+        
+        ctx.beginPath();
+        const turns = 5;
+        const maxR = Math.min(this.w,this.h)*0.4;
+        for(let a=0;a<turns*Math.PI*2;a+=0.1){
+            const r = (a/(turns*Math.PI*2))*maxR;
+            const x = Math.cos(a+this.phase)*r;
+            const y = Math.sin(a+this.phase)*r;
+            if(a===0) ctx.moveTo(x,y);
+            else ctx.lineTo(x,y);
+        }
+        ctx.stroke();
+        
+        ctx.restore();
+    }
+
+    drawTestPattern(){
+        const colors = ['#ff0000','#00ff00','#0000ff','#ffff00','#00ffff','#ff00ff','#ffffff'];
+        const barWidth = this.w / colors.length;
+        
+        for(let i=0;i<colors.length;i++){
+            ctx.fillStyle = colors[i];
+            const x = -this.w/2 + i*barWidth;
+            ctx.fillRect(x, -this.h/2, barWidth, this.h*0.7);
+        }
+        
+        const greyBars = 8;
+        const greyBarWidth = this.w / greyBars;
+        for(let i=0;i<greyBars;i++){
+            const grey = Math.floor((i/greyBars)*255);
+            ctx.fillStyle = `rgb(${grey},${grey},${grey})`;
+            const x = -this.w/2 + i*greyBarWidth;
+            ctx.fillRect(x, this.h*0.2, greyBarWidth, this.h*0.3);
+        }
+        
+        if(this.glitchTime % 30 < 5){
+            const glitchX = Math.random()*this.w - this.w/2;
+            const glitchW = 20 + Math.random()*100;
+            ctx.fillStyle = colors[Math.floor(Math.random()*colors.length)];
+            ctx.globalAlpha = 0.7;
+            ctx.fillRect(glitchX, -this.h/2, glitchW, this.h);
+            ctx.globalAlpha = 1;
+        }
+        
+        if(Math.random() > 0.8){
+            const shiftY = Math.random()*this.h - this.h/2;
+            const shiftAmount = (Math.random()-0.5)*20;
+            ctx.fillStyle = `rgba(0,0,0,0.3)`;
+            ctx.fillRect(-this.w/2 + shiftAmount, shiftY, this.w, 3);
+        }
+    }
+
+    drawComplexWaves(){
+        ctx.strokeStyle = `rgba(255,255,255,0.6)`;
+        ctx.lineWidth = 2;
+        
+        for(let layer=0;layer<3;layer++){
+            ctx.beginPath();
+            const offset = layer * Math.PI/3;
+            for(let x=-this.w/2;x<this.w/2;x+=3){
+                const y1 = Math.sin(x*this.waveFreq1 + this.phase + offset)*this.waveAmp1;
+                const y2 = Math.cos(x*this.waveFreq2 + this.phase*1.5 + offset)*this.waveAmp2;
+                const y = y1 + y2;
+                if(x===-this.w/2) ctx.moveTo(x,y);
+                else ctx.lineTo(x,y);
+            }
+            ctx.stroke();
+        }
+        
+        if(Math.random() > 0.9){
+            ctx.strokeStyle = `rgba(255,0,255,0.8)`;
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            const startX = Math.random()*this.w - this.w/2;
+            for(let x=startX;x<startX+100 && x<this.w/2;x+=2){
+                const y = Math.sin(x*0.5 + this.phase)*50;
+                if(x===startX) ctx.moveTo(x,y);
+                else ctx.lineTo(x,y);
+            }
+            ctx.stroke();
+        }
+    }
+
+    drawPlasma(){
+        const pixelSize = 8;
+        const cols = Math.floor(this.w / pixelSize);
+        const rows = Math.floor(this.h / pixelSize);
+        
+        for(let i=0;i<cols;i++){
+            for(let j=0;j<rows;j++){
+                const x = -this.w/2 + i*pixelSize;
+                const y = -this.h/2 + j*pixelSize;
+                
+                const v1 = Math.sin(i*0.1 + this.phase);
+                const v2 = Math.cos(j*0.1 + this.phase*1.3);
+                const v3 = Math.sin((i+j)*0.05 + this.phase*0.7);
+                
+                const r = Math.floor((Math.sin(v1 + this.phase)*0.5 + 0.5)*255);
+                const g = Math.floor((Math.cos(v2 + this.phase*1.2)*0.5 + 0.5)*255);
+                const b = Math.floor((Math.sin(v3 + this.phase*0.8)*0.5 + 0.5)*255);
+                
+                ctx.fillStyle = `rgb(${r},${g},${b})`;
+                ctx.fillRect(x, y, pixelSize, pixelSize);
+            }
+        }
+    }
+
+    drawWaveSpiral(){
+        ctx.save();
+        ctx.scale(this.zoom, this.zoom);
+        
+        ctx.strokeStyle = `rgba(255,255,255,0.7)`;
+        ctx.lineWidth = 1.5;
+        
+        const turns = 8;
+        const maxR = Math.min(this.w,this.h)*0.45;
+        
+        ctx.beginPath();
+        for(let a=0;a<turns*Math.PI*2;a+=0.05){
+            const baseR = (a/(turns*Math.PI*2))*maxR;
+            const wave1 = Math.sin(a*this.spiralFreq + this.phase)*this.spiralAmp;
+            const wave2 = Math.cos(a*this.spiralFreq*2.3 + this.phase*1.5)*this.spiralAmp*0.5;
+            const r = baseR + wave1 + wave2;
+            const x = Math.cos(a)*r;
+            const y = Math.sin(a)*r;
+            if(a===0) ctx.moveTo(x,y);
+            else ctx.lineTo(x,y);
+        }
+        ctx.stroke();
+        
+        ctx.strokeStyle = `rgba(255,100,255,0.5)`;
+        ctx.beginPath();
+        for(let a=0;a<turns*Math.PI*2;a+=0.05){
+            const baseR = (a/(turns*Math.PI*2))*maxR;
+            const wave = Math.sin(a*this.spiralFreq*1.7 + this.phase*2)*this.spiralAmp*1.2;
+            const r = baseR + wave;
+            const x = Math.cos(-a)*r;
+            const y = Math.sin(-a)*r;
+            if(a===0) ctx.moveTo(x,y);
+            else ctx.lineTo(x,y);
+        }
+        ctx.stroke();
+        
+        ctx.restore();
+    }
+
+    drawZoomPattern(){
+        ctx.save();
+        ctx.scale(this.zoom, this.zoom);
+        
+        const rings = 12;
+        const maxR = Math.min(this.w,this.h)*0.6;
+        
+        for(let i=0;i<rings;i++){
+            const r = (maxR/rings)*(i+1);
+            ctx.strokeStyle = `rgba(255,255,255,${0.2 + (i/rings)*0.3})`;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(0, 0, r, 0, Math.PI*2);
+            ctx.stroke();
+        }
+        
+        ctx.restore();
+    }
+}
+
+function generateGrid(){
+    const cells = [];
+    const padding = 15; // Espace minimum entre les TV
+    
+    // Approche simple : grille flexible 3x4 ou 4x3 selon orientation
+    const cols = canvas.width > canvas.height ? 4 : 3;
+    const rows = canvas.width > canvas.height ? 3 : 4;
+    
+    // Calculer la taille de base pour chaque cellule
+    const cellWidth = canvas.width / cols;
+    const cellHeight = canvas.height / rows;
+    
+    // Générer 10 TV (on en laissera 2 cases vides)
+    const positions = [];
+    for(let row = 0; row < rows; row++){
+        for(let col = 0; col < cols; col++){
+            positions.push({row, col});
+        }
+    }
+    
+    // Mélanger et prendre seulement 10 positions
+    positions.sort(() => Math.random() - 0.5);
+    const selectedPositions = positions.slice(0, 10);
+    
+    selectedPositions.forEach(pos => {
+        // Taille aléatoire mais qui rentre dans la cellule
+        const variation = 0.7 + Math.random() * 0.25; // Entre 70% et 95% de la cellule
+        
+        // Calculer en fonction du ratio 4:3
+        let tvHeight = cellHeight * variation - padding * 2;
+        let tvWidth = tvHeight * (4/3);
+        
+        // Si trop large, ajuster par la largeur
+        if(tvWidth > cellWidth * variation - padding * 2){
+            tvWidth = cellWidth * variation - padding * 2;
+            tvHeight = tvWidth * 0.75;
+        }
+        
+        // Position dans la cellule avec un léger décalage aléatoire
+        const baseX = pos.col * cellWidth;
+        const baseY = pos.row * cellHeight;
+        
+        const availableX = cellWidth - tvWidth - padding * 2;
+        const availableY = cellHeight - tvHeight - padding * 2;
+        
+        const x = baseX + padding + Math.random() * availableX;
+        const y = baseY + padding + Math.random() * availableY;
+        
+        cells.push(new Cell(x, y, tvWidth, tvHeight));
+    });
+    
+    return cells;
+}
+
+let cells = generateGrid();
+let staticWaveActive = false;
+let staticWaveStartTime = 0;
+let staticWaveInterval = 5000 + Math.random() * 5000; // 5-10 secondes
+
+function startStaticWave(){
+    staticWaveActive = true;
+    staticWaveStartTime = Date.now();
+    
+    // Mélanger l'ordre des cellules pour une propagation aléatoire
+    const shuffled = [...cells].sort(() => Math.random() - 0.5);
+    
+    shuffled.forEach((cell, index) => {
+        setTimeout(() => {
+            cell.staticMode = true;
+            
+            // Quand toutes les cellules sont en parasites, lancer l'explosion
+            if(index === shuffled.length - 1){
+                setTimeout(() => {
+                    // Exploser les TV une par une
+                    shuffled.forEach((c, i) => {
+                        setTimeout(() => {
+                            c.explodeGlass();
+                            
+                            // Quand toutes les TV ont explosé, ne rien faire
+                            // Les TV restent noires jusqu'au clic
+                            if(i === shuffled.length - 1){
+                                staticWaveActive = false;
+                            }
+                        }, i * 800);
+                    });
+                }, 2000);
+            }
+        }, index * 1500); // 1.5 secondes entre chaque TV
+    });
+}
+
+function animate(){
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    cells.forEach(c=>{
+        c.update();
+        c.draw();
+    });
+    
+    // Vérifier si on doit lancer une vague de parasites
+    // ET que la vague précédente est terminée
+    const allExplosionsComplete = cells.every(c => c.explosionComplete || (!c.exploding && !c.staticMode));
+    if(!staticWaveActive && allExplosionsComplete && Date.now() - staticWaveStartTime > staticWaveInterval){
+        startStaticWave();
+    }
+    
+    // Scanlines CRT
+    ctx.fillStyle = 'rgba(0,0,0,0.15)';
+    for(let y=0;y<canvas.height;y+=3){
+        ctx.fillRect(0, y, canvas.width, 1);
+    }
+    
+    // Léger bruit
+    ctx.save();
+    ctx.globalAlpha = 0.015;
+    const step = 4;
+    for(let x=0;x<canvas.width;x+=step){
+        for(let y=0;y<canvas.height;y+=step){
+            if(Math.random() > 0.5){
+                const noise = Math.random() * 255;
+                ctx.fillStyle = `rgb(${noise},${noise},${noise})`;
+                ctx.fillRect(x, y, step, step);
+            }
+        }
+    }
+    ctx.restore();
+    
+    requestAnimationFrame(animate);
+}
+animate();
+
+function handleTap(e){
+    e.preventDefault();
+    
+    // Annuler tous les timeouts en cours
+    for(let i = 0; i < 10000; i++){
+        clearTimeout(i);
+    }
+    
+    // Régénérer les TV
+    cells = generateGrid();
+    
+    // Reset complet de l'état
+    staticWaveActive = false;
+    staticWaveStartTime = Date.now();
+    staticWaveInterval = 5000 + Math.random() * 5000; // 5-10 secondes
+}
+canvas.addEventListener('click',handleTap);
+canvas.addEventListener('touchstart',handleTap);
+
+</script>
+</body>
+</html>

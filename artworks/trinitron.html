@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generative Art</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #0e0e0f;
+            overflow: hidden;
+        }
+
+        .canvas-frame {
+            position: relative;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 4px;
+            background: #161617;
+            width: min(78vw, 78vh, 620px);
+            height: min(78vw, 78vh, 620px);
+            overflow: hidden;
+        }
+
+        .canvas-frame::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.55) 100%);
+            z-index: 10;
+            border-radius: 3px;
+        }
+
+        .canvas-frame::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            z-index: 11;
+            border-radius: 3px;
+            opacity: 0.06;
+            mix-blend-mode: overlay;
+            background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            border-radius: 3px;
+            background: #0a0a0b;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+
+        canvas#particleCanvas { pointer-events: none; }
+        canvas#bloomCanvas { pointer-events: none; mix-blend-mode: screen; filter: blur(6px); opacity: 0.35; }
+        canvas#crtCanvas { pointer-events: none; z-index: 12; }
+
+        @media (max-width: 768px) {
+            .canvas-frame { width: min(92vw, 92vh, 500px); height: min(92vw, 92vh, 500px); }
+        }
+    </style>
+</head>
+<body>
+    <div class="canvas-frame">
+        <canvas id="antCanvas"></canvas>
+        <canvas id="particleCanvas"></canvas>
+        <canvas id="bloomCanvas"></canvas>
+        <canvas id="crtCanvas"></canvas>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/d3-delaunay@6"></script>
+    <script src="https://cdn.jsdelivr.net/npm/simplex-noise@2.4.0/simplex-noise.min.js"></script>
+    <script>
+        const antCanvas = document.getElementById('antCanvas');
+        const partCanvas = document.getElementById('particleCanvas');
+        const bloomCanvas = document.getElementById('bloomCanvas');
+        const crtCanvas = document.getElementById('crtCanvas');
+        const antCtx = antCanvas.getContext('2d');
+        const partCtx = partCanvas.getContext('2d');
+        const bloomCtx = bloomCanvas.getContext('2d');
+        const crtCtx = crtCanvas.getContext('2d');
+
+        // Offscreen canvas to composite all the source layers before applying the CRT effect
+        const composeCanvas = document.createElement('canvas');
+        const composeCtx = composeCanvas.getContext('2d');
+        // Reusable downsample canvas for the CRT pass (avoid allocating per frame)
+        const lowCanvas = document.createElement('canvas');
+        const lowCtx = lowCanvas.getContext('2d', { willReadFrequently: true });
+        // Reusable ghost-trail snapshot canvas
+        const ghostCanvas = document.createElement('canvas');
+        const ghostCtx = ghostCanvas.getContext('2d');
+
+        let width, height, size, time = 0;
+
+        const ANT_COUNT = 4;
+        const CELL_SIZE = 4;
+        const STEPS_PER_FRAME = 30;
+        const DIRS = [[0,-1],[1,0],[0,1],[-1,0]];
+
+        const PARTICLE_COUNT = 120;
+        const PARTICLE_SPEED = 1.2;
+        const SENSE_RADIUS = 6;
+        const CONNECTION_DISTANCE = 60;
+        const GRID_SIZE = 60;
+
+        // CRT settings (animated, 90s music-video style)
+        const CRT = {
+            pixelSize: 6,
+            brightness: 1.6,
+            blur: 1.2,
+            glow: 0.45,
+            chromaShift: 0,    // RGB channel separation in px
+            scanRoll: 0,       // vertical scroll of scanlines
+            jitterX: 0,        // horizontal jitter
+            jitterY: 0,
+            tearY: -1,         // y-position of horizontal tear (-1 = off)
+            tearShift: 0,
+            invert: 0,         // 0..1 momentary color invert
+            ghostAlpha: 0,     // trailing ghost frames
+            distort: 0,        // wave distortion amplitude
+        };
+        let prevGhostReady = false;
+        let prevComposeImage = null; // legacy unused
+
+        let cols, rows;
+        let grid;
+        let trailAge;
+        const activeCells = new Set();
+        const ants = [];
+        const particles = [];
+
+        const currentTheme = { h: 220, sat: 30, light: 70 };
+
+        const simplex = new SimplexNoise();
+        function noise3D(x, y, z) {
+            return (simplex.noise3D(x, y, z) + 1) / 2;
+        }
+
+        class Ant {
+            constructor() {
+                this.x = Math.floor(cols / 2 + (Math.random() - 0.5) * 20);
+                this.y = Math.floor(rows / 2 + (Math.random() - 0.5) * 20);
+                this.dir = Math.floor(Math.random() * 4);
+            }
+            step() {
+                const idx = this.y * cols + this.x;
+                const cell = grid[idx];
+                this.dir = cell === 0 ? (this.dir + 1) % 4 : (this.dir + 3) % 4;
+                if (cell) {
+                    grid[idx] = 0;
+                    activeCells.delete(idx);
+                } else {
+                    grid[idx] = 1;
+                    activeCells.add(idx);
+                }
+                trailAge[idx] = 1.0;
+                this.x += DIRS[this.dir][0];
+                this.y += DIRS[this.dir][1];
+                if (this.x < 0) this.x = cols - 1;
+                if (this.x >= cols) this.x = 0;
+                if (this.y < 0) this.y = rows - 1;
+                if (this.y >= rows) this.y = 0;
+            }
+        }
+
+        class Particle {
+            constructor() { this.reset(); }
+            reset() {
+                this.x = Math.random() * width;
+                this.y = Math.random() * height;
+                this.angle = Math.random() * Math.PI * 2;
+                this.life = Math.random() * 300 + 100;
+                this.maxLife = this.life;
+                this.hueOffset = (Math.random() - 0.5) * 40;
+                this.satOffset = (Math.random() - 0.5) * 20;
+                this.lightOffset = (Math.random() - 0.5) * 25;
+                this.huePhase = Math.random() * Math.PI * 2;
+                this.hueSpeed = 0.005 + Math.random() * 0.01;
+                this.trail = [];
+            }
+            sense(angle) {
+                const cx = Math.floor(this.x / CELL_SIZE + Math.cos(angle) * SENSE_RADIUS);
+                const cy = Math.floor(this.y / CELL_SIZE + Math.sin(angle) * SENSE_RADIUS);
+                if (cx < 0 || cx >= cols || cy < 0 || cy >= rows) return 0;
+                return trailAge[cy * cols + cx];
+            }
+            update() {
+                const left = this.sense(this.angle - 0.5);
+                const center = this.sense(this.angle);
+                const right = this.sense(this.angle + 0.5);
+
+                if (center > left && center > right) {
+                    // keep heading
+                } else if (left > right) {
+                    this.angle -= 0.3;
+                } else if (right > left) {
+                    this.angle += 0.3;
+                } else {
+                    this.angle += (Math.random() - 0.5) * 0.4;
+                }
+
+                // Perlin flow field — hybrid blend
+                const noiseAngle = noise3D(this.x * 0.002, this.y * 0.002, time * 0.002) * Math.PI * 2;
+                const influence = 0.15;
+                let diff = noiseAngle - this.angle;
+                while (diff > Math.PI) diff -= Math.PI * 2;
+                while (diff < -Math.PI) diff += Math.PI * 2;
+                this.angle += diff * influence;
+
+                this.x += Math.cos(this.angle) * PARTICLE_SPEED;
+                this.y += Math.sin(this.angle) * PARTICLE_SPEED;
+                this.life--;
+
+                // Record trail (skip if wrapped)
+                const last = this.trail[this.trail.length - 1];
+                if (!last || (Math.abs(last.x - this.x) < 30 && Math.abs(last.y - this.y) < 30)) {
+                    this.trail.push({ x: this.x, y: this.y });
+                    if (this.trail.length > 25) this.trail.shift();
+                } else {
+                    this.trail = [{ x: this.x, y: this.y }];
+                }
+
+                if (this.life <= 0) this.reset();
+                if (this.x < 0) this.x = width;
+                if (this.x > width) this.x = 0;
+                if (this.y < 0) this.y = height;
+                if (this.y > height) this.y = 0;
+            }
+            draw() {
+                const alpha = this.life / this.maxLife;
+                const fadeIn = Math.min(1, (this.maxLife - this.life) / 15);
+                const a = alpha * fadeIn;
+                const globalH = (time * 0.3) % 360;
+                const personalShift = Math.sin(time * this.hueSpeed + this.huePhase) * 20;
+                const h = (globalH + this.hueOffset + personalShift + 360) % 360;
+                const s = Math.max(0, Math.min(100, currentTheme.sat + this.satOffset));
+                const l = Math.max(0, Math.min(95, currentTheme.light + this.lightOffset));
+
+                // Trail as filaments
+                if (this.trail.length > 1) {
+                    for (let i = 1; i < this.trail.length; i++) {
+                        const t = i / this.trail.length;
+                        const p0 = this.trail[i - 1];
+                        const p1 = this.trail[i];
+                        partCtx.strokeStyle = `hsla(${h}, ${s}%, ${l}%, ${a * t * 0.6})`;
+                        partCtx.lineWidth = t * 1.6;
+                        partCtx.lineCap = 'round';
+                        partCtx.beginPath();
+                        partCtx.moveTo(p0.x, p0.y);
+                        partCtx.lineTo(p1.x, p1.y);
+                        partCtx.stroke();
+                    }
+                }
+
+                // Bright head
+                partCtx.beginPath();
+                partCtx.arc(this.x, this.y, 1.6, 0, Math.PI * 2);
+                partCtx.fillStyle = `hsla(${h}, ${s}%, ${l}%, ${a})`;
+                partCtx.fill();
+            }
+        }
+
+        function setupCanvas(c, cx) {
+            c.width = size * devicePixelRatio;
+            c.height = size * devicePixelRatio;
+            c.style.width = size + 'px';
+            c.style.height = size + 'px';
+            cx.scale(devicePixelRatio, devicePixelRatio);
+        }
+
+        function resize() {
+            const rect = antCanvas.parentElement.getBoundingClientRect();
+            size = Math.min(rect.width, rect.height);
+            width = size;
+            height = size;
+            setupCanvas(antCanvas, antCtx);
+            setupCanvas(partCanvas, partCtx);
+            setupCanvas(bloomCanvas, bloomCtx);
+            setupCanvas(crtCanvas, crtCtx);
+
+            // Compose canvas at CSS pixel size (used to read source colors)
+            composeCanvas.width = size;
+            composeCanvas.height = size;
+            ghostCanvas.width = size;
+            ghostCanvas.height = size;
+            prevGhostReady = false;
+
+            cols = Math.floor(width / CELL_SIZE);
+            rows = Math.floor(height / CELL_SIZE);
+            grid = new Uint8Array(cols * rows);
+            trailAge = new Float32Array(cols * rows);
+            activeCells.clear();
+
+            ants.length = 0;
+            for (let i = 0; i < ANT_COUNT; i++) ants.push(new Ant());
+
+            particles.length = 0;
+            for (let i = 0; i < PARTICLE_COUNT; i++) particles.push(new Particle());
+        }
+
+        function updateCRTFX() {
+            const t = time;
+
+            // Slow breathing pixel size, with periodic dramatic shifts
+            const basePix = 5 + Math.sin(t * 0.012) * 2.5;
+            // Beat: every ~180 frames, snap to a different pixel size for a few frames
+            const beatPhase = (t % 180) / 180;
+            let beatPix = 0;
+            if (beatPhase < 0.06) beatPix = 8;       // big chunky pixels on the "beat"
+            else if (beatPhase > 0.5 && beatPhase < 0.54) beatPix = -2; // sharper
+            CRT.pixelSize = Math.max(2, Math.round(basePix + beatPix));
+
+            // Chromatic aberration pulses
+            CRT.chromaShift = Math.sin(t * 0.04) * 1.2 + Math.sin(t * 0.011) * 2.5;
+
+            // Scanline roll (rolling vertical hold)
+            CRT.scanRoll = (t * 0.6) % 1000;
+
+            // Random jitter / horizontal tear glitches
+            CRT.jitterX = 0;
+            CRT.jitterY = 0;
+            CRT.tearY = -1;
+            CRT.tearShift = 0;
+            CRT.invert = 0;
+
+            // Glitch bursts
+            if (Math.random() < 0.04) {
+                CRT.jitterX = (Math.random() - 0.5) * 14;
+                CRT.jitterY = (Math.random() - 0.5) * 4;
+            }
+            if (Math.random() < 0.025) {
+                CRT.tearY = Math.random() * height;
+                CRT.tearShift = (Math.random() - 0.5) * 40;
+            }
+            if (Math.random() < 0.008) {
+                CRT.invert = 1;
+            }
+
+            // Brightness pulse
+            CRT.brightness = 1.4 + Math.sin(t * 0.05) * 0.25 + (Math.random() < 0.02 ? 0.6 : 0);
+
+            // Blur breathes
+            CRT.blur = 0.8 + Math.abs(Math.sin(t * 0.008)) * 1.6;
+
+            // Glow pulse
+            CRT.glow = 0.35 + Math.abs(Math.sin(t * 0.02)) * 0.4;
+
+            // Wave distortion sweeps occasionally
+            CRT.distort = Math.max(0, Math.sin(t * 0.006)) * 6;
+
+            // Ghost trails on big beats
+            CRT.ghostAlpha = beatPhase < 0.12 ? 0.35 : 0.12;
+        }
+
+        function applyCRT() {
+            updateCRTFX();
+
+            const W = width;
+            const H = height;
+            const pixelSize = CRT.pixelSize;
+
+            // 1) Compose all source layers into composeCanvas
+            composeCtx.globalCompositeOperation = 'source-over';
+            composeCtx.globalAlpha = 1;
+
+            // Ghost trail: keep a fading copy of last frame
+            if (prevGhostReady && CRT.ghostAlpha > 0) {
+                composeCtx.fillStyle = '#000';
+                composeCtx.fillRect(0, 0, W, H);
+                composeCtx.globalAlpha = CRT.ghostAlpha;
+                composeCtx.drawImage(ghostCanvas, 0, 0, W, H);
+                composeCtx.globalAlpha = 1;
+            } else {
+                composeCtx.fillStyle = '#000';
+                composeCtx.fillRect(0, 0, W, H);
+            }
+
+            // Wave distortion: draw source in horizontal slices with sin offset
+            const slice = 4;
+            const drawLayer = (layer) => {
+                if (CRT.distort < 0.5) {
+                    composeCtx.drawImage(layer, 0, 0, W, H);
+                } else {
+                    for (let y = 0; y < H; y += slice) {
+                        const off = Math.sin((y + time * 4) * 0.04) * CRT.distort;
+                        composeCtx.drawImage(layer,
+                            0, y * (layer.height / H), layer.width, slice * (layer.height / H),
+                            off, y, W, slice);
+                    }
+                }
+            };
+            drawLayer(antCanvas);
+            drawLayer(partCanvas);
+            composeCtx.globalCompositeOperation = 'lighter';
+            composeCtx.globalAlpha = 0.35;
+            drawLayer(bloomCanvas);
+            composeCtx.globalAlpha = 1;
+            composeCtx.globalCompositeOperation = 'source-over';
+
+            // Snapshot for next frame's ghost (reusable canvas)
+            ghostCtx.drawImage(composeCanvas, 0, 0, W, H);
+            prevGhostReady = true;
+
+            // 2) Downsample to logical pixel resolution to read colors (reuse lowCanvas)
+            const lowCols = Math.ceil(W / pixelSize);
+            const lowRows = Math.ceil(H / pixelSize);
+            if (lowCanvas.width !== lowCols || lowCanvas.height !== lowRows) {
+                lowCanvas.width = lowCols;
+                lowCanvas.height = lowRows;
+            }
+            lowCtx.clearRect(0, 0, lowCols, lowRows);
+            lowCtx.drawImage(composeCanvas, 0, 0, lowCols, lowRows);
+            const srcData = lowCtx.getImageData(0, 0, lowCols, lowRows).data;
+
+            // 3) Draw RGB stripes on the CRT canvas (CSS-pixel coordinate space)
+            crtCtx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+            crtCtx.fillStyle = '#000';
+            crtCtx.fillRect(0, 0, W, H);
+
+            const stripeW = pixelSize / 3;
+            const scanGap = Math.max(1, Math.floor(pixelSize * 0.18));
+            const stripeH = pixelSize - scanGap;
+
+            const chroma = CRT.chromaShift;
+            const jx = CRT.jitterX;
+            const jy = CRT.jitterY;
+            const tearY = CRT.tearY;
+            const tearShift = CRT.tearShift;
+            const inv = CRT.invert;
+
+            crtCtx.globalCompositeOperation = 'lighter';
+            for (let y = 0; y < lowRows; y++) {
+                for (let x = 0; x < lowCols; x++) {
+                    const i = (y * lowCols + x) * 4;
+                    let r = srcData[i];
+                    let g = srcData[i + 1];
+                    let b = srcData[i + 2];
+
+                    // Chromatic aberration: sample R and B from neighbouring cells
+                    const xrShift = Math.round(chroma);
+                    if (xrShift !== 0) {
+                        const xr = Math.max(0, Math.min(lowCols - 1, x - xrShift));
+                        const xb = Math.max(0, Math.min(lowCols - 1, x + xrShift));
+                        r = srcData[(y * lowCols + xr) * 4];
+                        b = srcData[(y * lowCols + xb) * 4 + 2];
+                    }
+
+                    if (inv > 0.5) { r = 255 - r; g = 255 - g; b = 255 - b; }
+
+                    let px = x * pixelSize + jx;
+                    let py = y * pixelSize + jy;
+
+                    // Horizontal tear glitch
+                    if (tearY >= 0 && py > tearY && py < tearY + 30) {
+                        px += tearShift;
+                    }
+
+                    crtCtx.fillStyle = `rgb(${Math.min(255, (r * CRT.brightness) | 0)},0,0)`;
+                    crtCtx.fillRect(px, py, stripeW, stripeH);
+                    crtCtx.fillStyle = `rgb(0,${Math.min(255, (g * CRT.brightness) | 0)},0)`;
+                    crtCtx.fillRect(px + stripeW, py, stripeW, stripeH);
+                    crtCtx.fillStyle = `rgb(0,0,${Math.min(255, (b * CRT.brightness) | 0)})`;
+                    crtCtx.fillRect(px + 2 * stripeW, py, stripeW, stripeH);
+                }
+            }
+            crtCtx.globalCompositeOperation = 'source-over';
+
+            // 4) Rolling scanline bar (the bright/dark band slowly drifting)
+            crtCtx.save();
+            const rollY = (CRT.scanRoll % H);
+            const barH = H * 0.18;
+            const rollGrad = crtCtx.createLinearGradient(0, rollY - barH, 0, rollY + barH);
+            rollGrad.addColorStop(0, 'rgba(255,255,255,0)');
+            rollGrad.addColorStop(0.5, 'rgba(255,255,255,0.08)');
+            rollGrad.addColorStop(1, 'rgba(255,255,255,0)');
+            crtCtx.globalCompositeOperation = 'lighter';
+            crtCtx.fillStyle = rollGrad;
+            crtCtx.fillRect(0, rollY - barH, W, barH * 2);
+            // wrap top
+            if (rollY + barH > H) {
+                crtCtx.fillRect(0, rollY - barH - H, W, barH * 2);
+            }
+            crtCtx.restore();
+
+            // 5) Bloom + soft blur over the CRT layer itself
+            if (CRT.glow > 0) {
+                crtCtx.save();
+                crtCtx.globalCompositeOperation = 'lighter';
+                crtCtx.filter = `blur(${CRT.blur * 2}px)`;
+                crtCtx.globalAlpha = CRT.glow;
+                crtCtx.drawImage(crtCanvas, 0, 0, W, H);
+                crtCtx.restore();
+            }
+            if (CRT.blur > 0) {
+                crtCtx.save();
+                crtCtx.filter = `blur(${CRT.blur}px)`;
+                crtCtx.drawImage(crtCanvas, 0, 0, W, H);
+                crtCtx.restore();
+            }
+        }
+
+        function animate() {
+            // Ant layer
+            antCtx.fillStyle = 'rgba(10, 10, 11, 0.04)';
+            antCtx.fillRect(0, 0, width, height);
+
+            for (let s = 0; s < STEPS_PER_FRAME; s++) {
+                ants.forEach(a => a.step());
+            }
+
+            for (let i = 0; i < trailAge.length; i++) {
+                trailAge[i] *= 0.985;
+            }
+
+            antCtx.fillStyle = `hsla(${currentTheme.h}, ${currentTheme.sat}%, ${currentTheme.light}%, 0.7)`;
+            for (const idx of activeCells) {
+                const x = idx % cols;
+                const y = (idx - x) / cols;
+                antCtx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+            }
+
+            antCtx.fillStyle = `hsla(${currentTheme.h}, ${currentTheme.sat}%, ${Math.min(95, currentTheme.light + 25)}%, 1)`;
+            ants.forEach(a => {
+                antCtx.fillRect(a.x * CELL_SIZE, a.y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+            });
+
+            // Particle layer: Droste-style infinite zoom feedback + fade
+            partCtx.save();
+            partCtx.setTransform(1, 0, 0, 1, 0, 0);
+            partCtx.globalAlpha = 0.88;
+            const fbZoom = 1.025;
+            const fbRot = 0.003;
+            const dw = partCanvas.width;
+            const dh = partCanvas.height;
+            const fbCx = dw / 2;
+            const fbCy = dh / 2;
+            partCtx.translate(fbCx, fbCy);
+            partCtx.scale(fbZoom, fbZoom);
+            partCtx.rotate(fbRot);
+            partCtx.translate(-fbCx, -fbCy);
+            partCtx.drawImage(partCanvas, 0, 0);
+            partCtx.restore();
+            partCtx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+
+            partCtx.fillStyle = 'rgba(10, 10, 11, 0.18)';
+            partCtx.fillRect(0, 0, width, height);
+
+            // Density grid for glow
+            const GLOW_CELL = 40;
+            const gCols = Math.ceil(width / GLOW_CELL);
+            const gRows = Math.ceil(height / GLOW_CELL);
+            const density = new Float32Array(gCols * gRows);            for (const p of particles) {
+                const gx = Math.floor(p.x / GLOW_CELL);
+                const gy = Math.floor(p.y / GLOW_CELL);
+                if (gx >= 0 && gx < gCols && gy >= 0 && gy < gRows) {
+                    density[gy * gCols + gx]++;
+                }
+            }
+
+            partCtx.globalCompositeOperation = 'lighter';
+            for (let gy = 0; gy < gRows; gy++) {
+                for (let gx = 0; gx < gCols; gx++) {
+                    const d = density[gy * gCols + gx];
+                    if (d < 2) continue;
+                    const cx = gx * GLOW_CELL + GLOW_CELL / 2;
+                    const cy = gy * GLOW_CELL + GLOW_CELL / 2;
+                    const radius = Math.min(80, 20 + d * 8);
+                    const intensity = Math.min(0.15, d * 0.018);
+                    const glowH = ((time * 0.3) + gx * 5 + gy * 5) % 360;
+
+                    // Halo
+                    const grad = partCtx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+                    grad.addColorStop(0, `hsla(${glowH}, ${currentTheme.sat}%, ${currentTheme.light}%, ${intensity})`);
+                    grad.addColorStop(0.5, `hsla(${glowH}, ${currentTheme.sat}%, ${currentTheme.light}%, ${intensity * 0.3})`);
+                    grad.addColorStop(1, `hsla(${glowH}, ${currentTheme.sat}%, ${currentTheme.light}%, 0)`);
+                    partCtx.fillStyle = grad;
+                    partCtx.beginPath();
+                    partCtx.arc(cx, cy, radius, 0, Math.PI * 2);
+                    partCtx.fill();
+
+                    if (d >= 4) {
+                        // Wedge rays
+                        const rayCount = 12;
+                        const rayLength = radius * 2.2;
+                        const rayIntensity = intensity * 0.4;
+                        const rotation = time * 0.003 + (gx + gy) * 0.5;
+                        const wedgeWidth = (Math.PI * 2) / rayCount * 0.45;
+                        for (let r = 0; r < rayCount; r++) {
+                            const angle = (r / rayCount) * Math.PI * 2 + rotation;
+                            const lengthVar = 0.6 + Math.abs(Math.sin(time * 0.02 + r + gx + gy)) * 0.5;
+                            const len = rayLength * lengthVar;
+                            const a1 = angle - wedgeWidth;
+                            const a2 = angle + wedgeWidth;
+                            const wg = partCtx.createRadialGradient(cx, cy, 0, cx, cy, len);
+                            wg.addColorStop(0, `hsla(${glowH}, ${currentTheme.sat}%, ${Math.min(95, currentTheme.light + 10)}%, ${rayIntensity})`);
+                            wg.addColorStop(0.6, `hsla(${glowH}, ${currentTheme.sat}%, ${currentTheme.light}%, ${rayIntensity * 0.25})`);
+                            wg.addColorStop(1, `hsla(${glowH}, ${currentTheme.sat}%, ${currentTheme.light}%, 0)`);
+                            partCtx.fillStyle = wg;
+                            partCtx.beginPath();
+                            partCtx.moveTo(cx, cy);
+                            partCtx.arc(cx, cy, len, a1, a2);
+                            partCtx.closePath();
+                            partCtx.fill();
+                        }
+
+                        // Bright core
+                        const coreGrad = partCtx.createRadialGradient(cx, cy, 0, cx, cy, 6);
+                        coreGrad.addColorStop(0, `hsla(${glowH}, ${currentTheme.sat}%, 90%, ${intensity * 0.8})`);
+                        coreGrad.addColorStop(1, `hsla(${glowH}, ${currentTheme.sat}%, 90%, 0)`);
+                        partCtx.fillStyle = coreGrad;
+                        partCtx.beginPath();
+                        partCtx.arc(cx, cy, 6, 0, Math.PI * 2);
+                        partCtx.fill();
+
+                        // Expanding rings
+                        const ringMaxRadius = radius * 2.5;
+                        const ringCount = 3;
+                        const ringPeriod = 120;
+                        for (let r = 0; r < ringCount; r++) {
+                            const phase = ((time + r * (ringPeriod / ringCount) + (gx + gy) * 7) % ringPeriod) / ringPeriod;
+                            const ringRadius = phase * ringMaxRadius;
+                            const ringAlpha = (1 - phase) * intensity * 0.5;
+                            partCtx.strokeStyle = `hsla(${glowH}, ${currentTheme.sat}%, ${currentTheme.light + 5}%, ${ringAlpha})`;
+                            partCtx.lineWidth = 0.8;
+                            partCtx.beginPath();
+                            partCtx.arc(cx, cy, ringRadius, 0, Math.PI * 2);
+                            partCtx.stroke();
+                        }
+                    }
+                }
+            }
+            partCtx.globalCompositeOperation = 'source-over';
+
+            // Delaunay mesh
+            const points = new Float64Array(particles.length * 2);
+            for (let i = 0; i < particles.length; i++) {
+                points[i * 2] = particles[i].x;
+                points[i * 2 + 1] = particles[i].y;
+            }
+            const delaunay = new d3.Delaunay(points);
+            const { triangles } = delaunay;
+
+            const globalH = (time * 0.3) % 360;
+            const baseColor = `${globalH}, ${currentTheme.sat}%, ${currentTheme.light}%`;
+
+            partCtx.lineWidth = 0.4;
+            const meshAlpha = Math.sin(time * 0.01) * 0.04 + 0.08;
+            partCtx.strokeStyle = `hsla(${baseColor}, ${meshAlpha})`;
+            partCtx.beginPath();
+            for (let i = 0; i < triangles.length; i += 3) {
+                const i0 = triangles[i] * 2;
+                const i1 = triangles[i + 1] * 2;
+                const i2 = triangles[i + 2] * 2;
+                partCtx.moveTo(points[i0], points[i0 + 1]);
+                partCtx.lineTo(points[i1], points[i1 + 1]);
+                partCtx.lineTo(points[i2], points[i2 + 1]);
+                partCtx.closePath();
+            }
+            partCtx.stroke();
+
+            // Proximity connections
+            const sgrid = {};
+            for (let i = 0; i < particles.length; i++) {
+                const p = particles[i];
+                const cx = Math.floor(p.x / GRID_SIZE);
+                const cy = Math.floor(p.y / GRID_SIZE);
+                const key = cx + ',' + cy;
+                if (!sgrid[key]) sgrid[key] = [];
+                sgrid[key].push(i);
+            }
+
+            partCtx.lineWidth = 0.5;
+            for (let i = 0; i < particles.length; i++) {
+                const p1 = particles[i];
+                const cx = Math.floor(p1.x / GRID_SIZE);
+                const cy = Math.floor(p1.y / GRID_SIZE);
+                for (let dx = -1; dx <= 1; dx++) {
+                    for (let dy = -1; dy <= 1; dy++) {
+                        const cell = sgrid[(cx + dx) + ',' + (cy + dy)];
+                        if (!cell) continue;
+                        for (const j of cell) {
+                            if (j <= i) continue;
+                            const p2 = particles[j];
+                            const ddx = p1.x - p2.x;
+                            const ddy = p1.y - p2.y;
+                            const dist = Math.sqrt(ddx * ddx + ddy * ddy);
+                            if (dist < CONNECTION_DISTANCE) {
+                                const a = (1 - dist / CONNECTION_DISTANCE) * 0.3;
+                                partCtx.strokeStyle = `hsla(${baseColor}, ${a})`;
+                                partCtx.beginPath();
+                                partCtx.moveTo(p1.x, p1.y);
+                                partCtx.lineTo(p2.x, p2.y);
+                                partCtx.stroke();
+                            }
+                        }
+                    }
+                }
+            }
+
+            particles.forEach(p => { p.update(); p.draw(); });
+
+            // Bloom pass — re-draw only bright elements on bloom canvas
+            bloomCtx.clearRect(0, 0, width, height);
+            bloomCtx.globalCompositeOperation = 'lighter';
+
+            // Bright cores from dense clusters
+            for (let gy = 0; gy < gRows; gy++) {
+                for (let gx = 0; gx < gCols; gx++) {
+                    const d = density[gy * gCols + gx];
+                    if (d < 3) continue;
+                    const cx = gx * GLOW_CELL + GLOW_CELL / 2;
+                    const cy = gy * GLOW_CELL + GLOW_CELL / 2;
+                    const r = Math.min(60, 15 + d * 6);
+                    const glowH = ((time * 0.3) + gx * 5 + gy * 5) % 360;
+                    const grad = bloomCtx.createRadialGradient(cx, cy, 0, cx, cy, r);
+                    grad.addColorStop(0, `hsla(${glowH}, ${currentTheme.sat}%, ${currentTheme.light + 10}%, ${Math.min(0.4, d * 0.05)})`);
+                    grad.addColorStop(1, `hsla(${glowH}, ${currentTheme.sat}%, ${currentTheme.light + 10}%, 0)`);
+                    bloomCtx.fillStyle = grad;
+                    bloomCtx.beginPath();
+                    bloomCtx.arc(cx, cy, r, 0, Math.PI * 2);
+                    bloomCtx.fill();
+
+                    // Echo expanding rings on bloom for visibility
+                    if (d >= 4) {
+                        const ringMaxRadius = r * 2.5;
+                        const ringCount = 3;
+                        const ringPeriod = 120;
+                        for (let ri = 0; ri < ringCount; ri++) {
+                            const phase = ((time + ri * (ringPeriod / ringCount) + (gx + gy) * 7) % ringPeriod) / ringPeriod;
+                            const ringRadius = phase * ringMaxRadius;
+                            const ringAlpha = (1 - phase) * 0.5;
+                            bloomCtx.strokeStyle = `hsla(${glowH}, ${currentTheme.sat + 10}%, ${currentTheme.light + 15}%, ${ringAlpha})`;
+                            bloomCtx.lineWidth = 1.5;
+                            bloomCtx.beginPath();
+                            bloomCtx.arc(cx, cy, ringRadius, 0, Math.PI * 2);
+                            bloomCtx.stroke();
+                        }
+                    }
+                }
+            }
+
+            // Particles as bright dots
+            particles.forEach(p => {
+                const alpha = p.life / p.maxLife;
+                const fadeIn = Math.min(1, (p.maxLife - p.life) / 15);
+                const a = alpha * fadeIn;
+                const gH = (time * 0.3) % 360;
+                const personalShift = Math.sin(time * p.hueSpeed + p.huePhase) * 20;
+                const h = (gH + p.hueOffset + personalShift + 360) % 360;
+                bloomCtx.beginPath();
+                bloomCtx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+                bloomCtx.fillStyle = `hsla(${h}, ${currentTheme.sat + 20}%, 70%, ${a * 0.35})`;
+                bloomCtx.fill();
+            });
+
+            bloomCtx.globalCompositeOperation = 'source-over';
+
+            // CRT overlay pass
+            applyCRT();
+
+            time++;
+            requestAnimationFrame(animate);
+        }
+
+        window.addEventListener('resize', resize);
+
+        resize();
+        animate();
+    </script>
+</body>
+</html>

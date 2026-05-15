@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #020410; overflow: hidden; display: flex; align-items: center; justify-content: center; height: 100vh; }
+  canvas { display: block; border: 1px solid #555; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const c = document.getElementById('c');
+const ctx = c.getContext('2d');
+let W, H;
+function resize() { W = H = c.width = c.height = Math.min(innerWidth, innerHeight); }
+resize();
+addEventListener('resize', resize);
+
+const TAU = Math.PI * 2;
+const NUM = 800;
+
+function circle(n) {
+  const p = [];
+  for (let i = 0; i < n; i++) { const a = (i/n)*TAU; p.push({x:Math.cos(a),y:Math.sin(a)}); }
+  return p;
+}
+function star(n, arms, inner) {
+  const p = [];
+  for (let i = 0; i < n; i++) {
+    const a = (i/n)*TAU - Math.PI/2;
+    const t = (i/n)*arms*TAU;
+    const r = inner + (1-inner)*(0.5+0.5*Math.cos(t));
+    p.push({x:Math.cos(a)*r, y:Math.sin(a)*r});
+  }
+  return p;
+}
+function heart(n) {
+  const p = [];
+  for (let i = 0; i < n; i++) {
+    const t = (i/n)*TAU;
+    const x = 16*Math.sin(t)**3;
+    const y = -(13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t));
+    p.push({x:x/17, y:y/17});
+  }
+  return p;
+}
+function spiral(n) {
+  const p = [];
+  for (let i = 0; i < n; i++) { const t=i/n, a=t*TAU*3; p.push({x:Math.cos(a)*t, y:Math.sin(a)*t}); }
+  return p;
+}
+
+const shapes = [circle, n=>star(n,5,0.4), heart, spiral, n=>star(n,7,0.55)];
+let curShape = 0, targets = shapes[0](NUM), nextTargets = targets, morphProgress = 1, shapeTimer = 200;
+
+// Noise
+function noise2d(x, y) { const n = Math.sin(x*127.1+y*311.7)*43758.5453; return n - Math.floor(n); }
+function smoothNoise(x, y) {
+  const ix = Math.floor(x), iy = Math.floor(y);
+  const fx = x-ix, fy = y-iy;
+  const sx = fx*fx*(3-2*fx), sy = fy*fy*(3-2*fy);
+  const a = noise2d(ix,iy), b = noise2d(ix+1,iy), c = noise2d(ix,iy+1), d = noise2d(ix+1,iy+1);
+  return a+(b-a)*sx + (c-a)*sy + (a-b-c+d)*sx*sy;
+}
+function fbm(x, y) { return smoothNoise(x,y)*0.5 + smoothNoise(x*2,y*2)*0.3 + smoothNoise(x*4,y*4)*0.2; }
+
+// Particles
+const px = new Float32Array(NUM), py = new Float32Array(NUM);
+const vx = new Float32Array(NUM), vy = new Float32Array(NUM);
+const sz = new Float32Array(NUM);
+for (let i = 0; i < NUM; i++) {
+  px[i] = (Math.random()-0.5)*2; py[i] = (Math.random()-0.5)*2;
+  sz[i] = 2 + Math.random()*2;
+}
+
+// Sparkles
+const SP = 200;
+const spx = new Float32Array(SP), spy = new Float32Array(SP);
+const spvx = new Float32Array(SP), spvy = new Float32Array(SP);
+const spLife = new Float32Array(SP), spMax = new Float32Array(SP), spHue = new Float32Array(SP);
+let spIdx = 0;
+
+function emitSpark(x, y, h) {
+  const i = spIdx++ % SP;
+  spx[i] = x; spy[i] = y;
+  const a = Math.random()*TAU, v = 0.3+Math.random()*1.5;
+  spvx[i] = Math.cos(a)*v; spvy[i] = Math.sin(a)*v;
+  spLife[i] = spMax[i] = 30+Math.random()*40;
+  spHue[i] = h;
+}
+
+function drawSparks() {
+  for (let i = 0; i < SP; i++) {
+    if (spLife[i] <= 0) continue;
+    spLife[i]--;
+    spx[i] += spvx[i]; spy[i] += spvy[i];
+    spvx[i] *= 0.96; spvy[i] *= 0.96;
+    const t = spLife[i]/spMax[i], s = t*2, a = t*0.8;
+    ctx.beginPath();
+    ctx.moveTo(spx[i], spy[i]-s*2);
+    ctx.lineTo(spx[i]+s*0.5, spy[i]);
+    ctx.lineTo(spx[i], spy[i]+s*2);
+    ctx.lineTo(spx[i]-s*0.5, spy[i]);
+    ctx.closePath();
+    ctx.fillStyle = `hsla(${spHue[i]},80%,75%,${a})`;
+    ctx.fill();
+  }
+}
+
+const auroraHues = [140, 160, 180, 200, 270, 290, 310];
+
+function frame(ts) {
+  const t = ts * 0.001;
+  ctx.fillStyle = 'rgba(2,4,12,0.08)';
+  ctx.fillRect(0, 0, W, H);
+
+  if (--shapeTimer <= 0) {
+    curShape = (curShape+1) % shapes.length;
+    nextTargets = shapes[curShape](NUM);
+    morphProgress = 0;
+    shapeTimer = 250 + Math.random()*150|0;
+  }
+  morphProgress = Math.min(1, morphProgress+0.008);
+  const ease = morphProgress < 0.5
+    ? 4*morphProgress*morphProgress*morphProgress
+    : 1-Math.pow(-2*morphProgress+2,3)/2;
+
+  const scale = W*0.32, cx = W*0.5, cy = H*0.5;
+  const turbulence = Math.sin(morphProgress*Math.PI)*0.02;
+  const coinCos = Math.cos(t*0.8);
+  const coinSin = Math.sin(t*0.8);
+  const thick = 6 * coinSin;
+
+  for (let i = 0; i < NUM; i++) {
+    const ta = targets[i], tb = nextTargets[i];
+    const tx = ta.x+(tb.x-ta.x)*ease;
+    const ty = ta.y+(tb.y-ta.y)*ease;
+
+    const drift = 0.004+turbulence;
+    const nx = fbm(px[i]*2+t*0.5, py[i]*2)*2-1;
+    const ny = fbm(px[i]*2, py[i]*2+t*0.5)*2-1;
+    vx[i] += nx*drift + Math.sin(t*1.3+i*0.1)*0.001;
+    vy[i] += ny*drift + Math.cos(t*1.7+i*0.1)*0.001;
+    vx[i] += (tx-px[i])*0.035;
+    vy[i] += (ty-py[i])*0.035;
+    vx[i] *= 0.88; vy[i] *= 0.88;
+    px[i] += vx[i]; py[i] += vy[i];
+
+    const sx = px[i]*scale*coinCos+cx, sy = py[i]*scale+cy;
+    const spd = Math.sqrt(vx[i]*vx[i]+vy[i]*vy[i]);
+
+    const hi = (i*0.01 + t*0.3 + Math.sin(t+i*0.02)*2) % auroraHues.length;
+    const hi0 = hi|0, hi1 = (hi0+1)%auroraHues.length;
+    const h = auroraHues[hi0] + (auroraHues[hi1]-auroraHues[hi0])*(hi-hi0);
+    const sat = 70 + spd*300;
+    const lit = 50 + spd*200 + Math.sin(t*1.5+i*0.03)*10;
+    const alpha = 0.6 + Math.min(spd*6, 0.35);
+    const s = sz[i] + spd*8;
+    const r2 = s*0.25;
+
+    // Back layer (thickness)
+    const bx = sx - thick;
+    ctx.beginPath();
+    ctx.moveTo(bx, sy-s*2);
+    ctx.quadraticCurveTo(bx+r2, sy-r2, bx+s, sy);
+    ctx.quadraticCurveTo(bx+r2, sy+r2, bx, sy+s*2);
+    ctx.quadraticCurveTo(bx-r2, sy+r2, bx-s, sy);
+    ctx.quadraticCurveTo(bx-r2, sy-r2, bx, sy-s*2);
+    ctx.closePath();
+    ctx.fillStyle = `hsla(${h},${sat}%,${lit*0.4}%,${alpha*0.3})`;
+    ctx.fill();
+
+    // Front layer
+    ctx.beginPath();
+    ctx.moveTo(sx, sy-s*2);
+    ctx.quadraticCurveTo(sx+r2, sy-r2, sx+s, sy);
+    ctx.quadraticCurveTo(sx+r2, sy+r2, sx, sy+s*2);
+    ctx.quadraticCurveTo(sx-r2, sy+r2, sx-s, sy);
+    ctx.quadraticCurveTo(sx-r2, sy-r2, sx, sy-s*2);
+    ctx.closePath();
+    ctx.fillStyle = `hsla(${h},${sat}%,${lit}%,${alpha})`;
+    ctx.fill();
+
+    if (spd > 0.012 && Math.random() < 0.15) emitSpark(sx, sy, h);
+  }
+
+  if (morphProgress >= 1) targets = nextTargets;
+  drawSparks();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

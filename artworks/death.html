@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Death Signal</title>
+    <style>
+        body {
+            margin: 0;
+            background: #000;
+            height: 100vh;
+            display: grid;
+            place-items: center;
+            overflow: hidden;
+        }
+        .tv-container {
+            position: relative;
+            aspect-ratio: 4/3;
+            max-width: 100vw;
+            max-height: 100vh;
+            border-radius: 3%;
+            overflow: hidden;
+        }
+        .tv-container::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            border-radius: 3%;
+            box-shadow: inset 0 0 80px 20px rgba(0,0,0,0.3);
+        }
+        canvas {
+            width: 100%;
+            height: 100%;
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+        }
+    </style>
+</head>
+<body>
+    <div class="tv-container">
+        <canvas id="static"></canvas>
+    </div>
+    <script>
+        const canvas = document.getElementById('static');
+        const ctx = canvas.getContext('2d', { alpha: false });
+
+        const DW = 640, DH = 480, RW = 640, RH = 480;
+        canvas.width = DW;
+        canvas.height = DH;
+
+        const CX = RW / 2, CY = RH / 2, DLIM = 30;
+        
+        let time = 0, lastT = 0, appPhase = 0, nextApp = Math.random() * 3 + 2;
+        let offX = 0, offY = 0, rollPos = 0, tcPhase = 0;
+        let inTC = true, transTC = false, transPhase = 0, tvOff = false, offPhase = 0;
+        let skullShown = false, finalSequence = false;
+        const bloodSplat = [], bloodDrip = [];
+
+        const staticDistMap = new Float32Array(RW * RH);
+        
+        const svgPath = "m 344.01783,823.52642 c -6.69808,-2.16341 -66.79084,-32.77996 -76.25,-38.84847 -11.21615,-7.1957 -21.77492,-18.54293 -29.75607,-31.97802 -6.38236,-10.74376 -7.11893,-12.70726 -7.11893,-18.97722 0,-4.69636 1.24718,-10.3761 3.79692,-17.29135 l 3.79692,-10.2978 -1.92192,-21.09787 c -1.05706,-11.60384 -1.92192,-24.90611 -1.92192,-29.56061 0,-10.4466 2.92863,-20.88892 6.37587,-22.73383 5.59253,-2.99303 12.37413,6.25145 12.37413,16.86803 0,27.60968 11.92227,78.38816 16.48885,70.22813 0.76912,-1.37435 0.4729,-5.21459 -0.8667,-11.23585 -1.11936,-5.03131 -1.85789,-11.62738 -1.64117,-14.6579 0.38757,-5.41981 0.47349,-5.51656 5.24624,-5.90783 2.66873,-0.21877 5.48123,0.23303 6.25,1.00402 0.87709,0.87961 1.39778,7.07161 1.39778,16.62237 0,16.64773 0.27816,17.19565 7.77447,15.3142 3.14762,-0.79001 3.18934,-0.95149 2.46824,-9.5528 -0.63671,-7.59465 -0.41246,-9.07026 1.69939,-11.18211 2.81987,-2.81988 7.74869,-3.18971 9.78646,-0.73434 0.77533,0.9342 2.47009,4.78068 3.76614,8.5477 4.45571,12.95079 7.30927,15.20945 9.9587,7.8826 1.67947,-4.6445 4.67745,-6.14292 10.83199,-5.41396 3.97782,0.47114 4.66005,1.49741 7.58152,11.40483 2.29373,7.77855 4.75206,10.03016 10.2574,9.39483 2.73963,-0.31616 3.43789,-1.09616 3.70576,-4.13956 1.29702,-14.73556 2.18662,-15.62169 10.75904,-10.71705 7.94148,4.54365 8.22861,4.87839 10.78589,12.57436 1.41001,4.24333 2.58955,5.74399 4.7563,6.05114 3.92609,0.55656 5.80294,-1.29596 7.68066,-7.5811 0.87536,-2.93005 2.66534,-7.43673 3.97771,-10.01485 2.15884,-4.24098 2.86374,-4.6875 7.39997,-4.6875 3.35724,0 5.25741,0.63477 5.75107,1.92124 0.9577,2.49575 7.27881,5.75182 9.50658,4.89696 1.10186,-0.42284 1.54148,-1.95301 1.20998,-4.21164 -0.42718,-2.9106 0.29657,-4.17084 4.03119,-7.01937 2.76319,-2.10759 5.00273,-3.021 5.69925,-2.32448 0.63107,0.63107 2.60865,6.1899 4.39464,12.35298 1.78599,6.16306 3.49959,11.45791 3.80799,11.76631 0.98315,0.98316 8.10016,-6.58273 8.79449,-9.34916 0.36738,-1.46379 -0.26701,-5.87764 -1.40974,-9.80857 -2.20467,-7.58376 -1.73714,-12.37141 1.56604,-16.03677 2.43941,-2.70689 8.60378,-2.84616 11.19697,-0.25298 1.06399,1.06399 2.07669,1.76712 2.25046,1.5625 0.17377,-0.20461 2.9883,-9.65327 6.25453,-20.99702 6.74042,-23.40986 10.77251,-32.96546 15.10906,-35.80688 6.79516,-4.45236 9.41225,1.7646 6.33988,15.06054 -2.64152,11.43133 -6.23812,61.77924 -5.4556,76.37134 0.86098,16.05546 -1.67883,26.89789 -7.87557,33.62055 -7.45297,8.08552 -42.46642,31.58427 -64.66402,43.39827 -6.70827,3.57028 -14.09136,7.89025 -16.40689,9.59995 -9.93565,7.3361 -27.23197,9.94939 -39.53995,5.97404 z m 16.25,-126.37416 c -0.6875,-0.25244 -3.58621,-1.05881 -6.44157,-1.79194 -4.95574,-1.2724 -5.25881,-1.63033 -6.67164,-7.87982 -2.57721,-11.39993 -2.24,-10.92189 -7.7046,-10.92189 -4.42188,0 -5.19215,0.44455 -6.42372,3.70734 -1.75498,4.6495 -6.46013,5.87983 -12.62898,3.30232 -5.16454,-2.15789 -4.84805,-0.41541 -5.01935,-27.63466 l -0.11013,-17.5 -3.125,0 c -2.57759,0 -3.07403,0.54741 -2.83404,3.125 1.03378,11.10299 0.6038,14.72576 -2.55917,21.5625 l -3.32526,7.1875 -6.15465,0 c -5.29865,0 -6.5918,-0.51954 -9.29788,-3.73551 -2.699,-3.2076 -4.88022,-10.07093 -6.1292,-19.2859 -0.63126,-4.65756 -3.25974,-3.44574 -4.33654,1.99931 -1.21347,6.1361 -3.90632,7.47904 -7.59681,3.78855 -1.70794,-1.70794 -2.62871,-5.02005 -3.23576,-11.63935 -1.36009,-14.83051 -4.17748,-26.213 -7.32163,-29.58004 -4.10725,-4.39841 -11.59078,-8.40584 -21.63263,-11.58425 l -8.79857,-2.78489 -9.06554,3.97889 c -5.93486,2.60483 -9.98467,3.68718 -11.72707,3.13416 -1.46384,-0.46461 -6.50312,-4.66353 -11.19839,-9.33095 -9.76045,-9.70252 -9.55807,-8.79238 -6.66187,-29.96002 2.69376,-19.68805 2.35146,-34.48987 -1.19136,-51.51657 -1.67559,-8.05288 -3.67357,-15.81323 -4.43996,-17.24523 -0.76638,-1.432 -3.36447,-8.06204 -5.77354,-14.73343 -2.40907,-6.67137 -8.24839,-21.44475 -12.97627,-32.82972 -8.90981,-21.45529 -17.25227,-50.92896 -19.90618,-70.328 -1.7077,-12.48259 -1.71689,-50.26852 -0.0148,-60.75916 2.5167,-15.51119 16.3983,-61.54176 22.63342,-75.0511 6.65943,-14.42866 11.4562,-21.85035 19.6892,-30.46365 7.09284,-7.42047 28.11962,-24.08613 34.64926,-27.46274 1.97236,-1.01995 4.70978,-3.10251 6.08316,-4.62792 4.33521,-4.81511 12.39946,-9.71576 32.74247,-19.89763 36.35032,-18.19367 71.07652,-25.26359 110.49599,-22.4959 23.35666,1.63989 57.12668,6.72584 70.50859,10.61896 15.58627,4.53444 35.4064,14.47998 46.26512,23.21537 17.40133,13.99865 25.16788,23.66991 37.09567,46.19323 5.97344,11.27967 12.60559,24.93984 14.73811,30.35594 2.13253,5.4161 4.68549,11.41026 5.67325,13.32037 0.98775,1.9101 3.16634,8.16625 4.8413,13.90256 1.67496,5.73628 4.48674,15.36772 6.2484,21.40318 7.6971,26.37039 14.10446,78.47135 12.78317,103.94543 -0.64775,12.48861 -1.38348,16.45941 -4.51632,24.375 -2.05839,5.20081 -9.4503,24.92476 -16.42649,43.83101 l -12.68396,34.375 -0.13413,25.625 c -0.11562,22.08601 0.19553,26.63009 2.25284,32.90262 2.1291,6.49144 2.22096,8.17937 0.85041,15.625 -0.84511,4.59105 -3.19,11.81355 -5.21087,16.04999 -3.33933,7.00036 -4.52819,8.21076 -13.04,13.27628 -10.13833,6.03347 -9.02644,5.82246 -41.67705,7.90926 -15.37788,0.98284 -16.45044,1.66395 -24.26983,15.41225 -5.10506,8.9759 -5.67917,9.51082 -16.45436,15.3314 -6.1406,3.31705 -11.43944,6.30571 -11.77521,6.64147 -0.33576,0.33578 -1.02974,6.48447 -1.54216,13.66378 -1.09889,15.39605 -1.7283,17.80855 -4.90962,18.81826 -4.97448,1.57884 -7.04376,-0.96001 -12.9941,-15.94281 -1.48856,-3.74816 -2.51707,-4.6875 -5.13256,-4.6875 -7.50584,0 -8.10661,1.2506 -8.10661,16.875 0,12.84586 -0.2439,14.41756 -2.41783,15.58102 -3.16582,1.69429 -12.20445,1.66642 -13.25963,-0.0409 -0.45375,-0.73418 -1.13027,-4.70129 -1.50335,-8.8158 -0.67327,-7.4249 -0.70625,-7.47809 -4.40529,-7.10261 -3.36319,0.34137 -4.03055,1.20183 -6.83734,8.8158 -1.7107,4.64062 -3.46839,8.39308 -3.90596,8.33881 -0.43759,-0.0543 -1.3581,-0.30523 -2.0456,-0.55766 z m -3.75473,-123.22275 5.56442,-5.12909 -0.76618,-7.33029 c -0.86524,-8.27817 1.38756,-18.4737 4.33156,-19.60342 2.76882,-1.06249 4.80753,2.5975 6.52904,11.72122 0.94033,4.98353 2.6833,9.51685 4.48003,11.65213 3.2841,3.90293 16.13008,9.25316 20.6727,8.60997 3.49985,-0.49553 5.9234,-6.60236 6.97433,-17.57381 0.9406,-9.81971 -1.46395,-17.40782 -8.39626,-26.49634 -10.92465,-14.32259 -16.15961,-22.9422 -21.91505,-36.08411 -6.12557,-13.98706 -8.24321,-15.94462 -14.62405,-13.51864 -2.42904,0.92352 -3.35937,2.86358 -5.24594,10.93954 -2.54768,10.90608 -4.5339,15.29054 -13.41917,29.62226 -3.34348,5.39293 -6.60096,12.14293 -7.23888,15 -2.59891,11.64009 -5.32735,29.17428 -4.89888,31.48246 0.46868,2.52487 15.80807,11.41892 20.17248,11.69638 1.21849,0.0775 4.71942,-2.16725 7.77985,-4.98826 z m 118.37529,-60.91259 c 4.6038,-2.08652 13.44249,-7.34635 19.6415,-11.6885 10.64984,-7.45975 11.31662,-8.19335 12.0996,-13.31217 0.45575,-2.97955 0.38922,-9.72955 -0.14787,-15 -0.53709,-5.27045 -0.84458,-17.24103 -0.68331,-26.60128 0.29175,-16.93441 0.27732,-17.03112 -2.91365,-19.54114 -2.0469,-1.61008 -6.86444,-3.05732 -13.31884,-4.00107 -5.56159,-0.81321 -13.57464,-2.58475 -17.80678,-3.93675 -11.67972,-3.73123 -24.36783,-4.44093 -32.67592,-1.82771 -3.77928,1.18873 -8.15253,3.16154 -9.71834,4.38401 -3.85599,3.01046 -12.96561,7.5663 -15.12921,7.5663 -0.96627,0 -5.78364,2.01452 -10.70528,4.47671 -7.8253,3.91485 -9.34169,5.25276 -12.08159,10.65969 l -3.13313,6.18297 2.5169,10.59752 c 1.3843,5.82864 3.67453,12.86666 5.08941,15.64005 2.34928,4.60497 31.13213,33.97281 36.0174,36.74943 4.78074,2.71719 15.11911,4.36532 24.57855,3.91825 7.78196,-0.36778 11.85662,-1.31407 18.37056,-4.26631 z m -168.7428,-5.96401 c 6.71062,-3.4702 13.7807,-13.28156 18.42355,-25.56688 1.41393,-3.74133 5.14054,-10.17742 8.28135,-14.30242 5.1443,-6.75626 5.64562,-8.00519 5.05527,-12.59446 -0.86073,-6.69116 -6.86139,-21.49875 -11.3187,-27.93064 -1.94798,-2.81094 -5.29172,-6.19059 -7.4305,-7.51032 -2.18369,-1.34743 -13.75403,-4.42087 -26.38873,-7.00966 -20.62144,-4.22523 -23.59036,-4.54163 -35.55957,-3.78961 -13.68098,0.85958 -22.078,2.81424 -31.06491,7.2313 -11.86783,5.83304 -14.14031,16.42328 -8.01757,37.3637 5.46746,18.69933 6.51705,24.80317 6.51705,37.89957 l 0,11.66182 3.90649,1.61813 c 3.09591,1.28236 4.97633,1.30903 9.0625,0.12855 2.8358,-0.81927 8.62464,-2.07835 12.86409,-2.79798 7.11536,-1.2078 8.35383,-1.05006 16.1058,2.05121 12.49967,5.00065 14.02608,5.32908 25.31069,5.44595 7.25389,0.0751 11.54127,-0.49587 14.25319,-1.89826 z";
+
+        function parsePath(p) {
+			// Array to store points, including the new 'isStart' flag.
+			const pts = []; 
+			// Splits the path string into individual commands (e.g., ['M10 10', 'L20 20', 'M30 30', ...])
+			const cmds = p.match(/[a-zA-Z][^a-zA-Z]*/g);
+			let x = 0, y = 0; // Current position
+			
+			cmds.forEach(c => {
+				const t = c[0]; // Command type (M, L, C, etc.)
+				// Extracts and parses numeric values for the command
+				const v = c.slice(1).trim().split(/[\s,]+/).map(parseFloat);
+				
+				if (t === 'M' || t === 'm') {
+					// M (MoveTo) starts a new subpath. It sets the position but doesn't draw a line.
+					x = t === 'M' ? v[0] : x + v[0];
+					y = t === 'M' ? v[1] : y + v[1];
+					// *** FIX 1: Add isStart: true flag for MoveTo commands ***
+					pts.push({x, y, isStart: true});
+					
+					// Handle implicit LineTo commands after the initial MoveTo (e.g., M10 10 20 20 L30 30)
+					for (let i = 2; i < v.length; i += 2) {
+						x = t === 'M' ? v[i] : x + v[i]; // If absolute, coordinates are absolute
+						y = t === 'M' ? v[i+1] : y + v[i+1]; // If relative, coordinates are relative
+						// Implicit LineTos are drawing commands, so isStart is false.
+						pts.push({x, y, isStart: false});
+					}
+				} else if (t === 'L' || t === 'l') {
+					// L (LineTo) is a drawing command.
+					for (let i = 0; i < v.length; i += 2) {
+						x = t === 'L' ? v[i] : x + v[i];
+						y = t === 'L' ? v[i+1] : y + v[i+1];
+						// isStart is false for drawing commands.
+						pts.push({x, y, isStart: false});
+					}
+				} else if (t === 'C' || t === 'c') {
+					// C (CurveTo) is a drawing command. We only record the final point of the curve.
+					for (let i = 0; i < v.length; i += 6) {
+						x = t === 'C' ? v[i+4] : x + v[i+4]; // The x-coordinate of the final point (x2)
+						y = t === 'C' ? v[i+5] : y + v[i+5]; // The y-coordinate of the final point (y2)
+						// isStart is false for drawing commands.
+						pts.push({x, y, isStart: false});
+					}
+				} else if (t === 'Z' || t === 'z') {
+					// Z (ClosePath) is a drawing command that connects back to the start of the current subpath.
+					// Find the *last* point with isStart: true (the start of the current subpath).
+					const subpathStart = pts.slice().reverse().find(p => p.isStart);
+					if (subpathStart) {
+						// Update current position to the start point and push.
+						x = subpathStart.x;
+						y = subpathStart.y;
+						// isStart is false because it's the result of a drawing action.
+						pts.push({x, y, isStart: false});
+					}
+				}
+			});
+			return pts;
+		}
+        
+        const svgPts = parsePath(svgPath);
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        svgPts.forEach(p => {
+            minX = Math.min(minX, p.x);
+            minY = Math.min(minY, p.y);
+            maxX = Math.max(maxX, p.x);
+            maxY = Math.max(maxY, p.y);
+        });
+        
+        const svgW = maxX - minX, svgH = maxY - minY;
+        const scale = Math.min(RW * 0.6 / svgW, RH * 0.8 / svgH);
+        
+		function getEdges(t) {
+			const edges = [], wobble = Math.sin(t * 2) * 2;
+			
+			// Iterate through all points, stopping one before the end
+			for (let i = 0; i < svgPts.length - 1; i++) {
+				const p1 = svgPts[i]; // Starting point of the segment
+				const p2 = svgPts[i + 1]; // Ending point of the segment
+
+				// *** FIX 2: Skip connection if p2 is the start of a new subpath (MoveTo) ***
+				if (p2.isStart) {
+					continue; // Skip this iteration, effectively breaking the line
+				}
+				
+				// Apply scaling, centering, and wobble transformations
+				const s = {
+					x: (p1.x - minX - svgW / 2) * scale + CX + wobble + offX,
+					y: (p1.y - minY - svgH / 2) * scale + CY + offY
+				};
+				const e = {
+					x: (p2.x - minX - svgW / 2) * scale + CX + wobble + offX,
+					y: (p2.y - minY - svgH / 2) * scale + CY + offY
+				};
+				
+				edges.push({s, e});
+			}
+			return edges;
+		}
+
+        function calculateStaticDist(edges) {
+            staticDistMap.fill(999);
+            for (let y = 0; y < RH; y++) {
+                for (let x = 0; x < RW; x++) {
+                    const idx = y * RW + x;
+                    let minDist = 999;
+                    
+                    for (const eg of edges) {
+                        const ax = x - eg.s.x, ay = y - eg.s.y;
+                        const bx = eg.e.x - eg.s.x, by = eg.e.y - eg.s.y;
+                        const len = bx * bx + by * by;
+                        let t = len === 0 ? 0 : Math.max(0, Math.min(1, (ax * bx + ay * by) / len));
+                        const px = eg.s.x + t * bx, py = eg.s.y + t * by;
+                        const dx = x - px, dy = y - py;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        if (dist < minDist) minDist = dist;
+                    }
+                    staticDistMap[idx] = minDist;
+                }
+            }
+        }
+
+        function getDist(x, y, offsetX, offsetY) {
+            const sx = Math.floor(x - offsetX);
+            const sy = Math.floor(y - offsetY);
+            if (sx < 0 || sx >= RW || sy < 0 || sy >= RH) return 999;
+            return staticDistMap[sy * RW + sx];
+        }
+
+        const initialEdges = getEdges(0);
+        initialEdges.forEach(eg => {
+            eg.s.x -= CX; eg.s.y -= CY;
+            eg.e.x -= CX; eg.e.y -= CY;
+            eg.s.x += RW / 2; eg.s.y += RH / 2;
+            eg.e.x += RW / 2; eg.e.y += RH / 2;
+        });
+        calculateStaticDist(initialEdges);
+
+        const img = ctx.createImageData(RW, RH);
+        const buf = new Uint8ClampedArray(DW * DH * 4);
+        const imgData = new ImageData(buf, DW, DH);
+        const d = img.data;
+        
+        const tcCanvas = document.createElement('canvas');
+        tcCanvas.width = RW;
+        tcCanvas.height = RH;
+        const tctx = tcCanvas.getContext('2d');
+        
+        const cols = ['#fff', '#ff0', '#0ff', '#0f0', '#f0f', '#f00', '#00f'];
+        const bw = RW / cols.length;
+        cols.forEach((c, i) => {
+            tctx.fillStyle = c;
+            tctx.fillRect(i * bw, 0, bw, RH * 0.6);
+        });
+
+        const botCols = ['#00f', '#000', '#f0f', '#000', '#0ff', '#000', '#fff'];
+        const bbw = RW / botCols.length;
+        botCols.forEach((c, i) => {
+            tctx.fillStyle = c;
+            tctx.fillRect(i * bbw, RH * 0.6, bbw, RH * 0.1);
+        });
+
+        const sw = RW / 15;
+        for (let i = 0; i < 15; i++) {
+            const b = Math.floor((i / 14) * 255);
+            tctx.fillStyle = `rgb(${b},${b},${b})`;
+            tctx.fillRect(i * sw, RH * 0.7, sw, RH * 0.1);
+        }
+
+        tctx.strokeStyle = '#fff';
+        tctx.lineWidth = 4;
+        tctx.beginPath();
+        tctx.arc(RW / 2, RH * 0.3, 80, 0, Math.PI * 2);
+        tctx.moveTo(RW / 2 - 100, RH * 0.3);
+        tctx.lineTo(RW / 2 + 100, RH * 0.3);
+        tctx.moveTo(RW / 2, RH * 0.3 - 100);
+        tctx.lineTo(RW / 2, RH * 0.3 + 100);
+        tctx.stroke();
+
+        tctx.fillStyle = '#000';
+        tctx.fillRect(0, RH * 0.8, RW, RH * 0.2);
+        tctx.fillStyle = '#fff';
+        tctx.font = 'bold 32px monospace';
+        tctx.textAlign = 'center';
+        tctx.fillText('INTARYNX 1', RW / 2, RH * 0.9);
+        
+        const origTC = tctx.getImageData(0, 0, RW, RH).data;
+
+        function vhsGlitch(inp) {
+            const out = new Uint8ClampedArray(inp.length);
+            out.set(inp);
+
+            const hasG = Math.random() < 0.05;
+            const gLine = ~~(Math.random() * RH);
+            const gH = ~~(Math.random() * 15) + 5;
+            const gOff = ~~((Math.random() - 0.5) * 30);
+            const hasT = Math.random() < 0.03;
+            const tBand = ~~(Math.random() * 5) * 40;
+
+            for (let y = 0; y < RH; y++) {
+                for (let x = 0; x < RW; x++) {
+                    const idx = (y * RW + x) * 4;
+                    let sx = x, sy = y;
+                    
+                    if (hasG && y >= gLine && y < gLine + gH) {
+                        sx = Math.max(0, Math.min(RW - 1, x + gOff));
+                    }
+                    
+                    if (hasT && y >= tBand && y < tBand + 20) {
+                        sy = Math.max(0, Math.min(RH - 1, y + 15));
+                    }
+                    
+                    const sIdx = (sy * RW + sx) * 4;
+                    const cShift = ~~(Math.sin(y * 0.05) * 2);
+                    const rX = Math.max(0, Math.min(RW - 1, sx + cShift));
+                    const bX = Math.max(0, Math.min(RW - 1, sx - cShift));
+                    
+                    // Blur horizontal léger
+                    const blurR = (inp[(sy * RW + Math.max(0, rX - 1)) * 4] + inp[(sy * RW + rX) * 4] + inp[(sy * RW + Math.min(RW - 1, rX + 1)) * 4]) / 3;
+                    const blurG = (inp[Math.max(0, sIdx - 4) + 1] + inp[sIdx + 1] + inp[Math.min(inp.length - 4, sIdx + 4) + 1]) / 3;
+                    const blurB = (inp[(sy * RW + Math.max(0, bX - 1)) * 4 + 2] + inp[(sy * RW + bX) * 4 + 2] + inp[(sy * RW + Math.min(RW - 1, bX + 1)) * 4 + 2]) / 3;
+                    
+                    // Grain
+                    const grain = (Math.random() - 0.5) * 25;
+                    
+                    out[idx] = Math.max(0, Math.min(255, blurR + grain));
+                    out[idx + 1] = Math.max(0, Math.min(255, blurG + grain));
+                    out[idx + 2] = Math.max(0, Math.min(255, blurB + grain));
+                    out[idx + 3] = 255;
+                }
+            }
+            
+            if (Math.random() < 0.03) {
+                const dy = ~~(Math.random() * RH);
+                const dh = ~~(Math.random() * 3) + 1;
+                for (let y = dy; y < Math.min(RH, dy + dh); y++) {
+                    for (let x = 0; x < RW; x++) {
+                        const idx = (y * RW + x) * 4;
+                        const n = Math.random() * 50;
+                        out[idx] = out[idx + 1] = out[idx + 2] = n;
+                    }
+                }
+            }
+            return out;
+        }
+
+        function draw(ts) {
+            const dt = (ts - lastT) / 1000;
+            lastT = ts;
+            time += dt * 0.5;
+            rollPos += dt * 30;
+            if (rollPos > DH) rollPos = 0;
+            tcPhase += dt;
+            
+            // 1. MIRE AVEC SCROLLING (DÉBUT)
+            if (transTC) {
+                transPhase += dt;
+                const prog = Math.min(1, transPhase / 3);
+                
+                const rollSpd = (1 - prog) * 200;
+                const rollOff = (time * rollSpd) % RH;
+                
+                for (let i = 0; i < RW * RH; i++) {
+                    const v = Math.random() * 200, idx = i * 4;
+                    d[idx] = d[idx + 1] = d[idx + 2] = v;
+                    d[idx + 3] = 255;
+                }
+                ctx.putImageData(img, 0, 0);
+                ctx.imageSmoothingEnabled = false;
+                
+                // Créer version glitchée avec blur et grain
+                const tmpCanvas = document.createElement('canvas');
+                tmpCanvas.width = RW;
+                tmpCanvas.height = RH;
+                const tmpCtx = tmpCanvas.getContext('2d');
+                tmpCtx.drawImage(tcCanvas, 0, 0);
+                const tcData = tmpCtx.getImageData(0, 0, RW, RH);
+                const glitched = vhsGlitch(tcData.data);
+                const glitchedImg = new ImageData(glitched, RW, RH);
+                tmpCtx.putImageData(glitchedImg, 0, 0);
+                
+                ctx.save();
+                ctx.globalAlpha = prog;
+                const scaledRollY = -(rollOff / RH) * DH;
+                ctx.drawImage(tmpCanvas, 0, 0, RW, RH, 0, scaledRollY, DW, DH);
+                ctx.drawImage(tmpCanvas, 0, 0, RW, RH, 0, scaledRollY + DH, DW, DH);
+                ctx.restore();
+                
+                const g = ctx.createLinearGradient(0, rollPos - 80, 0, rollPos + 80);
+                g.addColorStop(0, 'rgba(0,0,0,0)');
+                g.addColorStop(0.5, 'rgba(0,0,0,0.15)');
+                g.addColorStop(1, 'rgba(0,0,0,0)');
+                ctx.fillStyle = g;
+                ctx.fillRect(0, rollPos - 80, DW, 160);
+                
+                // Scanlines
+                ctx.fillStyle = 'rgba(0,0,0,0.2)';
+                for (let y = 0; y < DH; y += 4) ctx.fillRect(0, y, DW, 2);
+                
+                if (transPhase >= 3) {
+                    transTC = false;
+                    inTC = true;
+                    tcPhase = 0;
+                    transPhase = 0;
+                }
+                requestAnimationFrame(draw);
+                return;
+            }
+            
+            // 2. MIRE → PARASITES (première fois seulement)
+            if (inTC && tcPhase < 10 && !skullShown) {
+                const deg = tcPhase / 10;
+                const gData = vhsGlitch(origTC);
+                for (let i = 0; i < RW * RH; i++) {
+                    const n = Math.random() * 200, idx = i * 4;
+                    d[idx] = gData[idx] * (1 - deg) + n * deg;
+                    d[idx + 1] = gData[idx + 1] * (1 - deg) + n * deg;
+                    d[idx + 2] = gData[idx + 2] * (1 - deg) + n * deg;
+                    d[idx + 3] = 255;
+                }
+                ctx.putImageData(img, 0, 0);
+                ctx.imageSmoothingEnabled = false;
+                const g = ctx.createLinearGradient(0, rollPos - 80, 0, rollPos + 80);
+                g.addColorStop(0, 'rgba(0,0,0,0)');
+                g.addColorStop(0.5, 'rgba(0,0,0,0.15)');
+                g.addColorStop(1, 'rgba(0,0,0,0)');
+                ctx.fillStyle = g;
+                ctx.fillRect(0, rollPos - 80, DW, 160);
+                
+                // Scanlines
+                ctx.fillStyle = 'rgba(0,0,0,0.2)';
+                for (let y = 0; y < DH; y += 4) ctx.fillRect(0, y, DW, 2);
+                
+                requestAnimationFrame(draw);
+                return;
+            }
+            
+            // 6. MIRE STABLE (10 sec) après le crâne
+            if (inTC && skullShown && tcPhase < 10) {
+                const gData = vhsGlitch(origTC);
+                for (let i = 0; i < RW * RH; i++) {
+                    const idx = i * 4;
+                    d[idx] = gData[idx];
+                    d[idx + 1] = gData[idx + 1];
+                    d[idx + 2] = gData[idx + 2];
+                    d[idx + 3] = 255;
+                }
+                ctx.putImageData(img, 0, 0);
+                ctx.imageSmoothingEnabled = false;
+                const g = ctx.createLinearGradient(0, rollPos - 80, 0, rollPos + 80);
+                g.addColorStop(0, 'rgba(0,0,0,0)');
+                g.addColorStop(0.5, 'rgba(0,0,0,0.15)');
+                g.addColorStop(1, 'rgba(0,0,0,0)');
+                ctx.fillStyle = g;
+                ctx.fillRect(0, rollPos - 80, DW, 160);
+                
+                // Scanlines
+                ctx.fillStyle = 'rgba(0,0,0,0.2)';
+                for (let y = 0; y < DH; y += 4) ctx.fillRect(0, y, DW, 2);
+                
+                requestAnimationFrame(draw);
+                return;
+            }
+            
+            // Passage au crâne après première mire
+            if (inTC && tcPhase >= 10 && !skullShown) {
+                inTC = false;
+                appPhase = 0;
+                nextApp = Math.random() * 8 + 6;
+            }
+            
+            // Passage au shutdown après deuxième mire
+            if (inTC && tcPhase >= 10 && skullShown) {
+                tvOff = true;
+                offPhase = 0;
+                inTC = false;
+                finalSequence = true;
+            }
+            
+            // 7. TV S'ÉTEINT + 8. SANG + 9. FIN
+            if (tvOff) {
+                offPhase += dt;
+                if (offPhase < 0.5) {
+                    const gData = vhsGlitch(origTC);
+                    for (let i = 0; i < RW * RH; i++) {
+                        const idx = i * 4;
+                        d[idx] = gData[idx];
+                        d[idx + 1] = gData[idx + 1];
+                        d[idx + 2] = gData[idx + 2];
+                        d[idx + 3] = 255;
+                    }
+                    ctx.putImageData(img, 0, 0);
+                    ctx.imageSmoothingEnabled = false;
+                    ctx.drawImage(canvas, 0, 0, RW, RH, 0, 0, DW, DH);
+                } else if (offPhase < 1.2) {
+                    const prog = (offPhase - 0.5) / 0.7;
+                    const gData = vhsGlitch(origTC);
+                    for (let i = 0; i < RW * RH; i++) {
+                        const idx = i * 4;
+                        d[idx] = gData[idx];
+                        d[idx + 1] = gData[idx + 1];
+                        d[idx + 2] = gData[idx + 2];
+                        d[idx + 3] = 255;
+                    }
+                    ctx.fillStyle = '#000';
+                    ctx.fillRect(0, 0, DW, DH);
+                    const cy = DH / 2, h = DH * (1 - prog), yo = cy - h / 2;
+                    ctx.putImageData(img, 0, 0);
+                    ctx.imageSmoothingEnabled = false;
+                    ctx.drawImage(canvas, 0, 0, RW, RH, 0, yo, DW, h);
+                    ctx.fillStyle = `rgba(0,0,0,${prog * 0.5})`;
+                    ctx.fillRect(0, 0, DW, DH);
+                } else if (offPhase < 1.5) {
+                    const prog = (offPhase - 1.2) / 0.3;
+                    ctx.fillStyle = '#000';
+                    ctx.fillRect(0, 0, DW, DH);
+                    const cy = DH / 2, lh = 4 * (1 - prog), br = ~~(255 * (1 - prog));
+                    ctx.fillStyle = `rgb(${br},${br},${br})`;
+                    ctx.fillRect(0, cy - lh / 2, DW, lh);
+                } else if (offPhase < 1.8) {
+                    const prog = (offPhase - 1.5) / 0.3;
+                    ctx.fillStyle = '#000';
+                    ctx.fillRect(0, 0, DW, DH);
+                    const cx = DW / 2, cy = DH / 2, br = ~~(255 * (1 - prog));
+                    const sz = 3 * (1 - prog * 0.5);
+                    ctx.fillStyle = `rgb(${br},${br},${br})`;
+                    ctx.fillRect(cx - sz, cy - sz, sz * 2, sz * 2);
+                } else {
+                    ctx.fillStyle = '#000';
+                    ctx.fillRect(0, 0, DW, DH);
+                    const bPhase = offPhase - 1.8;
+                    
+                    // Délai de 3 secondes avant le sang
+                    if (bPhase > 3 && bPhase < 7 && Math.random() < 0.08) {
+                        const sp = {
+                            x: Math.random() * DW, y: Math.random() * DH * 0.6,
+                            size: Math.random() * 40 + 30, opacity: Math.random() * 0.3 + 0.6,
+                            splashes: [], droplets: null
+                        };
+                        const ns = ~~(Math.random() * 8) + 12;
+                        for (let i = 0; i < ns; i++) {
+                            const ang = (i / ns) * Math.PI * 2 + Math.random() * 0.5;
+                            const dist = (Math.random() * 0.5 + 0.5) * sp.size;
+                            sp.splashes.push({
+                                x: Math.cos(ang) * dist, y: Math.sin(ang) * dist,
+                                size: Math.random() * 15 + 8
+                            });
+                        }
+                        bloodSplat.push(sp);
+                    }
+                    if (bPhase > 3.5 && bPhase < 8 && Math.random() < 0.04) {
+                        bloodDrip.push({
+                            x: Math.random() * DW, startY: Math.random() * DH * 0.4,
+                            currentY: Math.random() * DH * 0.4, length: 0,
+                            maxLength: Math.random() * 200 + 100, width: Math.random() * 3 + 2,
+                            speed: Math.random() * 40 + 30, opacity: Math.random() * 0.3 + 0.5
+                        });
+                    }
+                    bloodSplat.forEach(sp => {
+                        ctx.fillStyle = `rgba(85,8,8,${sp.opacity})`;
+                        ctx.beginPath();
+                        ctx.arc(sp.x, sp.y, sp.size, 0, Math.PI * 2);
+                        ctx.fill();
+                        sp.splashes.forEach(sl => {
+                            ctx.beginPath();
+                            ctx.arc(sp.x + sl.x, sp.y + sl.y, sl.size, 0, Math.PI * 2);
+                            ctx.fill();
+                        });
+                        if (!sp.droplets) {
+                            sp.droplets = [];
+                            const nd = ~~(Math.random() * 5) + 3;
+                            for (let i = 0; i < nd; i++) {
+                                const ang = Math.random() * Math.PI * 2;
+                                const dist = sp.size + Math.random() * 30;
+                                sp.droplets.push({
+                                    x: sp.x + Math.cos(ang) * dist,
+                                    y: sp.y + Math.sin(ang) * dist,
+                                    size: Math.random() * 4 + 2
+                                });
+                            }
+                        }
+                        sp.droplets.forEach(dr => {
+                            ctx.beginPath();
+                            ctx.arc(dr.x, dr.y, dr.size, 0, Math.PI * 2);
+                            ctx.fill();
+                        });
+                    });
+                    bloodDrip.forEach(dr => {
+                        dr.currentY += dr.speed * dt;
+                        dr.length = Math.min(dr.currentY - dr.startY, dr.maxLength);
+                        if (dr.length > 0) {
+                            const g = ctx.createLinearGradient(dr.x, dr.startY, dr.x, dr.currentY);
+                            g.addColorStop(0, `rgba(80,8,8,${dr.opacity * 0.3})`);
+                            g.addColorStop(0.7, `rgba(90,10,10,${dr.opacity})`);
+                            g.addColorStop(1, `rgba(100,12,12,${dr.opacity})`);
+                            ctx.strokeStyle = g;
+                            ctx.lineWidth = dr.width;
+                            ctx.lineCap = 'round';
+                            ctx.beginPath();
+                            ctx.moveTo(dr.x, dr.startY);
+                            for (let i = 1; i <= 10; i++) {
+                                const p = i / 10, y = dr.startY + dr.length * p;
+                                const w = Math.sin(p * Math.PI * 4) * 2;
+                                ctx.lineTo(dr.x + w, y);
+                            }
+                            ctx.stroke();
+                            if (dr.currentY < DH) {
+                                ctx.fillStyle = `rgba(90,10,10,${dr.opacity})`;
+                                ctx.beginPath();
+                                ctx.arc(dr.x, dr.currentY, dr.width * 1.5, 0, Math.PI * 2);
+                                ctx.fill();
+                            }
+                        }
+                    });
+                    
+                    // 9. FIN (STOP DÉFINITIF) - après 9 secondes de sang
+                    if (bPhase > 9) {
+                        ctx.fillStyle = '#000';
+                        ctx.fillRect(0, 0, DW, DH);
+                        
+                        // Afficher le titre "The Death Signal"
+                        const titlePhase = bPhase - 9;
+                        const titleAlpha = Math.min(1, titlePhase / 2);
+                        
+                        ctx.globalAlpha = titleAlpha;
+                        ctx.fillStyle = '#8b0000';
+                        ctx.font = 'bold 48px serif';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText('The Death Signal', DW / 2, DH / 2);
+                        ctx.globalAlpha = 1;
+                        
+                        requestAnimationFrame(draw);
+                        return;
+                    }
+                }
+                requestAnimationFrame(draw);
+                return;
+            }
+            
+            // 3. CRÂNE APPARAÎT + 4. CRÂNE DISPARAÎT
+            appPhase += dt;
+            let vis = 0, sharp = 0;
+            
+            if (appPhase < nextApp) {
+                vis = sharp = 0;
+            } else if (appPhase < nextApp + 5) {
+                vis = sharp = (appPhase - nextApp) / 5;
+            } else if (appPhase < nextApp + 11) {
+                vis = sharp = 1;
+            } else if (appPhase < nextApp + 16) {
+                vis = sharp = 1 - (appPhase - nextApp - 11) / 5;
+            } else {
+                vis = sharp = 0;
+                if (appPhase > nextApp + 17) {
+                    // 5. MIRE RÉAPPARAÎT AVEC SCROLLING
+                    skullShown = true;
+                    transTC = true;
+                    transPhase = 0;
+                }
+            }
+            
+            const edges = vis > 0 ? getEdges(time) : [];
+            const wobble = Math.sin(time * 2) * 2;
+            const totalOffX = offX + wobble;
+            const totalOffY = offY;
+            const dThresh = DLIM + (1 - sharp) * 35;
+            
+            const step = 2;
+            for (let i = 0; i < RW * RH; i += step) {
+                const x = i % RW, y = ~~(i / RW);
+                const dist = getDist(x, y, totalOffX, totalOffY);
+                let v = Math.random() * 255;
+                if (dist < dThresh && vis > 0) {
+                    const n = Math.random() * 0.7 + 0.3;
+                    const inf = (1 - (dist / dThresh)) * n * vis * (0.15 + sharp * 0.25);
+                    v *= (1 - inf);
+                }
+                const idx = i * 4;
+                d[idx] = d[idx + 1] = d[idx + 2] = v;
+                d[idx + 3] = 255;
+                if (i + 1 < RW * RH) {
+                    const idx2 = (i + 1) * 4;
+                    d[idx2] = d[idx2 + 1] = d[idx2 + 2] = v;
+                    d[idx2 + 3] = 255;
+                }
+            }
+            
+            ctx.putImageData(img, 0, 0);
+            ctx.imageSmoothingEnabled = false;
+            
+            const g = ctx.createLinearGradient(0, rollPos - 80, 0, rollPos + 80);
+            g.addColorStop(0, 'rgba(0,0,0,0)');
+            g.addColorStop(0.5, 'rgba(0,0,0,0.15)');
+            g.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = g;
+            ctx.fillRect(0, rollPos - 80, DW, 160);
+            
+            ctx.fillStyle = 'rgba(0,0,0,0.1)';
+            for (let x = 0; x < DW; x += 8) ctx.fillRect(x, 0, 2, DH);
+            
+            const pix = imgData.data;
+            const src = ctx.getImageData(0, 0, DW, DH).data;
+            pix.set(src);
+            
+            for (let i = 0; i < DW * DH * 4; i += 4) {
+                const off = ((i / 4) % DW) % 3;
+                if (off === 0) {
+                    pix[i] = Math.min(255, pix[i] * 1.1);
+                    pix[i+1] *= 0.9;
+                    pix[i+2] *= 0.9;
+                } else if (off === 1) {
+                    pix[i] *= 0.9;
+                    pix[i+1] = Math.min(255, pix[i+1] * 1.1);
+                    pix[i+2] *= 0.9;
+                } else {
+                    pix[i] *= 0.9;
+                    pix[i+1] *= 0.9;
+                    pix[i+2] = Math.min(255, pix[i+2] * 1.1);
+                }
+            }
+            ctx.putImageData(imgData, 0, 0);
+            requestAnimationFrame(draw);
+        }
+        requestAnimationFrame(draw);
+    </script>
+</body>
+</html>

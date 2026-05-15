@@ -1,0 +1,1017 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <link rel="shortcut icon" type="image/x-icon" href="/favicon.ico">
+    <link rel="apple-touch-icon" href="/intarynx.jpg">
+    <link rel="icon" type="image/jpeg" sizes="192x192" href="/intarynx.jpg">
+    <link rel="icon" type="image/jpeg" sizes="512x512" href="/intarynx.jpg">
+
+    <title>Intarynx's Gallery - Generative Canvas at the Edge of Algorithms & Aesthetics</title>
+    <meta name="description" content="Conjuring pixelated visions. Generative canvas at the edge of algorithms, aesthetics, and not taking itself too seriously. Subtlety isn't my forte.">
+    <meta name="keywords" content="generative canvas, creative coding, pixelated visions, algorithmic art, retro aesthetics, visual experiments, code art, intarynx">
+    <meta name="author" content="Intarynx">
+
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://upstride.ch/">
+    <meta property="og:title" content="Intarynx's Gallery - Generative Canvas">
+    <meta property="og:description" content="Conjuring pixelated visions. Generative canvas at the edge of algorithms, aesthetics, and not taking itself too seriously. Subtlety isn't my forte.">
+    <meta property="og:image" content="https://upstride.ch/intarynx.jpg">
+    <meta property="og:image:secure_url" content="https://upstride.ch/intarynx.jpg">
+    <meta property="og:image:type" content="image/jpeg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="1200">
+    <meta property="og:image:alt" content="Intarynx avatar">
+    <meta property="og:site_name" content="Intarynx's Gallery">
+
+    <meta property="twitter:card" content="summary_large_image">
+    <meta property="twitter:url" content="https://upstride.ch/">
+    <meta property="twitter:title" content="Intarynx's Gallery - Generative Canvas">
+    <meta property="twitter:description" content="Conjuring pixelated visions. Generative canvas at the edge of algorithms, aesthetics, and not taking itself too seriously. Subtlety isn't my forte.">
+    <meta property="twitter:image" content="https://upstride.ch/intarynx.jpg">
+    <meta property="twitter:image:alt" content="Intarynx avatar">
+    <meta name="twitter:creator" content="@intarynx">
+
+    <link rel="canonical" href="https://upstride.ch/">
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
+
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Person",
+      "name": "Intarynx",
+      "url": "https://upstride.ch",
+      "image": "https://upstride.ch/intarynx.jpg",
+      "sameAs": ["https://bsky.app/profile/intarynx.bsky.social"],
+      "jobTitle": "Generative Artist",
+      "description": "Conjuring pixelated visions. Generative canvas at the edge of algorithms, aesthetics, and not taking itself too seriously. Subtlety isn't my forte.",
+      "knowsAbout": ["Generative Art", "Creative Coding", "Algorithmic Art", "Canvas Art"]
+    }
+    </script>
+
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        html, body {
+            width: 100%;
+            min-height: 100%;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            color: #000;
+            background: #fff;
+        }
+
+        #bg {
+            position: fixed;
+            inset: 0;
+            width: 100%; height: 100%;
+            z-index: 0;
+            opacity: 0.35;
+            pointer-events: none;
+        }
+
+        .grain {
+            position: fixed;
+            inset: 0;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='2.5' numOctaves='4'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+            pointer-events: none;
+            z-index: 1;
+            opacity: 0.5;
+        }
+
+        .page {
+            position: relative;
+            z-index: 2;
+            padding: 0 0 80px;
+        }
+
+        /* ── Header ── */
+        header {
+            padding: 28px 32px 20px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            border-bottom: 2px solid #000;
+            margin-bottom: 28px;
+            position: sticky;
+            top: 0;
+            background: rgba(255,255,255,0.92);
+            backdrop-filter: blur(8px);
+            z-index: 10;
+        }
+
+        .page-inner {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 24px;
+        }
+
+        .avatar {
+            width: 56px; height: 56px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 2px solid #000;
+            flex-shrink: 0;
+            filter: grayscale(1) contrast(1.1);
+        }
+
+        .header-text { flex: 1; min-width: 0; }
+
+        h1 {
+            font-size: clamp(20px, 3.5vw, 32px);
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            font-family: 'JetBrains Mono', 'Courier New', Courier, monospace;
+            color: #000;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .subtitle {
+            font-size: 10px;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            color: #555;
+            font-weight: 500;
+            margin-top: 4px;
+        }
+
+        .social-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            color: #000;
+            text-decoration: none;
+            font-size: 12px;
+            padding: 8px 12px;
+            border: 2px solid #000;
+            background: #fff;
+            transition: all 0.2s;
+            flex-shrink: 0;
+            font-family: 'JetBrains Mono', 'Courier New', monospace;
+            font-weight: 700;
+        }
+        .social-link:hover { background: #000; color: #fff; }
+        .social-link svg { width: 15px; height: 15px; }
+
+        /* ── Search ── */
+        .search-wrap {
+            margin-bottom: 28px;
+            position: relative;
+            display: flex;
+            gap: 12px;
+            align-items: stretch;
+        }
+
+        .search-field {
+            flex: 1;
+            position: relative;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 14px 70px 14px 44px;
+            border: 2px solid #000;
+            background: #fff;
+            font-family: 'JetBrains Mono', 'Courier New', monospace;
+            font-size: 14px;
+            outline: none;
+        }
+
+        .search-input::placeholder { color: #999; }
+
+        .search-icon {
+            position: absolute;
+            left: 16px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 18px; height: 18px;
+            color: #000;
+            pointer-events: none;
+        }
+
+        .search-counter {
+            position: absolute;
+            right: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-family: 'JetBrains Mono', 'Courier New', monospace;
+            font-size: 11px;
+            color: #999;
+            letter-spacing: 0.08em;
+            pointer-events: none;
+            background: #fff;
+            padding: 2px 4px;
+        }
+
+        .random-btn {
+            flex-shrink: 0;
+            background: #fff;
+            border: 2px solid #000;
+            color: #000;
+            padding: 0 18px;
+            font-family: 'JetBrains Mono', 'Courier New', monospace;
+            font-size: 13px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+        .random-btn:hover {
+            background: #000;
+            color: #fff;
+            transform: rotate(-2deg);
+        }
+        .random-btn i { font-size: 14px; }
+
+        /* ── Gallery Grid ── */
+        .gallery {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 20px;
+        }
+
+        .art-card {
+            cursor: pointer;
+            border: 2px solid rgba(0,0,0,0.15);
+            background: #fff;
+            transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .art-card:hover {
+            border-color: #000;
+            transform: translateY(-3px);
+            box-shadow: 6px 6px 0 #000;
+        }
+
+        .art-thumb {
+            width: 100%;
+            aspect-ratio: 4 / 3;
+            background: #f4f4f4;
+            position: relative;
+            overflow: hidden;
+            border-bottom: 2px solid rgba(0,0,0,0.15);
+        }
+
+        .art-card:hover .art-thumb {
+            border-bottom-color: #000;
+        }
+
+        .art-thumb img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+            opacity: 0;
+            transition: opacity 0.5s ease;
+        }
+        .art-thumb img.loaded { opacity: 1; }
+
+        .art-thumb-placeholder {
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(90deg, #f0f0f0 0%, #e8e8e8 50%, #f0f0f0 100%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite linear;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #aaa;
+            font-family: 'JetBrains Mono', 'Courier New', monospace;
+            font-size: 10px;
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+        }
+
+        @keyframes shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        .art-info {
+            padding: 14px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+
+        .art-title {
+            font-family: 'JetBrains Mono', 'Courier New', Courier, monospace;
+            font-size: 14px;
+            font-weight: 700;
+            letter-spacing: -0.01em;
+            color: #000;
+            line-height: 1.3;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .art-index {
+            font-family: 'JetBrains Mono', 'Courier New', monospace;
+            font-size: 10px;
+            color: #999;
+            letter-spacing: 0.1em;
+            flex-shrink: 0;
+        }
+
+        .no-results {
+            grid-column: 1 / -1;
+            padding: 60px 20px;
+            text-align: center;
+            font-family: 'JetBrains Mono', 'Courier New', monospace;
+            font-size: 13px;
+            color: #999;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+        }
+
+        /* ── Footer ── */
+        footer {
+            position: fixed;
+            bottom: 0; left: 0; right: 0;
+            z-index: 10;
+            text-align: center;
+            padding: 10px 16px;
+            font-size: 11px;
+            color: #000;
+            letter-spacing: 0.1em;
+            background: #fff;
+            border-top: 1px solid rgba(0,0,0,0.15);
+            font-family: 'JetBrains Mono', 'Courier New', Courier, monospace;
+        }
+
+        /* ── Modal ── */
+        .modal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.95);
+            z-index: 1000;
+            backdrop-filter: blur(10px);
+            flex-direction: column;
+        }
+        .modal.active { display: flex; }
+
+        .modal-header {
+            padding: 14px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #fff;
+            border-bottom: 2px solid #000;
+            flex-shrink: 0;
+            gap: 12px;
+        }
+        .modal-title {
+            font-size: 16px;
+            font-weight: 700;
+            letter-spacing: -0.01em;
+            color: #000;
+            font-family: 'JetBrains Mono', 'Courier New', Courier, monospace;
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .modal-actions { display: flex; gap: 10px; align-items: center; flex-shrink: 0; }
+
+        .btn {
+            background: #fff;
+            border: 2px solid #000;
+            color: #000;
+            padding: 7px 14px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: 'JetBrains Mono', 'Courier New', Courier, monospace;
+            font-weight: 700;
+        }
+        .btn:hover { background: #000; color: #fff; }
+
+        .nav-btn {
+            background: #fff;
+            border: 2px solid #000;
+            color: #000;
+            width: 36px; height: 36px;
+            font-size: 14px;
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            transition: all 0.2s;
+            font-family: 'JetBrains Mono', 'Courier New', monospace;
+            font-weight: 700;
+            line-height: 1;
+        }
+        .nav-btn:hover { background: #000; color: #fff; }
+        .nav-btn:disabled { opacity: 0.25; cursor: default; }
+        .nav-btn:disabled:hover { background: #fff; color: #000; }
+
+        .close-btn {
+            background: none; border: none; color: #000;
+            font-size: 30px; cursor: pointer; padding: 0 4px;
+            line-height: 1; opacity: 0.7; transition: opacity 0.2s;
+        }
+        .close-btn:hover { opacity: 1; }
+
+        .modal-content { flex: 1; position: relative; overflow: hidden; background: #000; }
+        .modal-content iframe { width: 100%; height: 100%; border: none; }
+
+        .source-panel {
+            display: none;
+            background: #0d0d0d;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            height: 40vh;
+            overflow-y: auto;
+        }
+        .source-panel.active { display: block; }
+
+        .source-header {
+            position: sticky; top: 0;
+            background: #1a1a1a;
+            padding: 10px 18px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            display: flex; justify-content: space-between; align-items: center;
+            z-index: 1;
+        }
+        .source-header span {
+            font-family: 'JetBrains Mono', 'Courier New', monospace;
+            font-size: 11px; color: #888;
+            text-transform: uppercase; letter-spacing: 0.1em;
+        }
+        .copy-btn { font-size: 11px; padding: 4px 10px; }
+
+        .source-code {
+            padding: 18px;
+            font-family: 'JetBrains Mono', 'Courier New', monospace;
+            font-size: 12px; line-height: 1.6;
+            color: #ccc; white-space: pre; overflow-x: auto;
+        }
+
+        /* ── Mobile bottom action bar ── */
+        .mobile-actions {
+            display: none;
+            position: absolute;
+            bottom: 0; left: 0; right: 0;
+            background: #fff;
+            border-top: 2px solid #000;
+            padding: 10px 14px;
+            gap: 10px;
+            z-index: 5;
+        }
+        .mobile-actions .btn {
+            flex: 1;
+            padding: 10px 12px;
+            font-size: 12px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        /* ── Mobile ── */
+        @media (max-width: 600px) {
+            .page-inner { padding: 0 14px; }
+            header { padding: 18px 16px 14px; gap: 12px; }
+            .social-link span { display: none; }
+            .gallery { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+            .art-info { padding: 10px 12px; }
+            .art-title { font-size: 12px; }
+            .modal-actions { display: none; }
+            .random-btn span { display: none; }
+            .random-btn { padding: 0 14px; }
+
+            .mobile-actions { display: flex; }
+            .modal-content { padding-bottom: 60px; }
+            .source-panel { padding-bottom: 60px; }
+        }
+    </style>
+</head>
+<body>
+
+<canvas id="bg"></canvas>
+<div class="grain"></div>
+
+<div class="page">
+    <header>
+        <img src="intarynx.jpg" alt="Intarynx" class="avatar">
+        <div class="header-text">
+            <h1>Intarynx's Gallery</h1>
+            <p class="subtitle">Generative Canvas · Algorithms & Aesthetics · Subtlety Isn't My Forte</p>
+        </div>
+        <a href="https://bsky.app/profile/intarynx.bsky.social" target="_blank" rel="noopener noreferrer" class="social-link" aria-label="Follow Intarynx on Bluesky">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M12 10.8c-1.087-2.114-4.046-6.053-6.798-7.995C2.566.944 1.561 1.266.902 1.565.139 1.908 0 3.08 0 3.768c0 .69.378 5.65.624 6.479.815 2.736 3.713 3.66 6.383 3.364.136-.02.275-.039.415-.056-.138.022-.276.04-.415.056-3.912.58-7.387 2.005-2.83 7.078 5.013 5.19 6.87-1.113 7.823-4.308.953 3.195 2.05 9.271 7.733 4.308 4.267-4.308 1.172-6.498-2.74-7.078a8.741 8.741 0 0 1-.415-.056c.14.017.279.036.415.056 2.67.297 5.568-.628 6.383-3.364.246-.828.624-5.79.624-6.478 0-.69-.139-1.861-.902-2.206-.659-.298-1.664-.62-4.3 1.24C16.046 4.748 13.087 8.687 12 10.8Z"/>
+            </svg>
+            <span>Follow on Bluesky</span>
+        </a>
+    </header>
+
+    <div class="page-inner">
+        <div class="search-wrap">
+            <div class="search-field">
+                <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="8"/>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+                <input type="text" id="search" class="search-input" placeholder="Search canvas..." aria-label="Search canvas">
+                <span class="search-counter" id="searchCounter"></span>
+            </div>
+            <button class="random-btn" id="randomBtn" aria-label="Open a random canvas">
+                <i class="fa-solid fa-dice"></i>
+                <span>Random</span>
+            </button>
+        </div>
+
+        <div class="gallery" id="gallery" aria-label="Generative Art Gallery"></div>
+    </div>
+</div>
+
+<footer>
+    <p>© <span id="year"></span> Intarynx. All rights reserved. &nbsp;·&nbsp; <span id="count"></span> works</p>
+</footer>
+
+<div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-header">
+        <button class="nav-btn" id="prevBtn" aria-label="Previous artwork"><i class="fa-solid fa-chevron-left"></i></button>
+        <h2 class="modal-title" id="modalTitle"></h2>
+        <button class="nav-btn" id="nextBtn" aria-label="Next artwork"><i class="fa-solid fa-chevron-right"></i></button>
+        <div class="modal-actions">
+            <button class="btn" id="sourceBtn">View Source</button>
+        </div>
+        <button class="close-btn" id="closeBtn" aria-label="Close">×</button>
+    </div>
+    <div class="modal-content">
+        <iframe id="modalIframe" title="Artwork display"></iframe>
+    </div>
+    <div class="source-panel" id="sourcePanel">
+        <div class="source-header">
+            <span>Source Code</span>
+            <button class="btn copy-btn" id="copyBtn">Copy</button>
+        </div>
+        <pre class="source-code" id="sourceCode"></pre>
+    </div>
+    <div class="mobile-actions">
+        <button class="btn" id="mobileSourceBtn"><i class="fa-solid fa-code"></i> <span id="mobileSourceLabel">View Source</span></button>
+        <button class="btn" id="mobileCopyBtn"><i class="fa-solid fa-copy"></i> Copy Code</button>
+    </div>
+</div>
+
+<script>
+/* ══════════════════════════════════════════════
+   BACKGROUND — dubnobasswithmyheadman style
+══════════════════════════════════════════════ */
+(function () {
+    const cv = document.getElementById('bg');
+    const ctx = cv.getContext('2d');
+
+    let WORDS = ['generative','art','code','retro','visual','loop','signal','wave','drift','pulse'];
+
+    function rnd(a,b){return a+Math.random()*(b-a);}
+    function ri(a,b){return Math.floor(rnd(a,b));}
+    function pick(arr){return arr[ri(0,arr.length)];}
+
+    let W, H;
+
+    function resize() {
+        W = cv.width  = window.innerWidth;
+        H = cv.height = window.innerHeight;
+    }
+    resize();
+
+    function makeOff() {
+        const oc = document.createElement('canvas');
+        oc.width = W; oc.height = H;
+        return oc.getContext('2d');
+    }
+
+    function renderDenseZone(o) {
+        const nb = ri(1,3);
+        for (let b = 0; b < nb; b++) {
+            const cx = rnd(W*0.05, W*0.7), cy = rnd(H*0.05, H*0.7);
+            const sz = rnd(6,13), lines = ri(6,18);
+            const font = Math.random()<0.5 ? 'monospace' : 'sans-serif';
+            o.fillStyle = '#000'; o.globalAlpha = 1;
+            for (let l = 0; l < lines; l++) {
+                const y = cy + l*sz*rnd(0.7,0.9);
+                const targetW = rnd(W*0.12, W*0.45);
+                let line = '';
+                o.font = `bold ${sz}px ${font}`;
+                while (o.measureText(line).width < targetW) line += pick(WORDS).replace(/ /g,'');
+                const chars = line.split('');
+                const spacing = targetW / chars.length;
+                for (let i = 0; i < chars.length; i++) o.fillText(chars[i], cx + i*spacing, y);
+            }
+        }
+    }
+
+    function renderText(o) {
+        o.clearRect(0,0,W,H);
+        const sz = rnd(7,22);
+        const font = Math.random()<0.5 ? 'monospace' : 'sans-serif';
+        const angle = Math.random()<0.25 ? Math.PI/2 : rnd(-0.06,0.06);
+        o.save();
+        o.translate(W/2,H/2); o.rotate(angle); o.translate(-W/2,-H/2);
+        let y = rnd(-sz*2, sz*2);
+        while (y < H+sz*3) {
+            let x = rnd(-sz*6, 0);
+            const lineH = sz*rnd(0.9,1.3);
+            while (x < W+sz*6) {
+                const word = pick(WORDS);
+                o.font = `${Math.random()<0.35?'bold ':''}${rnd(7,22)}px ${font}`;
+                o.fillStyle = '#bbb'; o.globalAlpha = 1;
+                o.fillText(word, x, y);
+                x += o.measureText(word).width + sz*rnd(0.5,2);
+            }
+            y += lineH;
+        }
+        o.restore();
+    }
+
+    function renderBlocks(o) {
+        o.clearRect(0,0,W,H);
+        const nb = ri(2,5);
+        for (let b = 0; b < nb; b++) {
+            const bx=rnd(0,W*0.75), by=rnd(0,H*0.75);
+            const bw=rnd(W*0.15,W*0.5), bh=rnd(H*0.08,H*0.25);
+            const sz=rnd(8,18);
+            o.fillStyle='#080808'; o.globalAlpha=1;
+            for (let ly=by; ly<by+bh+sz; ly+=sz*rnd(0.55,0.75))
+                for (let lx=bx; lx<bx+bw+sz*2; lx+=sz*rnd(0.55,0.8)) {
+                    o.font=`bold ${sz}px monospace`;
+                    o.fillText(pick(WORDS).charAt(ri(0,6)), lx, ly);
+                }
+        }
+        renderDenseZone(o);
+    }
+
+    let circlePhase = 0;
+    function renderCircles(o) {
+        o.clearRect(0,0,W,H);
+        const nb=ri(3,6);
+        for (let ci=0; ci<nb; ci++) {
+            const cx=rnd(W*0.1,W*0.9), cy=rnd(H*0.1,H*0.9);
+            const r=rnd(Math.min(W,H)*0.04, Math.min(W,H)*0.28);
+            const sz=rnd(7,16);
+            const word=(pick(WORDS)+' '+pick(WORDS)+' ').toUpperCase();
+            const rings=ri(1,5);
+            for (let ring=0; ring<rings; ring++) {
+                const rr=r+ring*sz*rnd(0.9,1.6);
+                const type=Math.random();
+                if (type<0.35) {
+                    const cc=Math.floor((2*Math.PI*rr)/(sz*0.58));
+                    o.font=`${Math.random()<0.6?'bold ':''}${sz}px monospace`;
+                    o.fillStyle='#080808'; o.globalAlpha=1;
+                    for (let i=0;i<cc;i++) {
+                        const angle=(i/cc)*Math.PI*2+circlePhase;
+                        o.save(); o.translate(cx,cy); o.rotate(angle-Math.PI/2);
+                        o.fillText(word[i%word.length],0,-rr); o.restore();
+                    }
+                } else if (type<0.55) {
+                    const sA=rnd(0,Math.PI*2), eA=sA+rnd(Math.PI*0.3,Math.PI*2);
+                    o.beginPath(); o.arc(cx,cy,rr,sA,eA);
+                    o.strokeStyle='#080808'; o.lineWidth=rnd(0.5,3);
+                    o.globalAlpha=rnd(0.5,1); o.stroke();
+                } else if (type<0.72) {
+                    const sA=rnd(0,Math.PI*2), span=rnd(Math.PI*0.3,Math.PI*1.5);
+                    const cc=Math.floor((span*rr)/(sz*0.58));
+                    o.font=`${Math.random()<0.6?'bold ':''}${sz}px monospace`;
+                    o.fillStyle='#000'; o.globalAlpha=1;
+                    for (let i=0;i<cc;i++) {
+                        const angle=sA+(i/cc)*span+circlePhase;
+                        o.save(); o.translate(cx,cy); o.rotate(angle-Math.PI/2);
+                        o.fillText(word[i%word.length],0,-rr); o.restore();
+                    }
+                } else {
+                    const sA=rnd(0,Math.PI*2), span=rnd(Math.PI*0.2,Math.PI*0.9);
+                    const cc=Math.floor((span*rr)/(sz*0.3));
+                    o.font=`bold ${sz}px monospace`; o.fillStyle='#000'; o.globalAlpha=1;
+                    for (let i=0;i<cc;i++) {
+                        const angle=sA+(i/cc)*span+circlePhase;
+                        o.save(); o.translate(cx,cy); o.rotate(angle-Math.PI/2);
+                        for (let d=-sz*0.5;d<sz*0.5;d+=sz*0.25) o.fillText(word[i%word.length],0,-rr+d);
+                        o.restore();
+                    }
+                }
+            }
+        }
+        o.globalAlpha=1;
+    }
+
+    function renderScribbles(o) {
+        o.clearRect(0,0,W,H);
+        const nb=ri(4,9);
+        for (let s=0;s<nb;s++) {
+            const isW=Math.random()<0.35;
+            o.strokeStyle=isW?'#fff':'#000'; o.fillStyle=isW?'#fff':'#000';
+            o.lineWidth=rnd(0.5,4); o.globalAlpha=rnd(0.5,1);
+            o.lineCap='round'; o.lineJoin='round';
+            const type=Math.random();
+            const sx=rnd(0,W), sy=rnd(0,H);
+            if (type<0.3) {
+                o.beginPath(); o.moveTo(sx,sy);
+                const steps=ri(6,20);
+                for (let i=0;i<steps;i++) {
+                    o.quadraticCurveTo(sx+rnd(-W*0.3,W*0.3),sy+rnd(-H*0.3,H*0.3),
+                                       sx+rnd(-W*0.35,W*0.35),sy+rnd(-H*0.35,H*0.35));
+                }
+                o.stroke();
+            } else if (type<0.55) {
+                const hx=rnd(0,W*0.7),hy=rnd(0,H*0.7),hw=rnd(W*0.05,W*0.3),hh=rnd(H*0.05,H*0.2);
+                const gap=rnd(2,8);
+                o.beginPath(); let tog=false;
+                for (let yl=hy;yl<hy+hh;yl+=gap) {
+                    o.moveTo(tog?hx+hw:hx,yl); o.lineTo(tog?hx:hx+hw,yl+gap*rnd(0.3,0.7));
+                    tog=!tog;
+                }
+                o.stroke();
+            } else if (type<0.72) {
+                const maxR=rnd(W*0.03,W*0.18), turns=rnd(1.5,5), steps=ri(60,180);
+                o.beginPath();
+                for (let i=0;i<=steps;i++) {
+                    const t=i/steps, angle=t*turns*Math.PI*2, r=t*maxR;
+                    const px=sx+Math.cos(angle)*r, py=sy+Math.sin(angle)*r;
+                    i===0?o.moveTo(px,py):o.lineTo(px,py);
+                }
+                o.stroke();
+            } else if (type<0.86) {
+                o.beginPath(); o.moveTo(sx,sy);
+                const pts=ri(4,12);
+                for (let i=0;i<pts;i++) o.lineTo(sx+rnd(-W*0.4,W*0.4),sy+rnd(-H*0.4,H*0.4));
+                o.stroke();
+            } else {
+                o.beginPath();
+                const bpts=ri(5,10), br=rnd(W*0.01,W*0.06);
+                for (let i=0;i<=bpts;i++) {
+                    const angle=(i/bpts)*Math.PI*2, r=br*rnd(0.5,1.4);
+                    const px=sx+Math.cos(angle)*r, py=sy+Math.sin(angle)*r;
+                    i===0?o.moveTo(px,py):o.lineTo(px,py);
+                }
+                o.closePath(); o.stroke();
+            }
+        }
+        o.globalAlpha=1;
+    }
+
+    let layers;
+    function initLayers() {
+        layers = {
+            text:      {cur:makeOff(), prev:makeOff(), alpha:0, blending:false},
+            blocks:    {cur:makeOff(), prev:makeOff(), alpha:0, blending:false},
+            circles:   {cur:makeOff(), prev:makeOff(), alpha:0, blending:false},
+            scribbles: {cur:makeOff(), prev:makeOff(), alpha:0, blending:false},
+        };
+    }
+    initLayers();
+
+    window.addEventListener('resize', () => { resize(); initLayers(); init(); });
+
+    function startBlend(key, fn) {
+        const s = layers[key];
+        if (s.blending) return;
+        s.prev.clearRect(0,0,W,H); s.prev.drawImage(s.cur.canvas,0,0);
+        fn(s.cur); s.alpha=0; s.blending=true;
+    }
+
+    function composite() {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0,0,W,H);
+        for (const key of ['text','blocks','circles','scribbles']) {
+            const s = layers[key];
+            if (!s.cur.canvas.width || !s.cur.canvas.height) continue;
+            if (s.blending) {
+                ctx.globalAlpha = 1-s.alpha; ctx.drawImage(s.prev.canvas,0,0);
+                ctx.globalAlpha = s.alpha;   ctx.drawImage(s.cur.canvas,0,0);
+                s.alpha = Math.min(1, s.alpha+0.012);
+                if (s.alpha>=1) s.blending=false;
+            } else {
+                ctx.globalAlpha=1; ctx.drawImage(s.cur.canvas,0,0);
+            }
+        }
+        ctx.globalAlpha=1;
+    }
+
+    function init() {
+        renderText(layers.text.cur);
+        renderBlocks(layers.blocks.cur);
+        renderCircles(layers.circles.cur);
+        renderScribbles(layers.scribbles.cur);
+    }
+    init();
+
+    let frame=0;
+    let paused = false;
+    function loop() {
+        if (!paused) {
+            frame++;
+            if (frame%20===0) startBlend('text', renderText);
+            if (frame%40===0) startBlend('blocks', renderBlocks);
+            if (frame%5===0)  { circlePhase+=0.015; startBlend('circles', renderCircles); }
+            if (frame%55===0) startBlend('scribbles', renderScribbles);
+            composite();
+        }
+        requestAnimationFrame(loop);
+    }
+    loop();
+
+    window.__setBgWords = (w) => { WORDS = w; };
+    window.__pauseBg = (p) => { paused = p; };
+})();
+
+let artworks = [];
+let filteredArtworks = [];
+let currentIndex = -1;
+const cacheBuster = Date.now();
+
+document.getElementById('year').textContent = new Date().getFullYear();
+
+const gallery        = document.getElementById('gallery');
+const searchInput    = document.getElementById('search');
+const searchCounter  = document.getElementById('searchCounter');
+const randomBtn      = document.getElementById('randomBtn');
+const modal          = document.getElementById('modal');
+const modalTitle     = document.getElementById('modalTitle');
+const modalIframe    = document.getElementById('modalIframe');
+const sourcePanel    = document.getElementById('sourcePanel');
+const sourceCode     = document.getElementById('sourceCode');
+const sourceBtn      = document.getElementById('sourceBtn');
+const closeBtn       = document.getElementById('closeBtn');
+const copyBtn        = document.getElementById('copyBtn');
+const prevBtn        = document.getElementById('prevBtn');
+const nextBtn        = document.getElementById('nextBtn');
+let currentSource = '';
+
+fetch(`artworks.json?v=${cacheBuster}`)
+    .then(r => r.json())
+    .then(data => {
+        artworks = data;
+        artworks.forEach(a => {
+            a.url = `artworks/${a.id}.html`;
+            a.thumb = `screenshots/${a.id}.png`;
+        });
+        const words = new Set();
+        artworks.forEach(a => {
+            words.add(a.title);
+            a.title.split(/\s+/).forEach(w => { if (w.length > 1) words.add(w); });
+        });
+        if (window.__setBgWords) window.__setBgWords(Array.from(words));
+        filteredArtworks = artworks.slice();
+        document.getElementById('count').textContent = artworks.length;
+        renderGallery();
+        checkDirectLink();
+    });
+
+function updateCounter() {
+    const total = artworks.length;
+    const shown = filteredArtworks.length;
+    searchCounter.textContent = shown === total ? `${total}` : `${shown} / ${total}`;
+}
+
+function renderGallery() {
+    gallery.innerHTML = '';
+    updateCounter();
+    if (filteredArtworks.length === 0) {
+        gallery.innerHTML = '<div class="no-results">No canvas found</div>';
+        return;
+    }
+    filteredArtworks.forEach((art, idx) => {
+        const total = filteredArtworks.length;
+        const card = document.createElement('article');
+        card.className = 'art-card';
+        card.innerHTML = `
+            <div class="art-thumb">
+                <div class="art-thumb-placeholder"></div>
+                <img src="${art.thumb}" alt="${art.title}" loading="lazy"
+                     onload="this.classList.add('loaded'); this.previousElementSibling.style.display='none';"
+                     onerror="this.style.display='none'; this.previousElementSibling.style.animation='none'; this.previousElementSibling.style.background='#f4f4f4'; this.previousElementSibling.textContent='No preview';">
+            </div>
+            <div class="art-info">
+                <div class="art-title">${art.title}</div>
+                <div class="art-index">#${String(total - idx).padStart(3, '0')}</div>
+            </div>
+        `;
+        card.addEventListener('click', () => openArt(idx));
+        gallery.appendChild(card);
+    });
+}
+
+searchInput.addEventListener('input', e => {
+    const q = e.target.value.trim().toLowerCase();
+    filteredArtworks = q
+        ? artworks.filter(a => a.title.toLowerCase().includes(q) || a.id.toLowerCase().includes(q))
+        : artworks.slice();
+    renderGallery();
+});
+
+function openArt(idx) {
+    currentIndex = idx;
+    const art = filteredArtworks[idx];
+    modalTitle.textContent = art.title;
+    modalIframe.src = art.url;
+    modalIframe.title = art.title;
+    modal.classList.add('active');
+    sourcePanel.classList.remove('active');
+    sourceBtn.textContent = 'View Source';
+    loadSource(art.url);
+    history.replaceState(null, '', `?id=${art.id}`);
+    document.title = `${art.title} · Intarynx's Gallery`;
+    updateNavButtons();
+    if (window.__pauseBg) window.__pauseBg(true);
+}
+
+function closeArt() {
+    modal.classList.remove('active');
+    modalIframe.src = '';
+    sourcePanel.classList.remove('active');
+    currentIndex = -1;
+    history.replaceState(null, '', window.location.pathname);
+    document.title = "Intarynx's Gallery - Generative Canvas at the Edge of Algorithms & Aesthetics";
+    if (window.__pauseBg) window.__pauseBg(false);
+}
+
+function navigate(dir) {
+    const newIdx = currentIndex + dir;
+    if (newIdx >= 0 && newIdx < filteredArtworks.length) openArt(newIdx);
+}
+
+function updateNavButtons() {
+    prevBtn.disabled = currentIndex <= 0;
+    nextBtn.disabled = currentIndex >= filteredArtworks.length - 1;
+}
+
+function toggleSource() {
+    sourcePanel.classList.toggle('active');
+    sourceBtn.textContent = sourcePanel.classList.contains('active') ? 'Hide Source' : 'View Source';
+}
+
+async function loadSource(url) {
+    try {
+        const r = await fetch(url);
+        currentSource = await r.text();
+        sourceCode.textContent = currentSource;
+    } catch { sourceCode.textContent = '// Unable to load source'; }
+}
+
+function copySource() {
+    navigator.clipboard.writeText(currentSource).then(() => {
+        const t = copyBtn.textContent;
+        copyBtn.textContent = 'Copied!';
+        setTimeout(() => { copyBtn.textContent = t; }, 2000);
+    });
+}
+
+function checkDirectLink() {
+    const id = new URLSearchParams(window.location.search).get('id');
+    const idx = artworks.findIndex(a => a.id === id);
+    if (idx !== -1) openArt(idx);
+}
+
+sourceBtn.addEventListener('click', toggleSource);
+closeBtn.addEventListener('click', closeArt);
+copyBtn.addEventListener('click', copySource);
+prevBtn.addEventListener('click', () => navigate(-1));
+nextBtn.addEventListener('click', () => navigate(1));
+
+const mobileSourceBtn = document.getElementById('mobileSourceBtn');
+const mobileCopyBtn = document.getElementById('mobileCopyBtn');
+const mobileSourceLabel = document.getElementById('mobileSourceLabel');
+mobileSourceBtn.addEventListener('click', () => {
+    toggleSource();
+    mobileSourceLabel.textContent = sourcePanel.classList.contains('active') ? 'Hide Source' : 'View Source';
+});
+mobileCopyBtn.addEventListener('click', () => {
+    navigator.clipboard.writeText(currentSource).then(() => {
+        const i = mobileCopyBtn.innerHTML;
+        mobileCopyBtn.innerHTML = '<i class="fa-solid fa-check"></i> Copied!';
+        setTimeout(() => { mobileCopyBtn.innerHTML = i; }, 2000);
+    });
+});
+
+randomBtn.addEventListener('click', () => {
+    if (filteredArtworks.length === 0) return;
+    const idx = Math.floor(Math.random() * filteredArtworks.length);
+    openArt(idx);
+});
+document.addEventListener('keydown', e => {
+    if (!modal.classList.contains('active')) return;
+    if (e.key === 'Escape') closeArt();
+    else if (e.key === 'ArrowLeft') navigate(-1);
+    else if (e.key === 'ArrowRight') navigate(1);
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<base href="/upstride/">
+    <title>Muybridge Robot Study</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #1a1a1a;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: monospace;
+            overflow: hidden;
+        }
+        canvas {
+            background: #f5f5dc;
+            border: 20px solid #2a2a2a;
+            box-shadow: 0 0 50px rgba(0,0,0,0.5);
+            filter: blur(0.3px) contrast(1.1);
+        }
+        @keyframes breathe {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.002); }
+        }
+        .canvas-wrapper {
+            animation: breathe 4s ease-in-out infinite;
+        }
+        @keyframes filmShake {
+            0%, 100% { transform: translate(0, 0) rotate(0deg); }
+            10% { transform: translate(-1px, 1px) rotate(-0.1deg); }
+            20% { transform: translate(1px, -0.5px) rotate(0.1deg); }
+            30% { transform: translate(-0.5px, -1px) rotate(-0.05deg); }
+            40% { transform: translate(0.5px, 1px) rotate(0.05deg); }
+            50% { transform: translate(-1px, 0.5px) rotate(-0.1deg); }
+            60% { transform: translate(1px, -1px) rotate(0.1deg); }
+            70% { transform: translate(-0.5px, 0.5px) rotate(-0.05deg); }
+            80% { transform: translate(0.5px, -0.5px) rotate(0.05deg); }
+            90% { transform: translate(-1px, 1px) rotate(-0.1deg); }
+        }
+        .frame-display {
+            position: absolute;
+            top: 30px;
+            right: 30px;
+            background: #f5f5dc;
+            border: 8px solid #2a2a2a;
+            padding: 15px 25px;
+            font-family: 'Courier New', monospace;
+            font-size: 72px;
+            font-weight: bold;
+            color: #000;
+            letter-spacing: 4px;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);
+            filter: blur(0.4px) contrast(1.2);
+            animation: filmShake 0.15s infinite;
+        }
+    </style>
+</head>
+<body>
+    <div class="canvas-wrapper">
+        <canvas id="canvas"></canvas>
+    </div>
+    <div class="frame-display" id="frame">01</div>
+    
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 1200;
+        canvas.height = 400;
+
+        let frame = 0;
+        const frameCount = 12;
+        const figureWidth = 80;
+        const spacing = 100;
+        const speed = 0.3;
+
+        function drawFigure(x, y, phase) {
+            ctx.fillStyle = '#000';
+            ctx.strokeStyle = '#000';
+            
+            // More refined proportions
+            const walkCycle = phase % (Math.PI * 2);
+            const headBob = Math.sin(walkCycle * 2) * 3;
+            const torsoLean = Math.sin(walkCycle) * 0.08;
+            
+            const headY = y - 140 + headBob;
+            const bodyY = y - 100;
+            
+            // Robotic head - angular visor
+            ctx.save();
+            ctx.translate(x, headY);
+            ctx.beginPath();
+            ctx.moveTo(-11, -12);
+            ctx.lineTo(11, -12);
+            ctx.lineTo(13, 0);
+            ctx.lineTo(11, 14);
+            ctx.lineTo(-11, 14);
+            ctx.lineTo(-13, 0);
+            ctx.closePath();
+            ctx.fill();
+            
+            // Visor line
+            ctx.strokeStyle = '#f5f5dc';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(-10, -2);
+            ctx.lineTo(10, -2);
+            ctx.stroke();
+            ctx.strokeStyle = '#000';
+            ctx.restore();
+            
+            // Neck - cylindrical
+            ctx.fillRect(x - 5, headY + 14, 10, 10);
+            
+            // Chest plate - angular
+            ctx.save();
+            ctx.translate(x, bodyY);
+            ctx.rotate(torsoLean);
+            ctx.beginPath();
+            ctx.moveTo(-16, -28);
+            ctx.lineTo(16, -28);
+            ctx.lineTo(18, 10);
+            ctx.lineTo(-18, 10);
+            ctx.closePath();
+            ctx.fill();
+            
+            // Chest detail
+            ctx.fillStyle = '#f5f5dc';
+            ctx.fillRect(-2, -15, 4, 20);
+            ctx.fillStyle = '#000';
+            ctx.restore();
+            
+            // Abdominal segments
+            for (let i = 0; i < 3; i++) {
+                const segY = bodyY + 12 + i * 8;
+                ctx.fillRect(x - 14, segY, 28, 6);
+            }
+            
+            // Pelvis - mechanical hip assembly
+            ctx.beginPath();
+            ctx.moveTo(x - 18, bodyY + 35);
+            ctx.lineTo(x - 16, bodyY + 48);
+            ctx.lineTo(x + 16, bodyY + 48);
+            ctx.lineTo(x + 18, bodyY + 35);
+            ctx.closePath();
+            ctx.fill();
+            
+            // Hip joints
+            ctx.beginPath();
+            ctx.arc(x - 8, bodyY + 38, 4, 0, Math.PI * 2);
+            ctx.arc(x + 8, bodyY + 38, 4, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Arms with mechanical joints
+            const armSwing = Math.sin(walkCycle) * 35;
+            const forearmBend = Math.abs(Math.sin(walkCycle)) * 0.4;
+            
+            // Left arm
+            const leftShoulderX = x - 12;
+            const leftShoulderY = bodyY - 25;
+            const leftElbowX = leftShoulderX + Math.sin(walkCycle * 0.8) * 8 + armSwing * 0.4;
+            const leftElbowY = leftShoulderY + 28;
+            const leftHandX = leftElbowX + armSwing * 0.8;
+            const leftHandY = leftElbowY + 25 + forearmBend * 15;
+            
+            // Shoulder joint
+            ctx.beginPath();
+            ctx.arc(leftShoulderX, leftShoulderY, 5, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.lineWidth = 8;
+            ctx.lineCap = 'butt';
+            ctx.beginPath();
+            ctx.moveTo(leftShoulderX, leftShoulderY);
+            ctx.lineTo(leftElbowX, leftElbowY);
+            ctx.stroke();
+            
+            // Elbow joint
+            ctx.beginPath();
+            ctx.arc(leftElbowX, leftElbowY, 4, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.lineWidth = 7;
+            ctx.beginPath();
+            ctx.moveTo(leftElbowX, leftElbowY);
+            ctx.lineTo(leftHandX, leftHandY);
+            ctx.stroke();
+            
+            // Hand - mechanical gripper
+            ctx.fillRect(leftHandX - 3, leftHandY, 6, 8);
+            ctx.fillRect(leftHandX - 5, leftHandY + 8, 3, 4);
+            ctx.fillRect(leftHandX + 2, leftHandY + 8, 3, 4);
+            
+            // Right arm
+            const rightShoulderX = x + 12;
+            const rightShoulderY = bodyY - 25;
+            const rightElbowX = rightShoulderX + Math.sin(walkCycle * 0.8 + Math.PI) * 8 - armSwing * 0.4;
+            const rightElbowY = rightShoulderY + 28;
+            const rightHandX = rightElbowX - armSwing * 0.8;
+            const rightHandY = rightElbowY + 25 + (1 - forearmBend) * 15;
+            
+            // Shoulder joint
+            ctx.beginPath();
+            ctx.arc(rightShoulderX, rightShoulderY, 5, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.lineWidth = 8;
+            ctx.beginPath();
+            ctx.moveTo(rightShoulderX, rightShoulderY);
+            ctx.lineTo(rightElbowX, rightElbowY);
+            ctx.stroke();
+            
+            // Elbow joint
+            ctx.beginPath();
+            ctx.arc(rightElbowX, rightElbowY, 4, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.lineWidth = 7;
+            ctx.beginPath();
+            ctx.moveTo(rightElbowX, rightElbowY);
+            ctx.lineTo(rightHandX, rightHandY);
+            ctx.stroke();
+            
+            // Hand - mechanical gripper
+            ctx.fillRect(rightHandX - 3, rightHandY, 6, 8);
+            ctx.fillRect(rightHandX - 5, rightHandY + 8, 3, 4);
+            ctx.fillRect(rightHandX + 2, rightHandY + 8, 3, 4);
+            
+            // Legs with mechanical joints
+            const legPhase = walkCycle;
+            const leftLegLift = Math.max(0, Math.sin(legPhase)) * 50;
+            const rightLegLift = Math.max(0, Math.sin(legPhase + Math.PI)) * 50;
+            
+            const leftKneeForward = Math.sin(legPhase) * 12;
+            const rightKneeForward = Math.sin(legPhase + Math.PI) * 12;
+            
+            ctx.lineWidth = 10;
+            
+            // Left leg
+            const leftHipX = x - 8;
+            const leftHipY = bodyY + 35;
+            const leftKneeX = leftHipX + leftKneeForward;
+            const leftKneeY = leftHipY + 35 - leftLegLift * 0.3;
+            const leftFootX = leftHipX - 8;
+            const leftFootY = y - leftLegLift;
+            
+            ctx.beginPath();
+            ctx.moveTo(leftHipX, leftHipY);
+            ctx.lineTo(leftKneeX, leftKneeY);
+            ctx.stroke();
+            
+            // Knee joint
+            ctx.beginPath();
+            ctx.arc(leftKneeX, leftKneeY, 5, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.lineWidth = 9;
+            ctx.beginPath();
+            ctx.moveTo(leftKneeX, leftKneeY);
+            ctx.lineTo(leftFootX, leftFootY);
+            ctx.stroke();
+            
+            // Right leg
+            const rightHipX = x + 8;
+            const rightHipY = bodyY + 35;
+            const rightKneeX = rightHipX + rightKneeForward;
+            const rightKneeY = rightHipY + 35 - rightLegLift * 0.3;
+            const rightFootX = rightHipX + 8;
+            const rightFootY = y - rightLegLift;
+            
+            ctx.lineWidth = 10;
+            ctx.beginPath();
+            ctx.moveTo(rightHipX, rightHipY);
+            ctx.lineTo(rightKneeX, rightKneeY);
+            ctx.stroke();
+            
+            // Knee joint
+            ctx.beginPath();
+            ctx.arc(rightKneeX, rightKneeY, 5, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.lineWidth = 9;
+            ctx.beginPath();
+            ctx.moveTo(rightKneeX, rightKneeY);
+            ctx.lineTo(rightFootX, rightFootY);
+            ctx.stroke();
+            
+            // Feet - mechanical boots
+            ctx.fillRect(leftFootX - 6, leftFootY - 4, 12, 8);
+            ctx.fillRect(leftFootX - 8, leftFootY + 4, 16, 4);
+            
+            ctx.fillRect(rightFootX - 6, rightFootY - 4, 12, 8);
+            ctx.fillRect(rightFootX - 8, rightFootY + 4, 16, 4);
+        }
+
+        function animate() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Film grain
+            for (let i = 0; i < 800; i++) {
+                const x = Math.random() * canvas.width;
+                const y = Math.random() * canvas.height;
+                const size = Math.random() * 1.5;
+                const opacity = Math.random() * 0.3;
+                ctx.fillStyle = `rgba(0,0,0,${opacity})`;
+                ctx.fillRect(x, y, size, size);
+            }
+            
+            // Grid lines
+            ctx.strokeStyle = '#d0d0c0';
+            ctx.lineWidth = 1;
+            for (let i = 0; i <= frameCount; i++) {
+                const x = spacing + i * spacing;
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, canvas.height);
+                ctx.stroke();
+            }
+            
+            // Vertical scratches
+            if (Math.random() > 0.97) {
+                const scratchX = Math.random() * canvas.width;
+                ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+                ctx.lineWidth = 0.5;
+                ctx.beginPath();
+                ctx.moveTo(scratchX, 0);
+                ctx.lineTo(scratchX, canvas.height);
+                ctx.stroke();
+            }
+            
+            // Draw all frames
+            for (let i = 0; i < frameCount; i++) {
+                const x = spacing + i * spacing;
+                const phase = (frame * speed / 60 + i / frameCount) * Math.PI * 2;
+                const alpha = i === Math.floor((frame * speed) / 5) % frameCount ? 1 : 0.25;
+                ctx.globalAlpha = alpha;
+                drawFigure(x, canvas.height - 80, phase);
+                
+                // Double exposure ghost
+                if (i > 0 && Math.random() > 0.7) {
+                    ctx.globalAlpha = alpha * 0.15;
+                    drawFigure(x - 3, canvas.height - 80, phase - 0.1);
+                }
+            }
+            
+            ctx.globalAlpha = 1;
+            
+            // Dust and hair
+            if (Math.random() > 0.95) {
+                const dustX = Math.random() * canvas.width;
+                const dustY = Math.random() * canvas.height;
+                const dustLength = Math.random() * 30 + 10;
+                const dustAngle = Math.random() * Math.PI;
+                ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+                ctx.lineWidth = 0.5;
+                ctx.beginPath();
+                ctx.moveTo(dustX, dustY);
+                ctx.lineTo(dustX + Math.cos(dustAngle) * dustLength, dustY + Math.sin(dustAngle) * dustLength);
+                ctx.stroke();
+            }
+            
+            // Vignette ovale
+            const gradient = ctx.createRadialGradient(
+                canvas.width / 2, canvas.height / 2, canvas.width * 0.3,
+                canvas.width / 2, canvas.height / 2, canvas.width * 0.7
+            );
+            gradient.addColorStop(0, 'rgba(0,0,0,0)');
+            gradient.addColorStop(1, 'rgba(0,0,0,0.4)');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            frame++;
+            
+            const currentFrame = (Math.floor((frame * speed) / 5) % frameCount) + 1;
+            document.getElementById('frame').textContent = currentFrame.toString().padStart(2, '0');
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+    </script>
+</body>
+</html>

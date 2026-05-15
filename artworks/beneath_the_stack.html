@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; }
+  body { background: #05050a; overflow: hidden; display: flex; align-items: center; justify-content: center; height: 100vh; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const c = document.getElementById('c');
+const ctx = c.getContext('2d');
+let W, H, t = 0;
+
+// Off-screen canvas pour le paysage (rendu une fois, blit ensuite)
+const offC = document.createElement('canvas');
+const offCtx = offC.getContext('2d');
+let landscapeReady = false;
+
+function resize() {
+  const S = Math.min(innerWidth, innerHeight);
+  W = c.width = S; H = c.height = S;
+  offC.width = W; offC.height = H;
+  landscapeReady = false;
+  buildLines();
+}
+
+// --- Mots sombres ---
+const allDarkWords = [
+  "POWER","GREED","LAWYERS","CORRUPTION","LOBBYING","EXPLOITATION",
+  "OFFSHORE","MONOPOLY","SURVEILLANCE","PROPAGANDA","CONTROL","NEPOTISM",
+  "HYPOCRISY","MANIPULATION","OLIGARCHY","DOMINANCE","COERCION","FRAUD",
+  "DECEIT","TYRANNY","OPPRESSION","EXTORTION","COMPLICITY","BETRAYAL",
+  "CONTEMPT","ARROGANCE","IMPUNITY","PREDATION","PLUNDER","SERVITUDE",
+  "ABUSE","CENSORSHIP","PRIVILEGE","DECEPTION","INJUSTICE","EXPLOITATION",
+  "GREED","POWER","TYRANNY","CORRUPTION","CONTROL","FRAUD","LAWYERS",
+  "OLIGARCHY","DOMINANCE","MANIPULATION","PROPAGANDA","SURVEILLANCE"
+];
+const lineOverlap = 22, baseFontSize = 28;
+let lines = [];
+
+function buildLines() {
+  lines = [];
+  let curY = 0;
+  while (curY < H * 1.3) {
+    const lw = [];
+    let curX = -10 + Math.random() * 8;
+    const gap = 2 + Math.random() * 5;
+    while (curX < W + 30) {
+      const w = allDarkWords[Math.floor(Math.random() * allDarkWords.length)];
+      const sz = baseFontSize + Math.floor(Math.random() * 14 - 4);
+      ctx.font = `900 ${sz}px Impact, 'Arial Black', sans-serif`;
+      lw.push({ word: w, x: curX, sz, seed: Math.random() * 100 });
+      curX += ctx.measureText(w).width + gap;
+    }
+    lines.push({ words: lw, y: curY, shakeT: 0 });
+    curY += lineOverlap;
+  }
+}
+
+// --- Mots positifs flottants libres ---
+const positiveWords = [
+  "LOVE","HOPE","PEACE","JOY","FREEDOM","DREAM","LIGHT","BEAUTY",
+  "TRUTH","GRACE","WONDER","HARMONY","SOUL","BLISS","NATURE",
+  "KINDNESS","UNITY","SMILE","WARMTH","COMPASSION","DIGNITY","TRUST"
+];
+const fonts = [
+  "'Georgia', serif",
+  "'Courier New', monospace",
+  "'Trebuchet MS', sans-serif",
+  "'Palatino', serif",
+  "'Impact', sans-serif",
+  "'Comic Sans MS', cursive",
+  "'Lucida Console', monospace",
+  "'Brush Script MT', cursive",
+  "'Garamond', serif",
+  "'Verdana', sans-serif"
+];
+const freeWords = positiveWords.map((w, i) => ({
+  word: w,
+  nx: Math.random(),
+  ny: Math.random(),
+  vx: (Math.random() - 0.5) * 0.001,
+  vy: (Math.random() - 0.5) * 0.001,
+  size: 14 + Math.random() * 28,
+  font: fonts[i % fonts.length],
+  hue: Math.random() * 360,
+  phase: Math.random() * Math.PI * 2,
+  rot: (Math.random() - 0.5) * 0.5,
+  italic: Math.random() > 0.5,
+  bold: Math.random() > 0.4
+}));
+
+function drawFreeWords(topY, height) {
+  if (height < 5) return;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0, topY, W, height); ctx.clip();
+  ctx.translate(0, topY);
+  ctx.scale(1, height / H);
+
+  for (const fw of freeWords) {
+    fw.nx += fw.vx;
+    fw.ny += fw.vy;
+    if (fw.nx < -0.05) fw.nx = 1.05;
+    if (fw.nx > 1.05) fw.nx = -0.05;
+    if (fw.ny < -0.05) fw.ny = 1.05;
+    if (fw.ny > 1.05) fw.ny = -0.05;
+
+    const drawX = fw.nx * W;
+    const drawY = fw.ny * H;
+    const h = (fw.hue + t * 15) % 360;
+    const alpha = 0.6 + Math.sin(t * 2 + fw.phase) * 0.25;
+
+    ctx.save();
+    ctx.translate(drawX, drawY);
+    ctx.rotate(fw.rot + Math.sin(t * 0.8 + fw.phase) * 0.1);
+
+    const style = `${fw.italic ? 'italic ' : ''}${fw.bold ? '800' : '400'} ${fw.size}px ${fw.font}`;
+    ctx.font = style;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = `hsla(${h}, 80%, 45%, ${alpha})`;
+    ctx.fillText(fw.word, 0, 0);
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+resize();
+addEventListener('resize', resize);
+
+let revealedLines = 0, revealTimer = 350, stackPixelH = 0;
+const revealInterval = 45;
+
+// --- Render paysage une seule fois dans offscreen ---
+function renderLandscape() {
+  const g = offCtx;
+  // Fond
+  const hBase = 200;
+  const bg = g.createRadialGradient(W * 0.5, H * 0.4, 0, W * 0.5, H * 0.5, W * 0.9);
+  bg.addColorStop(0, '#fff8e0');
+  bg.addColorStop(0.3, '#f0ecd0');
+  bg.addColorStop(0.5, '#d8e8c8');
+  bg.addColorStop(0.7, '#c0dce8');
+  bg.addColorStop(1, '#d0e8d8');
+  g.fillStyle = bg; g.fillRect(0, 0, W, H);
+
+  // Rayons
+  g.save(); g.globalAlpha = 0.06;
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    g.fillStyle = `hsla(${40 + i * 20}, 80%, 75%, 1)`;
+    g.beginPath(); g.moveTo(W * 0.5, H * 0.4);
+    g.lineTo(W * 0.5 + Math.cos(a) * W, H * 0.4 + Math.sin(a) * W);
+    g.lineTo(W * 0.5 + Math.cos(a + 0.15) * W, H * 0.4 + Math.sin(a + 0.15) * W);
+    g.closePath(); g.fill();
+  }
+  g.restore();
+
+  // Anneaux
+  for (let i = 0; i < 6; i++) {
+    const r = i * W * 0.12 + W * 0.08;
+    g.strokeStyle = `hsla(${hBase + i * 60}, 80%, 70%, 0.05)`;
+    g.lineWidth = 1.5;
+    g.beginPath(); g.arc(W * 0.5, H * 0.5, r, 0, Math.PI * 2); g.stroke();
+  }
+
+  // Spirales statiques
+  for (let s = 0; s < 8; s++) {
+    const cx = (Math.sin(s * 2.4 + 1) * 0.4 + 0.5) * W;
+    const cy = (Math.cos(s * 1.8 + 2) * 0.4 + 0.5) * H;
+    const dir = s % 2 === 0 ? 1 : -1;
+    const sHue = s * 45;
+    g.lineWidth = 1.5;
+    g.beginPath();
+    for (let i = 0; i <= 60; i++) {
+      const frac = i / 60;
+      const a = frac * 4 * Math.PI * dir + s;
+      const r = frac * W * 0.1;
+      const px = cx + Math.cos(a) * r, py = cy + Math.sin(a) * r;
+      g.strokeStyle = `hsla(${(sHue + frac * 360) % 360}, 80%, 65%, ${0.15 * (1 - frac * 0.5)})`;
+      if (i === 0) g.moveTo(px, py); else g.lineTo(px, py);
+      g.stroke(); g.beginPath(); g.moveTo(px, py);
+    }
+  }
+
+  // Fleurs
+  for (let i = 0; i < 30; i++) {
+    const fx = (Math.sin(i * 3.7 + 0.5) * 0.45 + 0.5) * W;
+    const fy = (Math.cos(i * 2.3 + 1.2) * 0.45 + 0.5) * H;
+    const petals = 5 + (i % 5);
+    const hue = (i * 37) % 360;
+    const s = (20 + (i % 7) * 8);
+
+    // Pétales
+    for (let p = 0; p < petals; p++) {
+      const a = (p / petals) * Math.PI * 2 + i * 0.3;
+      const h = (hue + p * (360 / petals)) % 360;
+      const pl = s, pw = s * 0.4;
+      g.save(); g.translate(fx, fy); g.rotate(a);
+      const pg = g.createLinearGradient(0, 0, 0, -pl);
+      pg.addColorStop(0, `hsla(${h}, 85%, 70%, 0.55)`);
+      pg.addColorStop(0.5, `hsla(${(h + 40) % 360}, 80%, 65%, 0.3)`);
+      pg.addColorStop(1, `hsla(${(h + 80) % 360}, 70%, 75%, 0.12)`);
+      g.fillStyle = pg;
+      g.beginPath(); g.moveTo(0, 0);
+      g.bezierCurveTo(-pw, -pl * 0.3, -pw * 0.8, -pl * 0.85, 0, -pl);
+      g.bezierCurveTo(pw * 0.8, -pl * 0.85, pw, -pl * 0.3, 0, 0);
+      g.fill(); g.restore();
+    }
+
+    // Cœur
+    const cg = g.createRadialGradient(fx, fy, 0, fx, fy, s * 0.2);
+    cg.addColorStop(0, `hsla(${hue + 50}, 100%, 90%, 0.8)`);
+    cg.addColorStop(1, `hsla(${hue + 30}, 80%, 60%, 0.1)`);
+    g.fillStyle = cg;
+    g.beginPath(); g.arc(fx, fy, s * 0.2, 0, Math.PI * 2); g.fill();
+
+    // Halo
+    const hg = g.createRadialGradient(fx, fy, s * 0.2, fx, fy, s * 1.5);
+    hg.addColorStop(0, `hsla(${hue}, 80%, 70%, 0.06)`);
+    hg.addColorStop(1, 'transparent');
+    g.fillStyle = hg;
+    g.beginPath(); g.arc(fx, fy, s * 1.5, 0, Math.PI * 2); g.fill();
+  }
+
+  // Pollen statique
+  for (let i = 0; i < 150; i++) {
+    const px = Math.random() * W, py = Math.random() * H;
+    const h = Math.random() * 360;
+    g.fillStyle = `hsla(${h}, 90%, 80%, ${0.2 + Math.random() * 0.3})`;
+    g.beginPath(); g.arc(px, py, 1 + Math.random() * 2.5, 0, Math.PI * 2); g.fill();
+  }
+
+  landscapeReady = true;
+}
+
+// --- Léger overlay animé (très cheap) ---
+function drawAnimOverlay(topY, height) {
+  if (height < 2) return;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0, topY, W, height); ctx.clip();
+  ctx.translate(0, topY);
+  const sy = height / H;
+  ctx.scale(1, sy);
+
+  // Quelques particules qui bougent
+  for (let i = 0; i < 30; i++) {
+    const px = ((i * 47.3 + t * 20) % (W + 40)) - 20;
+    const py = ((i * 31.7 + Math.sin(t * 1.5 + i) * 30 + t * 8) % (H + 40)) - 20;
+    const h = (i * 37 + t * 30) % 360;
+    const al = 0.25 + Math.sin(t * 3 + i * 2) * 0.15;
+    ctx.fillStyle = `hsla(${h}, 90%, 80%, ${al})`;
+    ctx.beginPath(); ctx.arc(px, py, 2 + Math.sin(t + i) * 1, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // Pulsation lumineuse
+  const pulse = 0.03 + Math.sin(t * 2) * 0.02;
+  ctx.fillStyle = `rgba(255, 240, 200, ${pulse})`;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.restore();
+}
+
+// --- Stack de mots sombres ---
+function drawDarkStack() {
+  if (revealedLines === 0) return;
+  ctx.fillStyle = '#05050a';
+  ctx.fillRect(0, 0, W, stackPixelH);
+  ctx.textBaseline = 'top'; ctx.textAlign = 'left';
+  for (let i = 0; i < revealedLines; i++) {
+    const line = lines[i];
+    const age = t - line.shakeT;
+    const shake = age < 0.5 ? (0.5 - age) * 12 : 0;
+    for (const wd of line.words) {
+      const sx = shake * (Math.random() - 0.5);
+      const sy = shake * (Math.random() - 0.5);
+      ctx.font = `900 ${wd.sz}px Impact, 'Arial Black', sans-serif`;
+      ctx.shadowColor = 'rgba(100,5,3,0.5)'; ctx.shadowBlur = 8;
+      const fl = 0.55 + Math.sin(t * 8 + wd.seed * 6) * 0.2 + Math.sin(t * 13 + wd.seed * 11) * 0.12 + Math.random() * 0.08;
+      ctx.fillStyle = `rgba(${110 + (wd.seed * 40 & 63)},${10 + (wd.seed * 10 & 15)},${5 + (wd.seed * 6 & 7)},${fl})`;
+      ctx.fillText(wd.word, wd.x + sx, line.y + sy);
+      ctx.shadowBlur = 0;
+    }
+  }
+}
+
+// --- Renaissance : simple fade-in du paysage ---
+let rebirthStartT = 0;
+let phase = 'crush'; // 'crush' | 'pause' | 'rebirth'
+let pauseTimer = 0;
+
+function frame() {
+  t += 0.012;
+
+  if (phase === 'crush') {
+    if (revealedLines < lines.length) {
+      revealTimer--;
+      if (revealTimer <= 0) {
+        lines[revealedLines].shakeT = t;
+        revealedLines++;
+        stackPixelH = revealedLines * lineOverlap;
+        revealTimer = revealedLines < 4 ? revealInterval * 2.5 : revealInterval;
+      }
+    } else if (stackPixelH >= H) {
+      phase = 'pause';
+      pauseTimer = 150; // ~2.5s de noir total
+    }
+
+    ctx.fillStyle = '#05050a'; ctx.fillRect(0, 0, W, H);
+    if (!landscapeReady) renderLandscape();
+
+    const sceneTop = stackPixelH;
+    const sceneH = Math.max(0, H - sceneTop);
+    if (sceneH > 1) {
+      ctx.save();
+      ctx.beginPath(); ctx.rect(0, sceneTop, W, sceneH); ctx.clip();
+      ctx.drawImage(offC, 0, 0, W, H, 0, sceneTop, W, sceneH);
+      ctx.restore();
+      drawFreeWords(sceneTop, sceneH);
+      drawAnimOverlay(sceneTop, sceneH);
+    }
+    drawDarkStack();
+
+  } else if (phase === 'pause') {
+    ctx.fillStyle = '#05050a'; ctx.fillRect(0, 0, W, H);
+    drawDarkStack();
+    pauseTimer--;
+    if (pauseTimer <= 0) {
+      phase = 'rebirth';
+      rebirthStartT = t;
+    }
+
+  } else if (phase === 'rebirth') {
+    const elapsed = t - rebirthStartT;
+
+    // Fond noir + stack qui fade out
+    ctx.fillStyle = '#05050a'; ctx.fillRect(0, 0, W, H);
+
+    // Fissures de lumière poétiques
+    if (elapsed < 8) {
+      for (let i = 0; i < 20; i++) {
+        const delay = i * 0.25;
+        const age = elapsed - delay;
+        if (age < 0) continue;
+        const progress = Math.min(1, age * 0.25);
+        const h = (i * 53 + t * 20) % 360;
+        const breathe = Math.sin(t * 2 + i * 1.7) * 0.15;
+        const fadeIn = Math.min(1, age * 0.5);
+        const fadeOut = Math.max(0, 1 - (elapsed - 5) * 0.2);
+        const alpha = progress * (0.25 + breathe) * fadeIn * fadeOut;
+        if (alpha <= 0.01) continue;
+
+        const sx = (Math.sin(i * 4.1 + 1) * 0.4 + 0.5) * W;
+        const sy = (Math.cos(i * 3.3 + 2) * 0.4 + 0.5) * H;
+        const ang = i * 0.7 + 0.5;
+
+        // Halo diffus autour de la fissure
+        const segs = Math.floor(progress * 8);
+        let x = sx, y = sy;
+        const pts = [[x, y]];
+        for (let j = 0; j < segs; j++) {
+          x += Math.cos(ang + Math.sin(j * 1.5 + i * 0.3) * 0.7) * 22;
+          y += Math.sin(ang + Math.cos(j * 1.2 + i * 0.5) * 0.7) * 22;
+          pts.push([x, y]);
+        }
+
+        // Lueur large diffuse
+        for (const [px, py] of pts) {
+          const lg = ctx.createRadialGradient(px, py, 0, px, py, 25 + progress * 15);
+          lg.addColorStop(0, `hsla(${h}, 80%, 80%, ${alpha * 0.25})`);
+          lg.addColorStop(0.5, `hsla(${(h + 30) % 360}, 70%, 70%, ${alpha * 0.08})`);
+          lg.addColorStop(1, 'transparent');
+          ctx.fillStyle = lg;
+          ctx.beginPath(); ctx.arc(px, py, 40 + progress * 15, 0, Math.PI * 2); ctx.fill();
+        }
+
+        // Fissure elle-même
+        ctx.strokeStyle = `hsla(${h}, 90%, 85%, ${alpha * 0.9})`;
+        ctx.shadowColor = `hsla(${h}, 100%, 80%, ${alpha * 0.5})`;
+        ctx.shadowBlur = 12;
+        ctx.lineWidth = 0.8 + progress * 1.5;
+        ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
+        for (let j = 1; j < pts.length; j++) ctx.lineTo(pts[j][0], pts[j][1]);
+        ctx.stroke();
+
+        // Branches fines secondaires
+        if (progress > 0.4) {
+          ctx.strokeStyle = `hsla(${(h + 60) % 360}, 85%, 80%, ${alpha * 0.35})`;
+          ctx.lineWidth = 0.5;
+          for (let j = 1; j < pts.length; j += 2) {
+            const ba = ang + Math.PI * (0.3 + Math.sin(j + i) * 0.4) * (j % 2 === 0 ? 1 : -1);
+            ctx.beginPath(); ctx.moveTo(pts[j][0], pts[j][1]);
+            ctx.lineTo(pts[j][0] + Math.cos(ba) * 15 * progress, pts[j][1] + Math.sin(ba) * 15 * progress);
+            ctx.stroke();
+          }
+        }
+
+        ctx.shadowBlur = 0;
+
+        // Petites particules qui s'échappent des fissures
+        if (progress > 0.3) {
+          for (let j = 0; j < pts.length; j++) {
+            const spark = Math.sin(t * 6 + j * 3 + i * 2);
+            if (spark < 0.5) continue;
+            const spx = pts[j][0] + Math.sin(t * 4 + j * 5) * 12;
+            const spy = pts[j][1] + Math.cos(t * 3.5 + j * 4) * 12 - age * 8;
+            const sa = (spark - 0.5) * alpha * 0.6;
+            ctx.fillStyle = `hsla(${(h + 40) % 360}, 100%, 88%, ${sa})`;
+            ctx.beginPath(); ctx.arc(spx, spy, 1.2, 0, Math.PI * 2); ctx.fill();
+          }
+        }
+      }
+    }
+
+    // Stack fade out
+    const stackFade = Math.max(0, 1 - (elapsed - 2) * 0.15);
+    if (stackFade > 0) {
+      ctx.globalAlpha = stackFade;
+      drawDarkStack();
+      ctx.globalAlpha = 1;
+    }
+
+    // Paysage fade in + SEVENTIES CRAZY
+    const landFade = Math.min(1, Math.max(0, (elapsed - 3) * 0.1));
+    if (landFade > 0) {
+      ctx.globalAlpha = landFade;
+      ctx.drawImage(offC, 0, 0);
+
+      const rcx = W * 0.5, rcy = H * 0.5;
+      const rayGrow = Math.min(1, (elapsed - 3) * 0.08);
+      const intensity = Math.min(1, (elapsed - 3) * 0.06);
+
+      // Fond qui pulse en couleur
+      const bgH = (t * 40) % 360;
+      ctx.fillStyle = `hsla(${bgH}, 70%, 60%, ${0.06 * intensity})`;
+      ctx.fillRect(0, 0, W, H);
+
+      // Gros rayons qui tournent — style sun burst 70s
+      const rayCount = 16;
+      for (let i = 0; i < rayCount; i++) {
+        const a = (i / rayCount) * Math.PI * 2 + t * 0.3;
+        const thick = (Math.PI * 2 / rayCount) * 0.6;
+        const h = (i * (360 / rayCount) + t * 50) % 360;
+        const breathe = 0.6 + Math.sin(t * 3 + i * 2) * 0.4;
+        const rayLen = W * rayGrow;
+
+        ctx.fillStyle = `hsla(${h}, 100%, 65%, ${0.18 * breathe * intensity})`;
+        ctx.beginPath();
+        ctx.moveTo(rcx, rcy);
+        ctx.arc(rcx, rcy, rayLen, a, a + thick);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      // Cercles concentriques épais alternés — bullseye 70s
+      for (let i = 0; i < 12; i++) {
+        const r = (i * W * 0.055 + t * 25) % (W * 0.65);
+        const h = (i * 30 + t * 60) % 360;
+        const al = (0.12 - i * 0.008) * intensity * rayGrow;
+        if (al < 0.005) continue;
+        ctx.strokeStyle = `hsla(${h}, 100%, 60%, ${al})`;
+        ctx.lineWidth = 6 + Math.sin(t * 4 + i) * 3;
+        ctx.beginPath(); ctx.arc(rcx, rcy, r, 0, Math.PI * 2); ctx.stroke();
+      }
+
+      // Spirale groovy qui tourne
+      ctx.lineWidth = 3;
+      for (let s = 0; s < 2; s++) {
+        const dir = s === 0 ? 1 : -1;
+        ctx.beginPath();
+        for (let i = 0; i <= 120; i++) {
+          const frac = i / 120;
+          const a = frac * 6 * Math.PI * dir + t * 1.2 * dir;
+          const r = frac * W * 0.45 * rayGrow;
+          const px = rcx + Math.cos(a) * r;
+          const py = rcy + Math.sin(a) * r;
+          const h = (frac * 720 + t * 60 + s * 180) % 360;
+          ctx.strokeStyle = `hsla(${h}, 100%, 65%, ${(0.2 - frac * 0.15) * intensity})`;
+          if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+          ctx.stroke(); ctx.beginPath(); ctx.moveTo(px, py);
+        }
+      }
+
+      // Étoiles / fleurs géométriques 70s qui pulsent
+      for (let f = 0; f < 6; f++) {
+        const fx = (Math.sin(f * 2.3 + 1) * 0.35 + 0.5) * W;
+        const fy = (Math.cos(f * 3.1 + 2) * 0.35 + 0.5) * H;
+        const fGrow = Math.min(1, (elapsed - 4 - f * 0.5) * 0.2);
+        if (fGrow <= 0) continue;
+        const fSize = (25 + f * 10) * fGrow * (1 + Math.sin(t * 3 + f) * 0.2);
+        const petals = 6 + f % 3;
+        const h = (f * 60 + t * 45) % 360;
+
+        for (let p = 0; p < petals; p++) {
+          const pa = (p / petals) * Math.PI * 2 + t * 0.5;
+          const ph = (h + p * (360 / petals)) % 360;
+          ctx.fillStyle = `hsla(${ph}, 100%, 60%, ${0.35 * intensity * fGrow})`;
+          ctx.beginPath();
+          ctx.ellipse(
+            fx + Math.cos(pa) * fSize * 0.5,
+            fy + Math.sin(pa) * fSize * 0.5,
+            fSize * 0.5, fSize * 0.2,
+            pa, 0, Math.PI * 2
+          );
+          ctx.fill();
+        }
+        // Centre
+        ctx.fillStyle = `hsla(${(h + 180) % 360}, 100%, 80%, ${0.5 * intensity * fGrow})`;
+        ctx.beginPath(); ctx.arc(fx, fy, fSize * 0.18, 0, Math.PI * 2); ctx.fill();
+      }
+
+      // Flash stroboscopique subtil
+      const strobe = Math.sin(t * 8) > 0.85 ? 0.04 * intensity : 0;
+      if (strobe > 0) {
+        ctx.fillStyle = `rgba(255, 255, 255, ${strobe})`;
+        ctx.fillRect(0, 0, W, H);
+      }
+
+      drawAnimOverlay(0, H);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  requestAnimationFrame(frame);
+}
+
+ctx.fillStyle = '#05050a'; ctx.fillRect(0, 0, W, H);
+frame();
+</script>
+</body>
+</html>

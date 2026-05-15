@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Genuary 2026 #7</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #0a0a0a;
+        }
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        canvas {
+            display: block;
+            max-width: 600px;
+            max-height: 600px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const operations = ['AND', 'OR', 'XOR', 'NAND'];
+        let opIndex = 0;
+        let angleX = 0.3, angleY = 0;
+        let autoRotate = true;
+        let isDragging = false;
+        let lastMouseX = 0, lastMouseY = 0;
+
+        function resizeCanvas() {
+            const maxSize = 600;
+            const size = Math.min(window.innerWidth, window.innerHeight, maxSize);
+            canvas.width = size;
+            canvas.height = size;
+            canvas.style.width = size + 'px';
+            canvas.style.height = size + 'px';
+        }
+        
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        canvas.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            lastMouseX = e.clientX;
+            lastMouseY = e.clientY;
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (isDragging) {
+                autoRotate = false;
+                const deltaX = e.clientX - lastMouseX;
+                const deltaY = e.clientY - lastMouseY;
+                angleY += deltaX * 0.01;
+                angleX += deltaY * 0.01;
+                angleX = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, angleX));
+                lastMouseX = e.clientX;
+                lastMouseY = e.clientY;
+            }
+        });
+
+        canvas.addEventListener('mouseup', () => {
+            isDragging = false;
+            setTimeout(() => { autoRotate = true; }, 2000);
+        });
+
+        canvas.addEventListener('touchstart', (e) => {
+            isDragging = true;
+            lastMouseX = e.touches[0].clientX;
+            lastMouseY = e.touches[0].clientY;
+            e.preventDefault();
+        });
+
+        canvas.addEventListener('touchmove', (e) => {
+            if (isDragging) {
+                autoRotate = false;
+                const deltaX = e.touches[0].clientX - lastMouseX;
+                const deltaY = e.touches[0].clientY - lastMouseY;
+                angleY += deltaX * 0.01;
+                angleX += deltaY * 0.01;
+                angleX = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, angleX));
+                lastMouseX = e.touches[0].clientX;
+                lastMouseY = e.touches[0].clientY;
+                e.preventDefault();
+            }
+        });
+
+        canvas.addEventListener('touchend', () => {
+            isDragging = false;
+            setTimeout(() => { autoRotate = true; }, 2000);
+        });
+
+        function rotateX(point, angle) {
+            const cos = Math.cos(angle), sin = Math.sin(angle);
+            return [point[0], point[1] * cos - point[2] * sin, point[1] * sin + point[2] * cos];
+        }
+
+        function rotateY(point, angle) {
+            const cos = Math.cos(angle), sin = Math.sin(angle);
+            return [point[0] * cos + point[2] * sin, point[1], -point[0] * sin + point[2] * cos];
+        }
+
+        function project(point, w, h) {
+            const z = point[2] + 800;
+            if (z <= 1) return null;
+            const scale = 400 / z;
+            return [point[0] * scale + w / 2, point[1] * scale + h / 2, z];
+        }
+
+        function getNormal(p0, p1, p2) {
+            const v1 = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
+            const v2 = [p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]];
+            return [
+                v1[1] * v2[2] - v1[2] * v2[1],
+                v1[2] * v2[0] - v1[0] * v2[2],
+                v1[0] * v2[1] - v1[1] * v2[0]
+            ];
+        }
+
+        function draw() {
+            const w = canvas.width;
+            const h = canvas.height;
+            const op = operations[opIndex];
+
+            ctx.fillStyle = '#0a0a0a';
+            ctx.fillRect(0, 0, w, h);
+
+            const bgOp = operations[(opIndex + 2) % operations.length];
+            
+            for (let depth = 0; depth < 3; depth++) {
+                const gridSize = 80 >> depth;
+                const opacity = 0.08 / (depth + 1);
+                const rotation = Math.PI / 4 + depth * 0.1;
+                const hue = (depth * 60 + opIndex * 30) % 360;
+                
+                ctx.save();
+                ctx.translate(w / 2, h / 2);
+                ctx.rotate(rotation);
+                
+                const maxDim = Math.max(w, h);
+                const startX = -maxDim * 0.6;
+                const endX = maxDim * 0.6;
+                const startY = -maxDim * 0.6;
+                const endY = maxDim * 0.6;
+                
+                for (let x = startX; x < endX; x += gridSize) {
+                    const a = (Math.floor(x / gridSize) & 1) === 0;
+                    
+                    for (let y = startY; y < endY; y += gridSize) {
+                        const b = (Math.floor(y / gridSize) & 1) === 0;
+                        
+                        let result;
+                        if (bgOp === 'AND') result = a && b;
+                        else if (bgOp === 'OR') result = a || b;
+                        else if (bgOp === 'XOR') result = a ^ b;
+                        else result = !(a && b);
+                        
+                        if (result) {
+                            ctx.fillStyle = `hsla(${hue}, 70%, 60%, ${opacity})`;
+                            ctx.fillRect(x, y, gridSize, gridSize);
+                        }
+                    }
+                }
+                
+                ctx.restore();
+            }
+
+            if (autoRotate) angleY += 0.01;
+
+            const size = 100;
+
+            const vertices = [
+                [-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1],
+                [-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]
+            ].map(v => [v[0] * size, v[1] * size, v[2] * size]);
+
+            const faces = [
+                { indices: [0, 1, 2, 3], axis: 'z', value: -1 },
+                { indices: [5, 4, 7, 6], axis: 'z', value: 1 },
+                { indices: [4, 0, 3, 7], axis: 'x', value: -1 },
+                { indices: [1, 5, 6, 2], axis: 'x', value: 1 },
+                { indices: [3, 2, 6, 7], axis: 'y', value: 1 },
+                { indices: [4, 5, 1, 0], axis: 'y', value: -1 }
+            ];
+
+            const rotated = vertices.map(v => {
+                let p = rotateX(v, angleX);
+                p = rotateY(p, angleY);
+                return p;
+            });
+
+            const allCells = [];
+
+            faces.forEach((face, faceIdx) => {
+                const pts3D = face.indices.map(i => rotated[i]);
+                const normal = getNormal(pts3D[0], pts3D[1], pts3D[2]);
+                
+                const viewDir = [0, 0, -1];
+                const dot = normal[0] * viewDir[0] + normal[1] * viewDir[1] + normal[2] * viewDir[2];
+                if (dot >= 0) return;
+
+                const gridSize = 4;
+                const originalPts = face.indices.map(i => vertices[i]);
+
+                for (let i = 0; i < gridSize; i++) {
+                    for (let j = 0; j < gridSize; j++) {
+                        const u0 = i / gridSize;
+                        const v0 = j / gridSize;
+                        const eps = 0.0001;
+                        const u1 = (i + 1) / gridSize + eps;
+                        const v1 = (j + 1) / gridSize + eps;
+
+                        const symbol = (i + j) % 2 === 0 ? '●' : '○';
+
+                        const lerp3D = (p0, p1, p2, p3, u, v) => [
+                            p0[0] * (1-u) * (1-v) + p1[0] * u * (1-v) + p2[0] * u * v + p3[0] * (1-u) * v,
+                            p0[1] * (1-u) * (1-v) + p1[1] * u * (1-v) + p2[1] * u * v + p3[1] * (1-u) * v,
+                            p0[2] * (1-u) * (1-v) + p1[2] * u * (1-v) + p2[2] * u * v + p3[2] * (1-u) * v
+                        ];
+
+                        const c0_3D = lerp3D(originalPts[0], originalPts[1], originalPts[2], originalPts[3], u0, v0);
+                        const c1_3D = lerp3D(originalPts[0], originalPts[1], originalPts[2], originalPts[3], u1, v0);
+                        const c2_3D = lerp3D(originalPts[0], originalPts[1], originalPts[2], originalPts[3], u1, v1);
+                        const c3_3D = lerp3D(originalPts[0], originalPts[1], originalPts[2], originalPts[3], u0, v1);
+
+                        const axisMap = { x: 0, y: 1, z: 2 };
+                        const fixedAxis = axisMap[face.axis];
+                        const axes = [0, 1, 2].filter(a => a !== fixedAxis);
+
+                        const cellCenter = [
+                            (c0_3D[0] + c1_3D[0] + c2_3D[0] + c3_3D[0]) / 4,
+                            (c0_3D[1] + c1_3D[1] + c2_3D[1] + c3_3D[1]) / 4,
+                            (c0_3D[2] + c1_3D[2] + c2_3D[2] + c3_3D[2]) / 4
+                        ];
+
+                        const inputA = cellCenter[axes[0]] > 0;
+                        const inputB = cellCenter[axes[1]] > 0;
+                        const inputC = face.value > 0;
+
+                        let result;
+                        if (op === 'AND') result = inputA && inputB && inputC;
+                        else if (op === 'OR') result = inputA || inputB || inputC;
+                        else if (op === 'XOR') result = inputA ^ inputB ^ inputC;
+                        else result = !(inputA && inputB && inputC);
+
+                        const rc0 = rotateY(rotateX(c0_3D, angleX), angleY);
+                        const rc1 = rotateY(rotateX(c1_3D, angleX), angleY);
+                        const rc2 = rotateY(rotateX(c2_3D, angleX), angleY);
+                        const rc3 = rotateY(rotateX(c3_3D, angleX), angleY);
+
+                        const cellDepth = (rc0[2] + rc1[2] + rc2[2] + rc3[2]) / 4;
+
+                        const hue = (faceIdx * 60) % 360;
+
+                        allCells.push({
+                            corners3D: [rc0, rc1, rc2, rc3],
+                            result,
+                            hue,
+                            depth: cellDepth,
+                            symbol,
+                            cellCenter3D: [
+                                (c0_3D[0] + c1_3D[0] + c2_3D[0] + c3_3D[0]) / 4,
+                                (c0_3D[1] + c1_3D[1] + c2_3D[1] + c3_3D[1]) / 4,
+                                (c0_3D[2] + c1_3D[2] + c2_3D[2] + c3_3D[2]) / 4
+                            ],
+                            u0, v0, u1, v1,
+                            originalPts
+                        });
+                    }
+                }
+            });
+
+            allCells.sort((a, b) => b.depth - a.depth);
+
+            allCells.forEach(cell => {
+                const projected = cell.corners3D.map(p => project(p, w, h));
+                
+                if (projected.some(p => p === null)) return;
+
+                const centerX = (projected[0][0] + projected[1][0] + projected[2][0] + projected[3][0]) / 4;
+                const centerY = (projected[0][1] + projected[1][1] + projected[2][1] + projected[3][1]) / 4;
+                
+                if (cell.result) {
+                    const grad = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, 30);
+                    grad.addColorStop(0, `hsl(${cell.hue}, 85%, 65%)`);
+                    grad.addColorStop(1, `hsl(${cell.hue}, 75%, 50%)`);
+                    ctx.fillStyle = grad;
+                } else {
+                    const grad = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, 30);
+                    grad.addColorStop(0, '#4a4a4a');
+                    grad.addColorStop(1, '#2a2a2a');
+                    ctx.fillStyle = grad;
+                }
+                
+                ctx.beginPath();
+                ctx.moveTo(projected[0][0], projected[0][1]);
+                ctx.lineTo(projected[1][0], projected[1][1]);
+                ctx.lineTo(projected[2][0], projected[2][1]);
+                ctx.lineTo(projected[3][0], projected[3][1]);
+                ctx.closePath();
+                ctx.fill();
+
+                ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+                
+                if (cell.result) {
+                    const uMid = (cell.u0 + cell.u1) / 2;
+                    const vMid = (cell.v0 + cell.v1) / 2;
+                    const scale = 0.15;
+                    
+                    if (cell.symbol === '●') {
+                        const segments = 16;
+                        const pts = [];
+                        for (let s = 0; s < segments; s++) {
+                            const angle = (s / segments) * Math.PI * 2;
+                            const u = uMid + Math.cos(angle) * scale * 0.5;
+                            const v = vMid + Math.sin(angle) * scale * 0.5;
+                            const pt3D = [
+                                cell.originalPts[0][0] * (1-u) * (1-v) + cell.originalPts[1][0] * u * (1-v) + 
+                                cell.originalPts[2][0] * u * v + cell.originalPts[3][0] * (1-u) * v,
+                                cell.originalPts[0][1] * (1-u) * (1-v) + cell.originalPts[1][1] * u * (1-v) + 
+                                cell.originalPts[2][1] * u * v + cell.originalPts[3][1] * (1-u) * v,
+                                cell.originalPts[0][2] * (1-u) * (1-v) + cell.originalPts[1][2] * u * (1-v) + 
+                                cell.originalPts[2][2] * u * v + cell.originalPts[3][2] * (1-u) * v
+                            ];
+                            const rot = rotateY(rotateX(pt3D, angleX), angleY);
+                            const proj = project(rot, w, h);
+                            if (proj) pts.push(proj);
+                        }
+                        
+                        if (pts.length > 2) {
+                            ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+                            ctx.beginPath();
+                            ctx.moveTo(pts[0][0], pts[0][1]);
+                            for (let i = 1; i < pts.length; i++) {
+                                ctx.lineTo(pts[i][0], pts[i][1]);
+                            }
+                            ctx.closePath();
+                            ctx.fill();
+                        }
+                    } else {
+                        const segments = 16;
+                        const pts = [];
+                        for (let s = 0; s < segments; s++) {
+                            const angle = (s / segments) * Math.PI * 2;
+                            const u = uMid + Math.cos(angle) * scale * 0.5;
+                            const v = vMid + Math.sin(angle) * scale * 0.5;
+                            const pt3D = [
+                                cell.originalPts[0][0] * (1-u) * (1-v) + cell.originalPts[1][0] * u * (1-v) + 
+                                cell.originalPts[2][0] * u * v + cell.originalPts[3][0] * (1-u) * v,
+                                cell.originalPts[0][1] * (1-u) * (1-v) + cell.originalPts[1][1] * u * (1-v) + 
+                                cell.originalPts[2][1] * u * v + cell.originalPts[3][1] * (1-u) * v,
+                                cell.originalPts[0][2] * (1-u) * (1-v) + cell.originalPts[1][2] * u * (1-v) + 
+                                cell.originalPts[2][2] * u * v + cell.originalPts[3][2] * (1-u) * v
+                            ];
+                            const rot = rotateY(rotateX(pt3D, angleX), angleY);
+                            const proj = project(rot, w, h);
+                            if (proj) pts.push(proj);
+                        }
+                        
+                        if (pts.length > 2) {
+                            ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+                            ctx.lineWidth = 3;
+                            ctx.lineCap = 'round';
+                            ctx.beginPath();
+                            ctx.moveTo(pts[0][0], pts[0][1]);
+                            for (let i = 1; i < pts.length; i++) {
+                                ctx.lineTo(pts[i][0], pts[i][1]);
+                            }
+                            ctx.closePath();
+                            ctx.stroke();
+                        }
+                    }
+                }
+            });
+
+            requestAnimationFrame(draw);
+        }
+
+        setInterval(() => {
+            opIndex = (opIndex + 1) % operations.length;
+        }, 2000);
+
+        draw();
+    </script>
+</body>
+</html>

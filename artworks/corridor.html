@@ -1,0 +1,1389 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Corridor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+		html, body {
+			margin: 0;
+			padding: 0;
+			width: 100%;
+			height: 100%;
+			overflow: hidden;
+		}
+
+		body {
+			background: #000;
+		}
+        canvas {
+			display: block;
+		}
+        #startScreen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            width: 100vw;
+            height: 100vh;
+            height: 100dvh;
+            background: #000;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 10000;
+            cursor: pointer;
+        }
+        #startScreen h1 {
+            color: #fff;
+            font-family: serif;
+            font-size: 48px;
+            font-weight: bold;
+            margin: 0;
+            margin-bottom: 20px;
+        }
+        #startScreen p {
+            color: #aaa;
+            font-family: sans-serif;
+            font-size: 18px;
+        }
+    </style>
+</head>
+<body>
+    <div id="startScreen">
+        <h1>The Corridor</h1>
+        <p>Click to start</p>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        window.TONE_SILENCE_LOGGING = true;
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <script>
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.Fog(0x000000, 1, 50);
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 0, 0);
+
+		const renderer = new THREE.WebGLRenderer({ antialias: true });
+		document.body.appendChild(renderer.domElement);
+
+        const overlay = document.createElement('canvas');
+        overlay.style.position = 'fixed';
+        overlay.style.top = '0';
+        overlay.style.left = '0';
+        overlay.style.width = '100%';
+        overlay.style.height = '100%';
+        overlay.style.pointerEvents = 'none';
+        overlay.style.zIndex = '1000';
+        overlay.width = window.innerWidth;
+        overlay.height = window.innerHeight;
+        document.body.appendChild(overlay);
+        const overlayCtx = overlay.getContext('2d');
+		
+		function resize() {
+			const width = window.innerWidth;
+			const height = window.innerHeight;
+
+			camera.aspect = width / height;
+			camera.updateProjectionMatrix();
+
+			renderer.setSize(width, height, false);
+
+			overlay.width = width;
+			overlay.height = height;
+		}
+
+		resize();
+		window.addEventListener('resize', resize);
+
+
+        function drawOverlay() {
+            overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+            
+            // Flash blanc brutal pour le jumpscare
+            if (monsterJumpscareTriggered && monsterFallProgress >= 0.85 && monsterFallProgress < 0.95) {
+                const flashIntensity = 1 - (monsterFallProgress - 0.85) / 0.1;
+                overlayCtx.fillStyle = `rgba(255, 255, 255, ${flashIntensity})`;
+                overlayCtx.fillRect(0, 0, overlay.width, overlay.height);
+                return;
+            }
+            
+            if (!endingStarted) {
+                overlayCtx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+                for (let y = 0; y < overlay.height; y += 2) {
+                    overlayCtx.fillRect(0, y, overlay.width, 1);
+                }
+                const imageData = overlayCtx.getImageData(0, 0, overlay.width, overlay.height);
+                const pixels = imageData.data;
+                for (let i = 0; i < pixels.length; i += 4) {
+                    if (Math.random() > 0.95) {
+                        const grain = Math.random() * 50;
+                        pixels[i] = grain;
+                        pixels[i + 1] = grain;
+                        pixels[i + 2] = grain;
+                        pixels[i + 3] = 50;
+                    }
+                }
+                overlayCtx.putImageData(imageData, 0, 0);
+            } else {
+                overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+                
+                // Fade to white progressif - atteint blanc pur à la fin
+                const whiteOpacity = endingProgress < 0.7 ? endingProgress * 0.8 : 0.56 + (endingProgress - 0.7) / 0.3 * 0.44;
+                overlayCtx.fillStyle = `rgba(255, 255, 255, ${whiteOpacity})`;
+                overlayCtx.fillRect(0, 0, overlay.width, overlay.height);
+                
+                // Titre "The Corridor" quand presque blanc
+                if (endingProgress > 0.8) {
+                    const titleOpacity = (endingProgress - 0.8) / 0.2;
+                    overlayCtx.fillStyle = `rgba(0, 0, 0, ${titleOpacity})`;
+                    overlayCtx.font = 'bold 48px serif';
+                    overlayCtx.textAlign = 'center';
+                    overlayCtx.textBaseline = 'middle';
+                    overlayCtx.fillText('The Corridor', overlay.width / 2, overlay.height / 2);
+                    
+                    // Sous-titre
+                    overlayCtx.font = '18px sans-serif';
+                    overlayCtx.fillStyle = `rgba(170, 170, 170, ${titleOpacity})`;
+                    overlayCtx.fillText('intarynx 2025', overlay.width / 2, overlay.height / 2 + 44);
+                }
+                
+                // Twist final : retour au début après blanc complet
+                if (endingProgress >= 1) {
+                    setTimeout(() => {
+                        const fadeOut = 1;
+                        const fadeInterval = setInterval(() => {
+                            overlayCtx.fillStyle = `rgba(0, 0, 0, 0.1)`;
+                            overlayCtx.fillRect(0, 0, overlay.width, overlay.height);
+                        }, 50);
+                        
+                        setTimeout(() => {
+                            clearInterval(fadeInterval);
+                            location.reload();
+                        }, 2000);
+                    }, 2000);
+                }
+            }
+        }
+
+        const corridorLength = 20;
+        const corridorWidth = 4;
+        const corridorHeight = 3;
+        let corridorCount = 0;
+        let doorOpenProgress = 0;
+        let doorGroup = null;
+        let nextDoorGroup = null;
+        let walkCycle = 0;
+        const moveSpeed = 0.05;
+        let stopped = false;
+        let monster = null;
+        let monsterAppearProgress = 0;
+        let monsterFalling = false;
+        let monsterFallProgress = 0;
+        let cameraFalling = false;
+        let cameraFallProgress = 0;
+        let cameraLookingUp = false;
+        let cameraLookUpProgress = 0;
+        let bloodStain = null;
+        let bloodSpreadProgress = 0;
+        let endingProgress = 0;
+        let endingStarted = false;
+        let monsterCloneCyan = null;
+        let monsterCloneYellow = null;
+        let monsterJumpscareTriggered = false;
+        let audioStarted = false;
+        let ambientDrone = null;
+        let heartbeat = null;
+        let stepNoise = null;
+
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.1);
+        scene.add(ambientLight);
+
+        const wallpaperColors = [
+            ['#800020', '#600018'],
+            ['#2F4F4F', '#1C3030'],
+            ['#483D8B', '#2E2560'],
+            ['#702963', '#4A1B42'],
+            ['#2C3E50', '#1A252F'],
+            ['#CCCCCC', '#BBBBBB']
+        ];
+
+        const floorColors = [
+            ['#E8E8E8', '#D0D0D0'],
+            ['#D4E4D4', '#B8D4B8'],
+            ['#D8D8E8', '#C0C0D8'],
+            ['#E8D4E4', '#D0B8D0'],
+            ['#D8E0E8', '#C0CCD8'],
+            ['#FFFFFF', '#F0F0F0']
+        ];
+
+        function createTileTexture(colorIndex) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 128;
+            canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+            const colors = floorColors[colorIndex % floorColors.length];
+            ctx.fillStyle = colors[0];
+            ctx.fillRect(0, 0, 128, 128);
+            ctx.fillStyle = colors[1];
+            ctx.fillRect(0, 0, 64, 64);
+            ctx.fillRect(64, 64, 64, 64);
+            ctx.strokeStyle = '#999999';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(0, 0, 128, 128);
+            ctx.beginPath();
+            ctx.moveTo(64, 0);
+            ctx.lineTo(64, 128);
+            ctx.moveTo(0, 64);
+            ctx.lineTo(128, 64);
+            ctx.stroke();
+            return canvas;
+        }
+
+        function createWoodTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#8B4513';
+            ctx.fillRect(0, 0, 256, 512);
+            ctx.strokeStyle = '#5D2E0F';
+            ctx.lineWidth = 3;
+            ctx.strokeRect(20, 30, 216, 200);
+            ctx.strokeRect(25, 35, 206, 190);
+            ctx.strokeRect(20, 282, 216, 200);
+            ctx.strokeRect(25, 287, 206, 190);
+            ctx.strokeStyle = '#6B3410';
+            ctx.lineWidth = 1;
+            for (let i = 0; i < 50; i++) {
+                ctx.beginPath();
+                ctx.moveTo(Math.random() * 256, 0);
+                ctx.lineTo(Math.random() * 256, 512);
+                ctx.stroke();
+            }
+            return canvas;
+        }
+
+        function createWallpaperTexture(colorIndex) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+            const colors = wallpaperColors[colorIndex % wallpaperColors.length];
+            const stripeWidth = 24;
+            for (let i = 0; i < canvas.width; i += stripeWidth * 2) {
+                ctx.fillStyle = colors[0];
+                ctx.fillRect(i, 0, stripeWidth, canvas.height);
+                ctx.fillStyle = colors[1];
+                ctx.fillRect(i + stripeWidth, 0, stripeWidth, canvas.height);
+            }
+            return canvas;
+        }
+
+        function createCorridor(offset, colorIndex) {
+            const group = new THREE.Group();
+            const isWhiteCorridor = colorIndex >= 5;
+
+            const floorTexture = new THREE.CanvasTexture(createTileTexture(colorIndex));
+            floorTexture.wrapS = THREE.RepeatWrapping;
+            floorTexture.wrapT = THREE.RepeatWrapping;
+            floorTexture.repeat.set(4, 10);
+            const floor = new THREE.Mesh(
+                new THREE.PlaneGeometry(corridorWidth, corridorLength),
+                new THREE.MeshLambertMaterial({ map: floorTexture, side: THREE.DoubleSide })
+            );
+            floor.rotation.x = -Math.PI / 2;
+            floor.position.set(0, -corridorHeight / 2, -corridorLength / 2 - offset);
+            group.add(floor);
+
+            const ceiling = new THREE.Mesh(
+                new THREE.PlaneGeometry(corridorWidth, corridorLength),
+                new THREE.MeshLambertMaterial({ color: isWhiteCorridor ? 0xFFFFFF : 0xF5E6D3, side: THREE.DoubleSide })
+            );
+            ceiling.rotation.x = Math.PI / 2;
+            ceiling.position.set(0, corridorHeight / 2, -corridorLength / 2 - offset);
+            group.add(ceiling);
+
+            if (!isWhiteCorridor) {
+                const beamMaterial = new THREE.MeshLambertMaterial({ color: 0x5D2E0F });
+                for (let i = 1; i <= 20; i++) {
+                    const beam = new THREE.Mesh(
+                        new THREE.BoxGeometry(corridorWidth, 0.2, 0.3),
+                        beamMaterial
+                    );
+                    beam.position.set(0, corridorHeight / 2 - 0.1, -i * corridorLength / 21 - offset);
+                    group.add(beam);
+                }
+            }
+
+            const wallTexture = new THREE.CanvasTexture(createWallpaperTexture(colorIndex));
+            wallTexture.wrapS = THREE.RepeatWrapping;
+            wallTexture.wrapT = THREE.RepeatWrapping;
+            wallTexture.repeat.set(20, 2);
+            const wallMaterial = new THREE.MeshLambertMaterial({ map: wallTexture, side: THREE.DoubleSide });
+
+            const leftWall = new THREE.Mesh(
+                new THREE.PlaneGeometry(corridorLength, corridorHeight),
+                wallMaterial
+            );
+            leftWall.rotation.y = Math.PI / 2;
+            leftWall.position.set(-corridorWidth / 2, 0, -corridorLength / 2 - offset);
+            group.add(leftWall);
+
+            const rightWall = new THREE.Mesh(
+                new THREE.PlaneGeometry(corridorLength, corridorHeight),
+                wallMaterial.clone()
+            );
+            rightWall.rotation.y = -Math.PI / 2;
+            rightWall.position.set(corridorWidth / 2, 0, -corridorLength / 2 - offset);
+            group.add(rightWall);
+
+            const wallThickness = 0.2;
+
+            if (isWhiteCorridor) {
+                const backWallTexture = new THREE.CanvasTexture(createWallpaperTexture(colorIndex));
+                backWallTexture.wrapS = THREE.RepeatWrapping;
+                backWallTexture.wrapT = THREE.RepeatWrapping;
+                backWallTexture.repeat.set(2, 2);
+                const backWallMaterial = new THREE.MeshLambertMaterial({ 
+                    map: backWallTexture, 
+                    side: THREE.DoubleSide,
+                    color: 0xB3B3B3
+                });
+                
+                const backWall = new THREE.Mesh(
+                    new THREE.BoxGeometry(corridorWidth, corridorHeight, wallThickness),
+                    backWallMaterial
+                );
+                backWall.position.set(0, 0, -corridorLength - offset);
+                group.add(backWall);
+
+                // Miroir au centre du mur
+                const mirrorWidth = 2;
+                const mirrorHeight = 2.5;
+                
+                const cubeRenderTarget = new THREE.WebGLCubeRenderTarget(256, {
+                    format: THREE.RGBFormat,
+                    generateMipmaps: true,
+                    minFilter: THREE.LinearMipmapLinearFilter
+                });
+                
+                const cubeCamera = new THREE.CubeCamera(0.1, 100, cubeRenderTarget);
+                cubeCamera.position.set(0, 0, -corridorLength - offset + 0.15);
+                group.add(cubeCamera);
+                
+                const mirrorMaterial = new THREE.MeshBasicMaterial({
+                    envMap: cubeRenderTarget.texture,
+                    side: THREE.DoubleSide,
+                    color: 0xDDDDDD
+                });
+                
+                const mirror = new THREE.Mesh(
+                    new THREE.PlaneGeometry(mirrorWidth, mirrorHeight),
+                    mirrorMaterial
+                );
+                mirror.position.set(0, 0, -corridorLength - offset + 0.11);
+                group.add(mirror);
+                group.userData.mirror = mirror;
+                group.userData.cubeCamera = cubeCamera;
+                
+                // Cadre du miroir
+                const frameMaterial = new THREE.MeshLambertMaterial({ color: 0x3a3a3a });
+                const frameThickness = 0.08;
+                
+                const frameTop = new THREE.Mesh(
+                    new THREE.BoxGeometry(mirrorWidth + frameThickness * 2, frameThickness, 0.05),
+                    frameMaterial
+                );
+                frameTop.position.set(0, mirrorHeight / 2 + frameThickness / 2, -corridorLength - offset + 0.12);
+                group.add(frameTop);
+                
+                const frameBottom = new THREE.Mesh(
+                    new THREE.BoxGeometry(mirrorWidth + frameThickness * 2, frameThickness, 0.05),
+                    frameMaterial
+                );
+                frameBottom.position.set(0, -mirrorHeight / 2 - frameThickness / 2, -corridorLength - offset + 0.12);
+                group.add(frameBottom);
+                
+                const frameLeft = new THREE.Mesh(
+                    new THREE.BoxGeometry(frameThickness, mirrorHeight, 0.05),
+                    frameMaterial
+                );
+                frameLeft.position.set(-mirrorWidth / 2 - frameThickness / 2, 0, -corridorLength - offset + 0.12);
+                group.add(frameLeft);
+                
+                const frameRight = new THREE.Mesh(
+                    new THREE.BoxGeometry(frameThickness, mirrorHeight, 0.05),
+                    frameMaterial
+                );
+                frameRight.position.set(mirrorWidth / 2 + frameThickness / 2, 0, -corridorLength - offset + 0.12);
+                group.add(frameRight);
+
+                const whiteRoomAmbient = new THREE.AmbientLight(0xFFFFFF, 0);
+                group.add(whiteRoomAmbient);
+                group.userData.whiteRoomAmbient = whiteRoomAmbient;
+            } else {
+                const doorWidth = 1.5;
+                const doorHeight = 2.2;
+                const leftWidth = (corridorWidth - doorWidth) / 2;
+                
+                const backWallTexture = new THREE.CanvasTexture(createWallpaperTexture(colorIndex));
+                backWallTexture.wrapS = THREE.RepeatWrapping;
+                backWallTexture.wrapT = THREE.RepeatWrapping;
+                backWallTexture.repeat.set(2, 2);
+                const backWallMaterial = new THREE.MeshLambertMaterial({ 
+                    map: backWallTexture, 
+                    side: THREE.DoubleSide,
+                    color: 0xB3B3B3
+                });
+                
+                const leftPart = new THREE.Mesh(
+                    new THREE.BoxGeometry(leftWidth, corridorHeight, wallThickness),
+                    backWallMaterial
+                );
+                leftPart.position.set(-corridorWidth / 2 + leftWidth / 2, 0, -corridorLength - offset);
+                group.add(leftPart);
+
+                const rightPart = new THREE.Mesh(
+                    new THREE.BoxGeometry(leftWidth, corridorHeight, wallThickness),
+                    backWallMaterial.clone()
+                );
+                rightPart.position.set(corridorWidth / 2 - leftWidth / 2, 0, -corridorLength - offset);
+                group.add(rightPart);
+
+                const topHeight = corridorHeight - doorHeight;
+                const topPart = new THREE.Mesh(
+                    new THREE.BoxGeometry(doorWidth, topHeight, wallThickness),
+                    backWallMaterial.clone()
+                );
+                topPart.position.set(0, -corridorHeight / 2 + doorHeight + topHeight / 2, -corridorLength - offset);
+                group.add(topPart);
+
+                const chandelier = new THREE.Group();
+                const chain = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.03, 0.03, 0.8, 8),
+                    new THREE.MeshLambertMaterial({ color: 0x1a1a1a })
+                );
+                chain.position.set(0, corridorHeight / 2 - 0.4, -corridorLength / 2 - offset);
+                chandelier.add(chain);
+
+                const mainRing = new THREE.Mesh(
+                    new THREE.TorusGeometry(0.4, 0.04, 8, 16),
+                    new THREE.MeshLambertMaterial({ color: 0x2a2a2a })
+                );
+                mainRing.rotation.x = Math.PI / 2;
+                mainRing.position.set(0, corridorHeight / 2 - 0.8, -corridorLength / 2 - offset);
+                chandelier.add(mainRing);
+
+                chandelier.userData.flames = [];
+                for (let i = 0; i < 8; i++) {
+                    const angle = (i / 8) * Math.PI * 2;
+                    const holder = new THREE.Mesh(
+                        new THREE.CylinderGeometry(0.03, 0.05, 0.1, 8),
+                        new THREE.MeshLambertMaterial({ color: 0x2a2a2a })
+                    );
+                    holder.position.set(
+                        Math.cos(angle) * 0.4,
+                        corridorHeight / 2 - 0.85,
+                        -corridorLength / 2 - offset + Math.sin(angle) * 0.4
+                    );
+                    chandelier.add(holder);
+
+                    const candle = new THREE.Mesh(
+                        new THREE.CylinderGeometry(0.025, 0.025, 0.15, 8),
+                        new THREE.MeshLambertMaterial({ color: 0xFFF8DC })
+                    );
+                    candle.position.set(
+                        Math.cos(angle) * 0.4,
+                        corridorHeight / 2 - 0.75,
+                        -corridorLength / 2 - offset + Math.sin(angle) * 0.4
+                    );
+                    chandelier.add(candle);
+
+                    const flame = new THREE.Mesh(
+                        new THREE.SphereGeometry(0.04, 8, 8),
+                        new THREE.MeshLambertMaterial({ color: 0xFFA500, emissive: 0xFF6600, emissiveIntensity: 0.8 })
+                    );
+                    flame.scale.set(1, 1.5, 1);
+                    flame.position.set(
+                        Math.cos(angle) * 0.4,
+                        corridorHeight / 2 - 0.65,
+                        -corridorLength / 2 - offset + Math.sin(angle) * 0.4
+                    );
+                    flame.userData.baseIntensity = 0.8;
+                    flame.userData.offset = Math.random() * Math.PI * 2;
+                    chandelier.add(flame);
+                    chandelier.userData.flames.push(flame);
+                }
+
+                group.add(chandelier);
+                group.userData.chandelier = chandelier;
+
+                const chandelierLight = new THREE.PointLight(0xFFA500, 0.8, corridorLength * 1.2);
+                chandelierLight.position.set(0, corridorHeight / 2 - 0.7, -corridorLength / 2 - offset);
+                group.add(chandelierLight);
+                group.userData.chandelierLight = chandelierLight;
+
+                const ectoGeometry = new THREE.SphereGeometry(0.5, 8, 6);
+                const positions = ectoGeometry.attributes.position;
+                for (let i = 0; i < positions.count; i++) {
+                    positions.setX(i, positions.getX(i) + (Math.random() - 0.5) * 0.3);
+                    positions.setY(i, positions.getY(i) + (Math.random() - 0.5) * 0.3);
+                    positions.setZ(i, positions.getZ(i) + (Math.random() - 0.5) * 0.3);
+                }
+                ectoGeometry.computeVertexNormals();
+
+                const ectoMaterial = new THREE.MeshBasicMaterial({
+                    color: 0xAAFFAA,
+                    transparent: true,
+                    opacity: 0,
+                    side: THREE.DoubleSide,
+                    blending: THREE.AdditiveBlending,
+                    depthWrite: false
+                });
+
+                const ectoGroup = new THREE.Group();
+                for (let layer = 0; layer < 3; layer++) {
+                    const ecto = new THREE.Mesh(ectoGeometry.clone(), ectoMaterial.clone());
+                    const scale = 1 + layer * 0.15;
+                    ecto.scale.set(scale, scale, scale);
+                    ecto.userData.layer = layer;
+                    ectoGroup.add(ecto);
+                }
+
+                ectoGroup.position.set(
+                    (Math.random() - 0.5) * (corridorWidth - 1),
+                    (Math.random() - 0.5) * (corridorHeight - 1),
+                    -Math.random() * corridorLength - offset
+                );
+
+                ectoGroup.userData.baseOpacity = 0.2 + Math.random() * 0.3;
+                ectoGroup.userData.speed = 0.008 + Math.random() * 0.015;
+                ectoGroup.userData.phase = Math.random() * Math.PI * 2;
+                ectoGroup.userData.rotationSpeed = {
+                    x: (Math.random() - 0.5) * 0.015,
+                    y: (Math.random() - 0.5) * 0.015,
+                    z: (Math.random() - 0.5) * 0.015
+                };
+
+                group.add(ectoGroup);
+                group.userData.ectoplasm = ectoGroup;
+            }
+
+            return group;
+        }
+
+        function createDoor(offset, forCorridorIndex) {
+            if (forCorridorIndex >= 5) {
+                return new THREE.Group();
+            }
+
+            const group = new THREE.Group();
+            const doorWidth = 1.5;
+            const doorHeight = 2.2;
+
+            const doorTexture = new THREE.CanvasTexture(createWoodTexture());
+            const door = new THREE.Mesh(
+                new THREE.BoxGeometry(doorWidth, doorHeight, 0.1),
+                new THREE.MeshLambertMaterial({ map: doorTexture })
+            );
+            door.position.set(0, -corridorHeight / 2 + doorHeight / 2, -corridorLength - offset + 0.1);
+            group.add(door);
+            group.userData.door = door;
+
+            const handle = new THREE.Mesh(
+                new THREE.SphereGeometry(0.08, 16, 16),
+                new THREE.MeshLambertMaterial({ color: 0xFFD700 })
+            );
+            handle.position.set(doorWidth / 2 - 0.15, -corridorHeight / 2 + doorHeight / 2, -corridorLength - offset + 0.15);
+            group.add(handle);
+            group.userData.handle = handle;
+
+            const hingeMaterial = new THREE.MeshLambertMaterial({ color: 0x444444 });
+            const hingeY = [doorHeight / 2 - 0.3, 0, -doorHeight / 2 + 0.3];
+            group.userData.hinges = [];
+
+            hingeY.forEach(y => {
+                const hinge = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.05, 0.05, 0.2, 16),
+                    hingeMaterial
+                );
+                hinge.rotation.z = Math.PI / 2;
+                hinge.position.set(-doorWidth / 2, -corridorHeight / 2 + doorHeight / 2 + y, -corridorLength - offset + 0.15);
+                group.add(hinge);
+                group.userData.hinges.push(hinge);
+            });
+
+            group.userData.offset = offset;
+            group.userData.doorWidth = doorWidth;
+            group.userData.doorHeight = doorHeight;
+
+            return group;
+        }
+
+        let currentCorridor = createCorridor(0, 0);
+        scene.add(currentCorridor);
+
+        let nextCorridor = createCorridor(corridorLength, 1);
+        scene.add(nextCorridor);
+
+        doorGroup = createDoor(0, 0);
+        scene.add(doorGroup);
+
+        nextDoorGroup = createDoor(corridorLength, 1);
+        scene.add(nextDoorGroup);
+
+        monster = createMonster();
+        monster.visible = false;
+
+        // Préparer tous les sons au chargement
+        function prepareAudio() {
+            // Drone d'ambiance grave
+            ambientDrone = new Tone.Noise("brown");
+            droneFilter = new Tone.Filter(80, "lowpass").toDestination();
+            ambientDrone.connect(droneFilter);
+            ambientDrone.volume.value = -25;
+
+            // Deuxième couche drone
+            drone2 = new Tone.Synth({
+                oscillator: { type: "sine" },
+                envelope: { attack: 2, decay: 1, sustain: 0.8, release: 2 }
+            }).toDestination();
+            drone2.volume.value = -30;
+            dronePattern = new Tone.Loop((time) => {
+                drone2.triggerAttackRelease("C1", "4n", time);
+            }, "2n");
+
+            // Heartbeat (battements de cœur)
+            heartbeat = new Tone.MembraneSynth({
+                pitchDecay: 0.05,
+                octaves: 4,
+                oscillator: { type: "sine" },
+                envelope: { attack: 0.001, decay: 0.4, sustain: 0.01, release: 1.4 }
+            }).toDestination();
+            heartbeat.volume.value = -15;
+
+            // Bruit de pas
+            stepNoise = new Tone.NoiseSynth({
+                noise: { type: "white" },
+                envelope: { attack: 0.005, decay: 0.1, sustain: 0 }
+            }).toDestination();
+            stepNoise.volume.value = -20;
+        }
+
+        function startAudio() {
+            if (audioStarted) return;
+            
+            Tone.start().then(() => {
+                audioStarted = true;
+                ambientDrone.start();
+                dronePattern.start(0);
+                Tone.Transport.start();
+            });
+        }
+
+        function initAudio() {
+            if (audioStarted) return;
+            
+            Tone.start().then(() => {
+                audioStarted = true;
+
+                // Drone d'ambiance grave
+                const droneNoise = new Tone.Noise("brown").start();
+                const droneFilter = new Tone.Filter(80, "lowpass").toDestination();
+                droneNoise.connect(droneFilter);
+                droneNoise.volume.value = -25;
+                ambientDrone = droneNoise;
+
+                // Deuxième couche drone
+                const drone2 = new Tone.Synth({
+                    oscillator: { type: "sine" },
+                    envelope: { attack: 2, decay: 1, sustain: 0.8, release: 2 }
+                }).toDestination();
+                drone2.volume.value = -30;
+                const dronePattern = new Tone.Loop((time) => {
+                    drone2.triggerAttackRelease("C1", "4n", time);
+                }, "2n");
+                dronePattern.start(0);
+
+                // Heartbeat (battements de cœur)
+                heartbeat = new Tone.MembraneSynth({
+                    pitchDecay: 0.05,
+                    octaves: 4,
+                    oscillator: { type: "sine" },
+                    envelope: { attack: 0.001, decay: 0.4, sustain: 0.01, release: 1.4 }
+                }).toDestination();
+                heartbeat.volume.value = -15;
+
+                // Bruit de pas
+                stepNoise = new Tone.NoiseSynth({
+                    noise: { type: "white" },
+                    envelope: { attack: 0.005, decay: 0.1, sustain: 0 }
+                }).toDestination();
+                stepNoise.volume.value = -20;
+
+                Tone.Transport.start();
+            });
+        }
+
+        // Fonction pour jouer un pas
+        function playStep() {
+            if (!audioStarted || stopped) return;
+            stepNoise.triggerAttackRelease("16n");
+        }
+
+        // Fonction heartbeat
+        let heartbeatInterval = null;
+        function startHeartbeat(bpm = 60) {
+            if (heartbeatInterval) clearInterval(heartbeatInterval);
+            const interval = (60 / bpm) * 1000;
+            heartbeatInterval = setInterval(() => {
+                if (heartbeat && audioStarted) {
+                    heartbeat.triggerAttackRelease("C1", "8n");
+                }
+            }, interval);
+        }
+
+        // Son de porte
+        function playDoorCreak() {
+            if (!audioStarted) return;
+            const creak = new Tone.Synth({
+                oscillator: { type: "sawtooth" },
+                envelope: { attack: 0.5, decay: 0.5, sustain: 0.3, release: 1 }
+            }).toDestination();
+            creak.volume.value = -18;
+            creak.triggerAttackRelease("A2", "2n");
+            setTimeout(() => creak.dispose(), 3000);
+        }
+
+        // Son du monstre
+        function playMonsterSound() {
+            if (!audioStarted) return;
+            const monsterGrowl = new Tone.Synth({
+                oscillator: { type: "sawtooth" },
+                envelope: { attack: 0.1, decay: 1, sustain: 0.5, release: 2 }
+            }).toDestination();
+            monsterGrowl.volume.value = -10;
+            monsterGrowl.triggerAttackRelease("C1", "2n");
+            
+            const growl2 = new Tone.Noise("pink").start().stop("+3");
+            const growlFilter = new Tone.Filter(200, "lowpass").toDestination();
+            growl2.connect(growlFilter);
+            growl2.volume.value = -15;
+            
+            setTimeout(() => {
+                monsterGrowl.dispose();
+                growl2.dispose();
+                growlFilter.dispose();
+            }, 4000);
+        }
+
+        // Glitch sound pour la fin
+        function playGlitchSound() {
+            if (!audioStarted) return;
+            const glitch = new Tone.MetalSynth({
+                frequency: 200,
+                envelope: { attack: 0.001, decay: 0.1, release: 0.2 },
+                harmonicity: 5.1,
+                modulationIndex: 32,
+                resonance: 4000,
+                octaves: 1.5
+            }).toDestination();
+            glitch.volume.value = -20;
+            glitch.triggerAttackRelease("16n");
+            setTimeout(() => glitch.dispose(), 1000);
+        }
+
+        let lastStepTime = 0;
+        let doorSoundPlayed = false;
+
+        // Préparer les sons au chargement
+        prepareAudio();
+
+        // Démarrage au clic
+        document.getElementById('startScreen').addEventListener('click', () => {
+            document.getElementById('startScreen').style.display = 'none';
+            startAudio();
+            animate();
+        });
+
+        function createMonster() {
+            const group = new THREE.Group();
+            
+            const bodyGeometry = new THREE.SphereGeometry(0.8, 8, 8);
+            const positions = bodyGeometry.attributes.position;
+            for (let i = 0; i < positions.count; i++) {
+                positions.setX(i, positions.getX(i) * (1 + (Math.random() - 0.5) * 0.6));
+                positions.setY(i, positions.getY(i) * (1 + (Math.random() - 0.5) * 0.8));
+                positions.setZ(i, positions.getZ(i) * (1 + (Math.random() - 0.5) * 0.6));
+            }
+            bodyGeometry.computeVertexNormals();
+            
+            const bodyMaterial = new THREE.MeshBasicMaterial({
+                color: 0x111111,
+                wireframe: true,
+                transparent: true,
+                opacity: 0
+            });
+            const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+            group.add(body);
+            group.userData.body = body;
+            
+            const eyeMaterial = new THREE.MeshBasicMaterial({
+                color: 0x008844,
+                transparent: true,
+                opacity: 0,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false
+            });
+            
+            const eyeGroup1 = new THREE.Group();
+            for (let layer = 0; layer < 3; layer++) {
+                const eye = new THREE.Mesh(new THREE.SphereGeometry(0.12 + layer * 0.03, 8, 8), eyeMaterial.clone());
+                eye.userData.layer = layer;
+                eyeGroup1.add(eye);
+            }
+            eyeGroup1.position.set(-0.3, 0.3, 0.6);
+            group.add(eyeGroup1);
+            group.userData.leftEye = eyeGroup1;
+            
+            const eyeGroup2 = new THREE.Group();
+            for (let layer = 0; layer < 3; layer++) {
+                const eye = new THREE.Mesh(new THREE.SphereGeometry(0.12 + layer * 0.03, 8, 8), eyeMaterial.clone());
+                eye.userData.layer = layer;
+                eyeGroup2.add(eye);
+            }
+            eyeGroup2.position.set(0.3, 0.3, 0.6);
+            group.add(eyeGroup2);
+            group.userData.rightEye = eyeGroup2;
+            
+            for (let i = 0; i < 4; i++) {
+                const limbGeometry = new THREE.CylinderGeometry(0.1, 0.05, 1.2, 6);
+                const limbPositions = limbGeometry.attributes.position;
+                for (let j = 0; j < limbPositions.count; j++) {
+                    limbPositions.setX(j, limbPositions.getX(j) * (1 + (Math.random() - 0.5) * 0.5));
+                    limbPositions.setY(j, limbPositions.getY(j) * (1 + (Math.random() - 0.5) * 0.3));
+                }
+                limbGeometry.computeVertexNormals();
+                
+                const limb = new THREE.Mesh(limbGeometry, bodyMaterial.clone());
+                const angle = (i / 4) * Math.PI * 2;
+                limb.position.set(Math.cos(angle) * 0.5, -0.8, Math.sin(angle) * 0.5);
+                limb.rotation.x = Math.PI / 6;
+                limb.rotation.z = angle;
+                group.add(limb);
+            }
+            
+            group.position.set(0, corridorHeight / 2 + 2, -5 * corridorLength - corridorLength / 2 - 2);
+            group.userData.baseY = corridorHeight / 2 + 2;
+            group.userData.targetY = -corridorHeight / 2 + 1;
+            
+            return group;
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (!stopped) {
+                camera.position.z -= moveSpeed;
+                
+                // Son de pas toutes les 0.5 secondes
+                if (audioStarted) {
+                    const now = Date.now();
+                    if (now - lastStepTime > 500) {
+                        playStep();
+                        lastStepTime = now;
+                    }
+                }
+            }
+
+            if (corridorCount === 5 && camera.position.z < -5 * corridorLength - corridorLength / 2) {
+                if (!stopped) {
+                    stopped = true;
+                    cameraLookingUp = true;
+                    monster.visible = true;
+                    scene.add(monster);
+                    startHeartbeat(100);
+                    playMonsterSound();
+                }
+            }
+
+            if (cameraLookingUp && cameraLookUpProgress < 1 && !cameraFalling) {
+                cameraLookUpProgress = Math.min(1, cameraLookUpProgress + 0.005);
+                
+                // Bruit de mouvement naturel
+                const breathNoise = Math.sin(walkCycle * 2) * 0.01;
+                const trembleX = Math.sin(walkCycle * 4.3) * 0.005;
+                const trembleY = Math.sin(walkCycle * 3.7) * 0.008;
+                
+                // Mouvements de panique crédibles avec bruit naturel
+                if (cameraLookUpProgress < 0.15) {
+                    // Regarde à gauche lentement
+                    const localProgress = cameraLookUpProgress / 0.15;
+                    const easeProgress = localProgress * localProgress * (3 - 2 * localProgress);
+                    camera.rotation.y = easeProgress * 0.7 + trembleY;
+                    camera.rotation.x = Math.sin(easeProgress * Math.PI * 0.5) * 0.08 + breathNoise;
+                    camera.rotation.z = trembleX;
+                } else if (cameraLookUpProgress < 0.25) {
+                    // Regarde en haut à gauche
+                    const localProgress = (cameraLookUpProgress - 0.15) / 0.1;
+                    const easeProgress = localProgress * localProgress * (3 - 2 * localProgress);
+                    camera.rotation.y = 0.7 * (1 - easeProgress * 0.3) + trembleY;
+                    camera.rotation.x = -easeProgress * 0.5 + breathNoise;
+                    camera.rotation.z = trembleX;
+                } else if (cameraLookUpProgress < 0.4) {
+                    // Revient au centre et regarde en haut
+                    const localProgress = (cameraLookUpProgress - 0.25) / 0.15;
+                    const easeProgress = localProgress * localProgress * (3 - 2 * localProgress);
+                    camera.rotation.y = 0.7 * (1 - localProgress) + trembleY;
+                    camera.rotation.x = -0.5 - easeProgress * 0.2 + breathNoise;
+                    camera.rotation.z = trembleX;
+                } else if (cameraLookUpProgress < 0.55) {
+                    // Baisse un peu la tête et regarde à droite
+                    const localProgress = (cameraLookUpProgress - 0.4) / 0.15;
+                    const easeProgress = localProgress * localProgress * (3 - 2 * localProgress);
+                    camera.rotation.y = -easeProgress * 0.8 + trembleY;
+                    camera.rotation.x = -0.7 + easeProgress * 0.5 + breathNoise;
+                    camera.rotation.z = trembleX;
+                } else if (cameraLookUpProgress < 0.7) {
+                    // Regarde en haut à droite
+                    const localProgress = (cameraLookUpProgress - 0.55) / 0.15;
+                    const easeProgress = localProgress * localProgress * (3 - 2 * localProgress);
+                    camera.rotation.y = -0.8 * (1 - easeProgress * 0.5) + trembleY;
+                    camera.rotation.x = -0.2 - easeProgress * 0.6 + breathNoise;
+                    camera.rotation.z = trembleX;
+                } else {
+                    // Entend le bruit, revient au centre et lève la tête complètement
+                    const localProgress = (cameraLookUpProgress - 0.7) / 0.3;
+                    const easeProgress = localProgress * localProgress * (3 - 2 * localProgress);
+                    camera.rotation.y = -0.4 * (1 - easeProgress) + trembleY * 2;
+                    camera.rotation.x = -0.8 - easeProgress * 0.4 + breathNoise * 1.5;
+                    camera.rotation.z = trembleX * 2;
+                }
+                
+                if (cameraLookUpProgress >= 1) {
+                    camera.rotation.x = -1.2;
+                    camera.rotation.y = 0;
+                    camera.rotation.z = 0;
+                    monsterFalling = true;
+                }
+            }
+            
+            if (monster && monsterFalling && !cameraFalling) {
+                const monsterScreenY = monster.position.y;
+                const targetRotation = THREE.MathUtils.clamp(
+                    -1.2 + (monster.userData.baseY - monsterScreenY) / (monster.userData.baseY - monster.userData.targetY) * 1.5,
+                    -1.2,
+                    0.3
+                );
+                camera.rotation.x = targetRotation;
+            }
+
+            if (monster && monsterFalling && monsterFallProgress < 1) {
+                monsterFallProgress = Math.min(1, monsterFallProgress + 0.06);
+                const easeProgress = 1 - Math.pow(1 - monsterFallProgress, 4);
+                monster.position.y = monster.userData.baseY + (monster.userData.targetY - monster.userData.baseY) * easeProgress;
+                
+                monster.children.forEach(child => {
+                    if (child.material && child.material.transparent) {
+                        child.material.opacity = 1;
+                    }
+                });
+                
+                // Flash blanc brutal au moment de l'impact
+                if (monsterFallProgress >= 0.85 && !monsterJumpscareTriggered) {
+                    monsterJumpscareTriggered = true;
+                    
+                    // Son percussif
+                    if (audioStarted) {
+                        const crash = new Tone.MetalSynth({
+                            frequency: 100,
+                            envelope: { attack: 0.001, decay: 0.3, release: 1 },
+                            harmonicity: 8,
+                            modulationIndex: 40,
+                            resonance: 2000,
+                            octaves: 2
+                        }).toDestination();
+                        crash.volume.value = -5;
+                        crash.triggerAttackRelease("32n");
+                        
+                        const subBass = new Tone.Synth({
+                            oscillator: { type: "sine" },
+                            envelope: { attack: 0.001, decay: 0.5, sustain: 0, release: 0.5 }
+                        }).toDestination();
+                        subBass.volume.value = 0;
+                        subBass.triggerAttackRelease("C0", "8n");
+                        
+                        setTimeout(() => {
+                            crash.dispose();
+                            subBass.dispose();
+                        }, 2000);
+                    }
+                }
+                
+                if (monsterFallProgress >= 0.6 && !cameraFalling) {
+                    cameraFalling = true;
+                }
+            }
+
+            if (cameraFalling && cameraFallProgress < 1) {
+                cameraFallProgress = Math.min(1, cameraFallProgress + 0.025);
+                
+                if (cameraFallProgress < 0.7) {
+                    camera.position.y = Math.sin(cameraFallProgress * 30) * 0.3 - cameraFallProgress * 1.5;
+                    camera.rotation.x = Math.sin(cameraFallProgress * 25) * 0.4 - cameraFallProgress * 0.5;
+                    camera.rotation.z = Math.sin(cameraFallProgress * 20) * 0.3;
+                    camera.rotation.y = Math.sin(cameraFallProgress * 15) * 0.2;
+                } else {
+                    const finalProgress = (cameraFallProgress - 0.7) / 0.3;
+                    camera.position.y = -corridorHeight / 2 + 0.15;
+                    camera.rotation.x = Math.PI / 2.2;
+                    camera.rotation.z = -Math.PI / 6 + finalProgress * Math.PI / 12;
+                    camera.rotation.y = finalProgress * 0.3;
+                }
+                
+                if (cameraFallProgress >= 0.7 && !bloodStain) {
+                    const bloodCanvas = document.createElement('canvas');
+                    bloodCanvas.width = 512;
+                    bloodCanvas.height = 512;
+                    const bloodCtx = bloodCanvas.getContext('2d');
+                    
+                    const bloodTexture = new THREE.CanvasTexture(bloodCanvas);
+                    const bloodMaterial = new THREE.MeshBasicMaterial({
+                        map: bloodTexture,
+                        transparent: true,
+                        opacity: 0.95,
+                        side: THREE.DoubleSide,
+                        depthWrite: false
+                    });
+                    
+                    bloodStain = new THREE.Mesh(
+                        new THREE.PlaneGeometry(corridorWidth * 2, corridorLength * 2),
+                        bloodMaterial
+                    );
+                    bloodStain.rotation.x = -Math.PI / 2;
+                    bloodStain.position.set(0, -corridorHeight / 2 + 0.03, camera.position.z);
+                    bloodStain.userData.canvas = bloodCanvas;
+                    bloodStain.userData.ctx = bloodCtx;
+                    bloodStain.userData.texture = bloodTexture;
+                    scene.add(bloodStain);
+                }
+            }
+
+            if (bloodStain && cameraFallProgress >= 1) {
+                bloodSpreadProgress = Math.min(1, bloodSpreadProgress + 0.005);
+                
+                const ctx = bloodStain.userData.ctx;
+                const canvas = bloodStain.userData.canvas;
+                
+                if (bloodSpreadProgress < 1) {
+                    ctx.clearRect(0, 0, 512, 512);
+                    
+                    const centerX = 256;
+                    const centerY = 256 + (camera.position.z - bloodStain.position.z) * 25;
+                    
+                    const maxRadius = 400 * bloodSpreadProgress;
+                    const gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, maxRadius);
+                    gradient.addColorStop(0, 'rgba(139, 0, 0, 1)');
+                    gradient.addColorStop(0.3, 'rgba(120, 0, 0, 0.9)');
+                    gradient.addColorStop(0.6, 'rgba(100, 0, 0, 0.7)');
+                    gradient.addColorStop(0.85, 'rgba(80, 0, 0, 0.4)');
+                    gradient.addColorStop(1, 'rgba(60, 0, 0, 0)');
+                    
+                    ctx.fillStyle = gradient;
+                    ctx.fillRect(0, 0, 512, 512);
+                    
+                    for (let i = 0; i < 20 * bloodSpreadProgress; i++) {
+                        const angle = Math.random() * 100 + i;
+                        const dist = Math.random() * maxRadius * 0.8;
+                        const splatterX = centerX + Math.cos(angle) * dist;
+                        const splatterY = centerY + Math.sin(angle) * dist;
+                        const splatterSize = Math.random() * 15 + 5;
+                        
+                        ctx.fillStyle = `rgba(100, 0, 0, ${0.3 + Math.random() * 0.4})`;
+                        ctx.beginPath();
+                        ctx.ellipse(splatterX, splatterY, splatterSize, splatterSize * (0.5 + Math.random() * 0.5), angle, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                    
+                    bloodStain.userData.texture.needsUpdate = true;
+                } else if (!endingStarted) {
+                    endingStarted = true;
+                    
+                    // Créer les clones du monstre pour l'aberration chromatique
+                    if (monster && !monsterCloneCyan) {
+                        monsterCloneCyan = monster.clone();
+                        monsterCloneCyan.traverse((child) => {
+                            if (child.material) {
+                                child.material = new THREE.MeshBasicMaterial({
+                                    color: 0x00FFFF,
+                                    transparent: true,
+                                    opacity: 0,
+                                    wireframe: child.material.wireframe,
+                                    blending: THREE.AdditiveBlending
+                                });
+                            }
+                        });
+                        scene.add(monsterCloneCyan);
+                        
+                        monsterCloneYellow = monster.clone();
+                        monsterCloneYellow.traverse((child) => {
+                            if (child.material) {
+                                child.material = new THREE.MeshBasicMaterial({
+                                    color: 0xFFFF00,
+                                    transparent: true,
+                                    opacity: 0,
+                                    wireframe: child.material.wireframe,
+                                    blending: THREE.AdditiveBlending
+                                });
+                            }
+                        });
+                        scene.add(monsterCloneYellow);
+                    }
+                }
+            }
+
+            if (endingStarted) {
+                endingProgress = Math.min(1, endingProgress + 0.003);
+                
+                // Animer l'aberration chromatique sur les clones du monstre
+                if (monsterCloneCyan && monsterCloneYellow && endingProgress < 0.8) {
+                    const aberration = endingProgress * 0.3;
+                    const opacity = endingProgress * 0.6;
+                    
+                    monsterCloneCyan.position.copy(monster.position);
+                    monsterCloneCyan.position.x -= aberration;
+                    monsterCloneCyan.rotation.copy(monster.rotation);
+                    monsterCloneCyan.traverse((child) => {
+                        if (child.material) child.material.opacity = opacity;
+                    });
+                    
+                    monsterCloneYellow.position.copy(monster.position);
+                    monsterCloneYellow.position.x += aberration;
+                    monsterCloneYellow.rotation.copy(monster.rotation);
+                    monsterCloneYellow.traverse((child) => {
+                        if (child.material) child.material.opacity = opacity;
+                    });
+                } else if (monsterCloneCyan && monsterCloneYellow) {
+                    scene.remove(monsterCloneCyan);
+                    scene.remove(monsterCloneYellow);
+                    monsterCloneCyan = null;
+                    monsterCloneYellow = null;
+                }
+                
+                // Sons de glitch pendant la fin
+                if (endingProgress > 0.2 && endingProgress < 0.9 && Math.random() > 0.97) {
+                    playGlitchSound();
+                }
+                
+                // Accélérer le heartbeat
+                if (endingProgress > 0.3 && endingProgress < 0.7) {
+                    const bpm = 100 + (endingProgress - 0.3) * 100;
+                    if (Math.random() > 0.95) {
+                        startHeartbeat(bpm);
+                    }
+                }
+            }
+
+            if (monster && !monsterFalling) {
+                monsterAppearProgress = Math.min(1, monsterAppearProgress + 0.01);
+                
+                monster.children.forEach(child => {
+                    if (child.material && child.material.transparent) {
+                        child.material.opacity = monsterAppearProgress * 0.5;
+                    }
+                });
+            }
+            
+            if (monster && monsterFalling) {
+                if (cameraFallProgress < 0.7) {
+                    monster.rotation.y += 0.01;
+                }
+                
+                if (monster.userData.leftEye && monster.userData.rightEye) {
+                    const pulse = Math.sin(walkCycle * 3) * 0.5 + 0.5;
+                    [monster.userData.leftEye, monster.userData.rightEye].forEach(eyeGroup => {
+                        eyeGroup.children.forEach((eye, idx) => {
+                            eye.material.opacity = (1 - idx * 0.3) * (0.6 + pulse * 0.4);
+                        });
+                    });
+                }
+            }
+
+            walkCycle += 0.1;
+            if (!stopped && !cameraLookingUp && !cameraFalling) {
+                camera.position.y = Math.sin(walkCycle) * 0.05;
+                camera.rotation.z = Math.sin(walkCycle * 0.5) * 0.01;
+            }
+
+            // Update miroir si dans le dernier couloir
+            if (nextCorridor && nextCorridor.userData.cubeCamera && corridorCount === 4) {
+                const cubeCamera = nextCorridor.userData.cubeCamera;
+                const mirror = nextCorridor.userData.mirror;
+                
+                if (mirror) {
+                    mirror.visible = false;
+                    camera.visible = false;
+                    
+                    if (monster) monster.visible = false;
+                    if (monsterCloneCyan) monsterCloneCyan.visible = false;
+                    if (monsterCloneYellow) monsterCloneYellow.visible = false;
+                    if (bloodStain) bloodStain.visible = false;
+                    
+                    cubeCamera.update(renderer, scene);
+                    
+                    mirror.visible = true;
+                    camera.visible = true;
+                    if (monster && monster.parent) monster.visible = true;
+                    if (monsterCloneCyan && monsterCloneCyan.parent) monsterCloneCyan.visible = true;
+                    if (monsterCloneYellow && monsterCloneYellow.parent) monsterCloneYellow.visible = true;
+                    if (bloodStain) bloodStain.visible = true;
+                }
+            }
+
+            [currentCorridor, nextCorridor].forEach(corridor => {
+                if (corridor && corridor.userData.chandelier) {
+                    const flames = corridor.userData.chandelier.userData.flames;
+                    let avgFlicker = 0;
+                    flames.forEach(flame => {
+                        const flicker = Math.sin(walkCycle * 3 + flame.userData.offset) * 0.3 + 0.7;
+                        flame.material.emissiveIntensity = flame.userData.baseIntensity * flicker;
+                        flame.scale.y = 1.5 + Math.sin(walkCycle * 5 + flame.userData.offset) * 0.2;
+                        avgFlicker += flicker;
+                    });
+                    avgFlicker /= flames.length;
+
+                    if (corridor.userData.chandelierLight) {
+                        corridor.userData.chandelierLight.intensity = 0.8 * avgFlicker;
+                    }
+                }
+
+                if (corridor && corridor.userData.ectoplasm) {
+                    const ecto = corridor.userData.ectoplasm;
+                    ecto.userData.phase += ecto.userData.speed;
+                    const opacity = Math.sin(ecto.userData.phase) * 0.5 + 0.5;
+
+                    ecto.children.forEach((layer, idx) => {
+                        const layerOpacity = opacity * ecto.userData.baseOpacity * (1 - idx * 0.3);
+                        layer.material.opacity = layerOpacity;
+                    });
+
+                    ecto.rotation.x += ecto.userData.rotationSpeed.x;
+                    ecto.rotation.y += ecto.userData.rotationSpeed.y;
+                    ecto.rotation.z += ecto.userData.rotationSpeed.z;
+
+                    ecto.position.y += Math.sin(ecto.userData.phase * 2) * 0.002;
+                }
+            });
+
+            const distanceToDoor = Math.abs(camera.position.z - (-corridorLength * (corridorCount + 1)));
+
+            if (distanceToDoor < 10 && distanceToDoor > 4) {
+                const lookDownProgress = (10 - distanceToDoor) / 6;
+                camera.rotation.x = -lookDownProgress * 0.15;
+            } else if (distanceToDoor <= 4 && distanceToDoor > 1) {
+                const lookUpProgress = (4 - distanceToDoor) / 3;
+                camera.rotation.x = -0.15 * (1 - lookUpProgress);
+            } else if (distanceToDoor <= 1) {
+                camera.rotation.x = 0;
+            } else {
+                camera.rotation.x = 0;
+            }
+
+            if (distanceToDoor < 4) {
+                doorOpenProgress = Math.min(1, doorOpenProgress + 0.03);
+                
+                if (doorOpenProgress > 0.3 && !doorSoundPlayed) {
+                    playDoorCreak();
+                    doorSoundPlayed = true;
+                }
+                
+                if (corridorCount === 4 && nextCorridor && doorOpenProgress > 0.2) {
+                    const lightIntensity = (doorOpenProgress - 0.2) / 0.8;
+                    if (nextCorridor.userData.whiteRoomAmbient) {
+                        nextCorridor.userData.whiteRoomAmbient.intensity = lightIntensity * 0.6;
+                    }
+                }
+            } else {
+                doorOpenProgress = Math.max(0, doorOpenProgress - 0.03);
+                
+                if (doorOpenProgress < 0.3) {
+                    doorSoundPlayed = false;
+                }
+                
+                if (corridorCount === 4 && nextCorridor && doorOpenProgress <= 0.2) {
+                    if (nextCorridor.userData.whiteRoomAmbient) {
+                        nextCorridor.userData.whiteRoomAmbient.intensity = 0;
+                    }
+                }
+            }
+
+            if (doorGroup && doorGroup.userData.door) {
+                const door = doorGroup.userData.door;
+                const handle = doorGroup.userData.handle;
+                const hinges = doorGroup.userData.hinges;
+                const doorWidth = doorGroup.userData.doorWidth;
+                const doorHeight = doorGroup.userData.doorHeight;
+                const offset = doorGroup.userData.offset;
+
+                const angle = -doorOpenProgress * Math.PI / 2;
+                const pivotX = -doorWidth / 2;
+
+                door.rotation.y = angle;
+                door.position.x = pivotX + (doorWidth / 2) * Math.cos(angle);
+                door.position.z = -corridorLength - offset + 0.1 - (doorWidth / 2) * Math.sin(angle);
+
+                handle.position.x = pivotX + (doorWidth - 0.15) * Math.cos(angle);
+                handle.position.z = -corridorLength - offset + 0.15 - (doorWidth - 0.15) * Math.sin(angle);
+
+                hinges.forEach(hinge => {
+                    hinge.rotation.y = angle;
+                });
+            }
+
+            if (camera.position.z < -corridorLength * (corridorCount + 1) + 1 && doorOpenProgress > 0.8) {
+                scene.remove(currentCorridor);
+                scene.remove(doorGroup);
+
+                corridorCount++;
+
+                if (corridorCount >= 5) {
+                    return;
+                }
+
+                currentCorridor = nextCorridor;
+                doorGroup = nextDoorGroup;
+
+                nextCorridor = createCorridor((corridorCount + 1) * corridorLength, corridorCount + 1);
+                scene.add(nextCorridor);
+
+                nextDoorGroup = createDoor((corridorCount + 1) * corridorLength, corridorCount + 1);
+                scene.add(nextDoorGroup);
+
+                doorOpenProgress = 0;
+            }
+
+            renderer.render(scene, camera);
+            drawOverlay();
+        }
+
+        window.addEventListener('resize', () => {
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            camera.aspect = width / height;
+            camera.updateProjectionMatrix();
+            renderer.setSize(width, height);
+            overlay.width = width;
+            overlay.height = height;
+        });
+    </script>
+</body>
+</html>

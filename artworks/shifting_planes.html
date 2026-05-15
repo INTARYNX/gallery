@@ -1,0 +1,129 @@
+met ça dans un artefact <!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { margin:0; overflow:hidden; background:#000; }
+    canvas { display:block; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); border:1px solid #333; }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <script>
+    const c = document.getElementById('c');
+    const G = c.getContext('2d');
+
+    let S = 0;
+    function resize() {
+      S = Math.min(innerWidth, innerHeight);
+      if (S <= 0) return;
+      c.width = c.height = S;
+    }
+    resize();
+    addEventListener('resize', resize);
+
+    const PI = Math.PI, TAU = PI * 2;
+    const W = 400, P = PI / 32, w = W / TAU;
+    const BAU_LINE = ['rgb(220,40,30)', 'rgb(0,70,150)', 'rgb(245,195,30)'];
+
+    let f = 0, last = 0;
+
+    function draw(now) {
+      if (S <= 0) { requestAnimationFrame(draw); return; }
+      if (!last) last = now;
+      const dt = Math.min((now - last) / 1000, 0.05);
+      last = now;
+      const sc = S / W;
+
+      G.fillStyle = '#fff';
+      G.fillRect(0, 0, S, S);
+      G.save();
+      const zoom = 1 + Math.sin(f * 0.15) * 0.5;
+      G.translate(S / 2, S / 2);
+      G.scale(sc * zoom, sc * zoom);
+      G.translate(-W / 2, -W / 2);
+
+      const sta = Math.sin(Math.tan(Math.atan(f)));
+      const mid1 = (Math.sin(f * 0.3) * 0.5 + 0.5) * W;
+      const mid2 = (Math.sin(-f * 0.3) * 0.5 + 0.5) * W;
+
+      // Collect all squares
+      const left = [], right = [];
+      for (let y = PI / 1.46; y < TAU - PI / 1.46; y += P) {
+        for (let x = 0; x < TAU; x += P) {
+          const sx = sta + x;
+          const h = sx * w + 12 * sx;
+          const v = (Math.cos(f + x) + y) * w;
+
+          const s1 = h / 66;
+          if (s1 > 0.3) {
+            left.push(W - v - s1 / 2, h - s1 / 2, s1, h < mid1 ? 0 : 1);
+          }
+          const s2 = (W - h) / 66;
+          if (s2 > 0.3) {
+            right.push(v - s2 / 2, h - s2 / 2, s2, h < mid2 ? 0 : 1);
+          }
+        }
+      }
+
+      // Draw back form first (smaller squares = farther), front form on top
+      // Left form uses smaller sizes at top, right at bottom
+      // Draw right (back) then left (front) — left has shadow for depth
+      const drawForm = (arr, c0, c1, shadow) => {
+        const n = arr.length / 4;
+        // Sort by size (smaller = farther back)
+        const idx = new Uint16Array(n);
+        for (let i = 0; i < n; i++) idx[i] = i;
+        idx.sort((a, b) => arr[a * 4 + 2] - arr[b * 4 + 2]);
+
+        if (shadow) {
+          G.shadowColor = 'rgba(0,0,0,0.25)';
+          G.shadowBlur = 8;
+          G.shadowOffsetX = 3;
+          G.shadowOffsetY = 3;
+        }
+
+        for (let k = 0; k < n; k++) {
+          const i = idx[k] * 4;
+          const px = arr[i], py = arr[i + 1], sz = arr[i + 2], ci = arr[i + 3];
+          const a = Math.min(1, sz / 3);
+          G.fillStyle = (ci ? c1 : c0).replace('A', a);
+          G.fillRect(px, py, sz, sz);
+        }
+
+        if (shadow) {
+          G.shadowColor = 'transparent';
+          G.shadowBlur = 0;
+          G.shadowOffsetX = 0;
+          G.shadowOffsetY = 0;
+        }
+      };
+
+      // Right = back, no shadow
+      drawForm(right, 'rgba(0,70,150,A)', 'rgba(245,195,30,A)', false);
+      // Left = front, with shadow for depth
+      drawForm(left, 'rgba(220,40,30,A)', 'rgba(245,195,30,A)', false);
+
+      G.restore();
+
+      // Scrolling color lines
+      G.save();
+      G.globalAlpha = 0.12;
+      const lineH = 3;
+      const scroll = (f * 30) % (lineH * 3);
+      for (let ly = -lineH; ly < S + lineH; ly += lineH * 3) {
+        const yy = ly + scroll;
+        const ci = (((yy + f * 20 | 0) / 40 | 0) % 3 + 3) % 3;
+        G.fillStyle = BAU_LINE[ci];
+        G.fillRect(0, yy, S, lineH);
+      }
+      G.globalAlpha = 1;
+      G.restore();
+
+      f += P / 3 * dt * 60;
+      requestAnimationFrame(draw);
+    }
+
+    requestAnimationFrame(draw);
+  </script>
+</body>
+</html>

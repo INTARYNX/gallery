@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<base href="/upstride/">
+    <title>Planet Conquest</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: monospace;
+        }
+        canvas {
+            border: 4px solid #00aa00;
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas" width="640" height="480"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        const robots = [];
+        const humans = [];
+        const tiles = [];
+        const waste = [];
+        let frame = 0;
+        let robotsActive = false;
+        let conquestCount = 0;
+        
+        // MULE color palette
+        const colors = {
+            green: '#00aa00',
+            darkGreen: '#005500',
+            brown: '#aa5500',
+            red: '#aa0000',
+            darkRed: '#550000',
+            yellow: '#aaaa00',
+            cyan: '#00aaaa',
+            gray: '#555555'
+        };
+        
+        // Initialize grid (8x6 for larger tiles)
+        for (let y = 0; y < 6; y++) {
+            for (let x = 0; x < 8; x++) {
+                const rand = Math.random();
+                let terrain = 'field';
+                if (rand > 0.75) terrain = 'forest';
+                else if (rand > 0.6) terrain = 'lake';
+                else if (rand > 0.4) terrain = 'meadow';
+                
+                tiles.push({
+                    x: x * 80,
+                    y: y * 80,
+                    conquered: false,
+                    conqueredBy: null,
+                    progress: 0,
+                    terrain: terrain,
+                    hasAgriculture: terrain === 'field' || terrain === 'meadow'
+                });
+            }
+        }
+        
+        let humanProduction = 100;
+        let robotProduction = 0;
+        let humanDestruction = 0;
+        let robotDestruction = 0;
+        
+        // Create robots
+        for (let i = 0; i < 3; i++) {
+            robots.push({
+                x: Math.random() * 600,
+                y: Math.random() * 440,
+                vx: 0,
+                vy: 0,
+                targetTile: null,
+                frame: Math.floor(Math.random() * 8)
+            });
+        }
+        
+        // Create humans
+        for (let i = 0; i < 5; i++) {
+            humans.push({
+                x: Math.random() * 600,
+                y: Math.random() * 440,
+                vx: 0,
+                vy: 0,
+                targetTile: null,
+                frame: Math.floor(Math.random() * 8)
+            });
+        }
+        
+        function drawMULEHuman(x, y) {
+            const f = Math.floor(frame / 8) % 2;
+            
+            ctx.fillStyle = '#ffcc99';
+            ctx.fillRect(x - 6, y - 18, 12, 10);
+            ctx.fillStyle = colors.brown;
+            ctx.fillRect(x - 6, y - 22, 12, 4);
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(x - 4, y - 15, 2, 2);
+            ctx.fillRect(x + 2, y - 15, 2, 2);
+            ctx.fillStyle = '#3366cc';
+            ctx.fillRect(x - 8, y - 8, 16, 14);
+            ctx.fillRect(x - 12, y - 4, 4, 10);
+            ctx.fillRect(x + 8, y - 4, 4, 10);
+            ctx.fillStyle = '#ffcc99';
+            ctx.fillRect(x - 12, y + 6, 4, 4);
+            ctx.fillRect(x + 8, y + 6, 4, 4);
+            ctx.fillStyle = '#2244aa';
+            if (f === 0) {
+                ctx.fillRect(x - 7, y + 6, 6, 10);
+                ctx.fillRect(x + 1, y + 6, 6, 8);
+            } else {
+                ctx.fillRect(x - 7, y + 6, 6, 8);
+                ctx.fillRect(x + 1, y + 6, 6, 10);
+            }
+            ctx.fillStyle = colors.brown;
+            ctx.fillRect(x - 8, y + 16, 7, 3);
+            ctx.fillRect(x + 1, y + 16, 7, 3);
+        }
+        
+        function drawMULERobot(x, y) {
+            const f = Math.floor(frame / 8) % 2;
+            
+            ctx.fillStyle = colors.cyan;
+            ctx.fillRect(x - 14, y - 10, 28, 20);
+            ctx.strokeStyle = '#008888';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(x - 14, y - 10, 28, 20);
+            ctx.strokeRect(x - 10, y - 6, 20, 12);
+            ctx.fillStyle = colors.red;
+            ctx.fillRect(x - 4, y - 2, 8, 6);
+            ctx.fillStyle = colors.cyan;
+            ctx.fillRect(x - 12, y - 22, 24, 12);
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(x - 10, y - 20, 20, 8);
+            ctx.fillStyle = colors.red;
+            ctx.fillRect(x - 8, y - 18, 5, 5);
+            ctx.fillRect(x + 3, y - 18, 5, 5);
+            ctx.fillStyle = '#ff0000';
+            ctx.fillRect(x - 7, y - 17, 2, 2);
+            ctx.fillRect(x + 4, y - 17, 2, 2);
+            ctx.fillStyle = colors.gray;
+            ctx.fillRect(x - 10, y - 26, 2, 4);
+            ctx.fillRect(x - 2, y - 28, 2, 6);
+            ctx.fillRect(x + 8, y - 26, 2, 4);
+            ctx.fillStyle = colors.yellow;
+            ctx.fillRect(x - 11, y - 28, 4, 2);
+            ctx.fillRect(x - 3, y - 30, 4, 2);
+            ctx.fillRect(x + 7, y - 28, 4, 2);
+            ctx.fillStyle = colors.cyan;
+            ctx.fillRect(x - 18, y - 6, 4, 12);
+            ctx.fillRect(x + 14, y - 6, 4, 12);
+            ctx.fillStyle = colors.gray;
+            ctx.fillRect(x - 20, y + 6, 3, 4);
+            ctx.fillRect(x - 17, y + 6, 3, 4);
+            ctx.fillRect(x + 16, y + 6, 3, 4);
+            ctx.fillRect(x + 19, y + 6, 3, 4);
+            ctx.fillStyle = colors.cyan;
+            if (f === 0) {
+                ctx.fillRect(x - 12, y + 10, 8, 10);
+                ctx.fillRect(x + 4, y + 10, 8, 8);
+                ctx.fillStyle = colors.gray;
+                ctx.fillRect(x - 14, y + 20, 10, 3);
+                ctx.fillRect(x + 4, y + 18, 10, 3);
+            } else {
+                ctx.fillRect(x - 12, y + 10, 8, 8);
+                ctx.fillRect(x + 4, y + 10, 8, 10);
+                ctx.fillStyle = colors.gray;
+                ctx.fillRect(x - 14, y + 18, 10, 3);
+                ctx.fillRect(x + 4, y + 20, 10, 3);
+            }
+            ctx.strokeStyle = '#006666';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x - 14, y - 10, 28, 20);
+            ctx.strokeRect(x - 12, y - 22, 24, 12);
+        }
+        
+        function drawTile(tile) {
+            if (!tile.conquered) {
+                if (tile.terrain === 'forest') {
+                    ctx.fillStyle = '#228822';
+                    ctx.fillRect(tile.x, tile.y, 80, 80);
+                    ctx.fillStyle = '#116611';
+                    ctx.fillRect(tile.x, tile.y + 40, 80, 40);
+                    const trees = [[20, 25], [45, 30], [60, 20], [15, 50], [50, 55]];
+                    trees.forEach(([tx, ty]) => {
+                        ctx.fillStyle = colors.brown;
+                        ctx.fillRect(tile.x + tx, tile.y + ty + 8, 6, 12);
+                        ctx.fillStyle = '#339933';
+                        ctx.fillRect(tile.x + tx - 6, tile.y + ty, 18, 4);
+                        ctx.fillRect(tile.x + tx - 8, tile.y + ty + 4, 22, 8);
+                        ctx.fillRect(tile.x + tx - 6, tile.y + ty + 12, 18, 4);
+                        ctx.fillStyle = '#55bb55';
+                        ctx.fillRect(tile.x + tx - 2, tile.y + ty + 4, 6, 4);
+                    });
+                } else if (tile.terrain === 'lake') {
+                    ctx.fillStyle = '#2255aa';
+                    ctx.fillRect(tile.x, tile.y, 80, 80);
+                    ctx.fillStyle = '#3366bb';
+                    ctx.fillRect(tile.x, tile.y + 20, 80, 40);
+                    ctx.fillStyle = '#4477cc';
+                    ctx.fillRect(tile.x, tile.y + 50, 80, 30);
+                    const wave = Math.floor(frame / 10) % 4;
+                    ctx.fillStyle = '#5588dd';
+                    ctx.fillRect(tile.x + 15 + wave * 2, tile.y + 25, 12, 3);
+                    ctx.fillRect(tile.x + 45 - wave * 2, tile.y + 40, 15, 3);
+                    ctx.fillRect(tile.x + 20 + wave * 3, tile.y + 55, 20, 3);
+                    ctx.fillStyle = '#aa9944';
+                    ctx.fillRect(tile.x, tile.y + 70, 80, 10);
+                    ctx.fillStyle = '#88cc66';
+                    for (let i = 0; i < 8; i++) {
+                        ctx.fillRect(tile.x + i * 10, tile.y + 68, 4, 3);
+                    }
+                } else if (tile.terrain === 'meadow') {
+                    ctx.fillStyle = '#77aa44';
+                    ctx.fillRect(tile.x, tile.y, 80, 80);
+                    ctx.fillStyle = '#88bb55';
+                    ctx.fillRect(tile.x, tile.y + 30, 80, 50);
+                    ctx.fillStyle = '#66aa33';
+                    for (let i = 0; i < 12; i++) {
+                        const gx = (i * 13) % 70 + 5;
+                        const gy = 20 + (i * 7) % 50;
+                        ctx.fillRect(tile.x + gx, tile.y + gy, 3, 8);
+                        ctx.fillRect(tile.x + gx - 2, tile.y + gy + 3, 7, 3);
+                    }
+                    const flowers = [[15, 30, colors.yellow], [35, 25, '#ff66aa'], [55, 40, colors.yellow], [25, 55, '#ff66aa'], [60, 58, '#ffaa66']];
+                    flowers.forEach(([fx, fy, color]) => {
+                        ctx.fillStyle = '#66aa33';
+                        ctx.fillRect(tile.x + fx + 1, tile.y + fy + 3, 2, 5);
+                        ctx.fillStyle = color;
+                        ctx.fillRect(tile.x + fx, tile.y + fy, 4, 4);
+                    });
+                } else {
+                    ctx.fillStyle = '#886633';
+                    ctx.fillRect(tile.x, tile.y, 80, 80);
+                    for (let i = 0; i < 8; i++) {
+                        ctx.fillStyle = i % 2 === 0 ? '#aa8844' : '#997733';
+                        ctx.fillRect(tile.x, tile.y + i * 10, 80, 8);
+                    }
+                    ctx.fillStyle = '#88bb44';
+                    for (let i = 0; i < 8; i++) {
+                        for (let j = 0; j < 6; j++) {
+                            if ((i + j) % 2 === 0) {
+                                ctx.fillRect(tile.x + 8 + j * 12, tile.y + 3 + i * 10, 3, 5);
+                            }
+                        }
+                    }
+                }
+                
+                if (tile.hasAgriculture) {
+                    ctx.fillStyle = '#aa6633';
+                    ctx.fillRect(tile.x + 6, tile.y + 6, 20, 16);
+                    ctx.fillStyle = '#cc3333';
+                    ctx.fillRect(tile.x + 4, tile.y + 2, 24, 5);
+                    ctx.fillRect(tile.x + 6, tile.y + 0, 20, 3);
+                    ctx.fillStyle = colors.yellow;
+                    ctx.fillRect(tile.x + 10, tile.y + 10, 4, 4);
+                    ctx.fillRect(tile.x + 18, tile.y + 10, 4, 4);
+                    ctx.fillStyle = colors.brown;
+                    ctx.fillRect(tile.x + 14, tile.y + 15, 5, 7);
+                }
+            } else {
+                if (tile.conqueredBy === 'human') {
+                    ctx.fillStyle = '#666666';
+                    ctx.fillRect(tile.x, tile.y, 80, 80);
+                    ctx.fillStyle = '#888888';
+                    ctx.fillRect(tile.x + 10, tile.y + 20, 15, 25);
+                    ctx.fillRect(tile.x + 30, tile.y + 15, 20, 30);
+                    ctx.fillRect(tile.x + 55, tile.y + 25, 15, 20);
+                    ctx.fillStyle = colors.yellow;
+                    for (let i = 0; i < 3; i++) {
+                        ctx.fillRect(tile.x + 12, tile.y + 25 + i * 6, 3, 3);
+                        ctx.fillRect(tile.x + 18, tile.y + 25 + i * 6, 3, 3);
+                    }
+                    ctx.fillStyle = '#333333';
+                    ctx.fillRect(tile.x, tile.y + 50, 80, 10);
+                    ctx.fillStyle = colors.yellow;
+                    ctx.fillRect(tile.x + 5, tile.y + 54, 10, 2);
+                    ctx.fillRect(tile.x + 25, tile.y + 54, 10, 2);
+                    ctx.fillRect(tile.x + 45, tile.y + 54, 10, 2);
+                    ctx.fillRect(tile.x + 65, tile.y + 54, 10, 2);
+                } else {
+                    ctx.fillStyle = colors.darkRed;
+                    ctx.fillRect(tile.x, tile.y, 80, 80);
+                    ctx.fillStyle = colors.gray;
+                    ctx.fillRect(tile.x + 10, tile.y + 20, 15, 15);
+                    ctx.fillRect(tile.x + 55, tile.y + 45, 15, 15);
+                    ctx.fillRect(tile.x + 30, tile.y + 55, 20, 10);
+                    ctx.fillStyle = '#333333';
+                    ctx.fillRect(tile.x + 25, tile.y + 15, 30, 25);
+                    ctx.fillStyle = colors.red;
+                    ctx.fillRect(tile.x + 30, tile.y + 20, 8, 8);
+                    ctx.fillRect(tile.x + 42, tile.y + 20, 8, 8);
+                    ctx.fillStyle = '#333333';
+                    ctx.fillRect(tile.x + 32, tile.y + 5, 6, 10);
+                    ctx.fillRect(tile.x + 42, tile.y + 5, 6, 10);
+                    ctx.fillStyle = 'rgba(85, 85, 85, 0.5)';
+                    const smoke = Math.sin(frame / 10 + tile.x) * 3;
+                    ctx.fillRect(tile.x + 30 + smoke, tile.y, 10, 5);
+                    ctx.fillRect(tile.x + 40 + smoke, tile.y, 10, 5);
+                }
+            }
+            
+            if (!tile.conquered && tile.progress > 0) {
+                ctx.fillStyle = `rgba(170, 0, 0, ${tile.progress * 0.4})`;
+                ctx.fillRect(tile.x, tile.y, 80, 80);
+                ctx.fillStyle = colors.darkRed;
+                ctx.fillRect(tile.x + 10, tile.y + 70, 60, 6);
+                ctx.fillStyle = colors.red;
+                ctx.fillRect(tile.x + 10, tile.y + 70, 60 * tile.progress, 6);
+            }
+            
+            ctx.strokeStyle = tile.conquered ? (tile.conqueredBy === 'human' ? '#3366cc' : colors.darkRed) : colors.darkGreen;
+            ctx.lineWidth = 2;
+            ctx.strokeRect(tile.x, tile.y, 80, 80);
+        }
+        
+        function spawnWaste(x, y) {
+            for (let i = 0; i < 8; i++) {
+                waste.push({
+                    x: x + Math.random() * 80,
+                    y: y + Math.random() * 80,
+                    vx: (Math.random() - 0.5) * 3,
+                    vy: (Math.random() - 0.5) * 3 - 2,
+                    life: 30
+                });
+            }
+        }
+        
+        function animate() {
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            tiles.forEach(tile => drawTile(tile));
+            
+            waste.forEach((w, i) => {
+                w.x += w.vx;
+                w.y += w.vy;
+                w.vy += 0.2;
+                w.life--;
+                if (w.life > 0) {
+                    ctx.fillStyle = `rgba(85, 85, 85, ${w.life / 30})`;
+                    ctx.fillRect(w.x, w.y, 3, 3);
+                } else {
+                    waste.splice(i, 1);
+                }
+            });
+            
+            if (robotsActive) {
+                robots.forEach(robot => {
+                    if (!robot.targetTile || robot.targetTile.conqueredBy === 'robot') {
+                        let nearest = null;
+                        let minDist = Infinity;
+                        tiles.forEach(tile => {
+                            if (tile.conqueredBy !== 'robot') {
+                                const dist = Math.hypot(tile.x + 40 - robot.x, tile.y + 40 - robot.y);
+                                if (dist < minDist) {
+                                    minDist = dist;
+                                    nearest = tile;
+                                }
+                            }
+                        });
+                        robot.targetTile = nearest;
+                    }
+                    
+                    if (robot.targetTile && robot.targetTile.conqueredBy !== 'robot') {
+                        const tx = robot.targetTile.x + 40;
+                        const ty = robot.targetTile.y + 40;
+                        const dx = tx - robot.x;
+                        const dy = ty - robot.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        
+                        if (dist > 3) {
+                            robot.vx = (dx / dist) * 1.5;
+                            robot.vy = (dy / dist) * 1.5;
+                        } else {
+                            robot.vx = 0;
+                            robot.vy = 0;
+                            robot.targetTile.progress += 0.02;
+                            if (robot.targetTile.progress >= 1) {
+                                robot.targetTile.conquered = true;
+                                robot.targetTile.conqueredBy = 'robot';
+                                robot.targetTile.progress = 0;
+                                spawnWaste(robot.targetTile.x, robot.targetTile.y);
+                                
+                                const rc = tiles.filter(t => t.conqueredBy === 'robot').length;
+                                const hc = tiles.filter(t => t.conqueredBy === 'human').length;
+                                const nc = tiles.filter(t => !t.conquered).length;
+                                robotDestruction = (rc / tiles.length) * 100;
+                                humanDestruction = (hc / tiles.length) * 100;
+                                humanProduction = (nc / tiles.length) * 100;
+                                
+                                robot.targetTile = null;
+                            }
+                        }
+                    }
+                    
+                    robot.x += robot.vx;
+                    robot.y += robot.vy;
+                    robot.x = Math.max(20, Math.min(620, robot.x));
+                    robot.y = Math.max(20, Math.min(460, robot.y));
+                    
+                    drawMULERobot(robot.x, robot.y);
+                });
+            }
+            
+            humans.forEach(human => {
+                if (!human.targetTile || human.targetTile.conquered) {
+                    let nearest = null;
+                    let minDist = Infinity;
+                    tiles.forEach(tile => {
+                        if (!tile.conquered) {
+                            const dist = Math.hypot(tile.x + 40 - human.x, tile.y + 40 - human.y);
+                            if (dist < minDist) {
+                                minDist = dist;
+                                nearest = tile;
+                            }
+                        }
+                    });
+                    human.targetTile = nearest;
+                }
+                
+                if (human.targetTile && !human.targetTile.conquered) {
+                    const tx = human.targetTile.x + 40;
+                    const ty = human.targetTile.y + 40;
+                    const dx = tx - human.x;
+                    const dy = ty - human.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (dist > 3) {
+                        human.vx = (dx / dist) * 1.0;
+                        human.vy = (dy / dist) * 1.0;
+                    } else {
+                        human.vx = 0;
+                        human.vy = 0;
+                        human.targetTile.progress += 0.012;
+                        if (human.targetTile.progress >= 1) {
+                            human.targetTile.conquered = true;
+                            human.targetTile.conqueredBy = 'human';
+                            human.targetTile.progress = 0;
+                            spawnWaste(human.targetTile.x, human.targetTile.y);
+                            
+                            conquestCount++;
+                            if (conquestCount >= 5 && !robotsActive) {
+                                robotsActive = true;
+                            }
+                            
+                            const rc = tiles.filter(t => t.conqueredBy === 'robot').length;
+                            const hc = tiles.filter(t => t.conqueredBy === 'human').length;
+                            const nc = tiles.filter(t => !t.conquered).length;
+                            robotDestruction = (rc / tiles.length) * 100;
+                            humanDestruction = (hc / tiles.length) * 100;
+                            humanProduction = (nc / tiles.length) * 100;
+                            
+                            human.targetTile = null;
+                        }
+                    }
+                }
+                
+                human.x += human.vx;
+                human.y += human.vy;
+                human.x = Math.max(20, Math.min(620, human.x));
+                human.y = Math.max(20, Math.min(460, human.y));
+                
+                drawMULEHuman(human.x, human.y);
+            });
+            
+            const conquered = tiles.filter(t => t.conquered).length;
+            const total = tiles.length;
+            const barWidth = 200;
+            const barHeight = 20;
+            const barX = 420;
+            
+            ctx.fillStyle = colors.green;
+            ctx.font = 'bold 12px monospace';
+            ctx.fillText('NATURE', barX, 30);
+            ctx.fillStyle = colors.darkGreen;
+            ctx.fillRect(barX, 35, barWidth, barHeight);
+            ctx.fillStyle = colors.green;
+            ctx.fillRect(barX, 35, barWidth * (humanProduction / 100), barHeight);
+            ctx.strokeStyle = colors.yellow;
+            ctx.lineWidth = 2;
+            ctx.strokeRect(barX, 35, barWidth, barHeight);
+            ctx.fillStyle = colors.yellow;
+            ctx.fillText(Math.floor(humanProduction) + '%', barX + barWidth + 10, 50);
+            
+            ctx.fillStyle = '#3366cc';
+            ctx.fillText('HUMAN DESTRUCTION', barX, 80);
+            ctx.fillStyle = '#1a1a33';
+            ctx.fillRect(barX, 85, barWidth, barHeight);
+            ctx.fillStyle = '#3366cc';
+            ctx.fillRect(barX, 85, barWidth * (humanDestruction / 100), barHeight);
+            ctx.strokeStyle = colors.yellow;
+            ctx.lineWidth = 2;
+            ctx.strokeRect(barX, 85, barWidth, barHeight);
+            ctx.fillStyle = colors.yellow;
+            ctx.fillText(Math.floor(humanDestruction) + '%', barX + barWidth + 10, 100);
+            
+            ctx.fillStyle = colors.cyan;
+            ctx.fillText('ROBOT DESTRUCTION', barX, 130);
+            ctx.fillStyle = '#003333';
+            ctx.fillRect(barX, 135, barWidth, barHeight);
+            ctx.fillStyle = colors.cyan;
+            ctx.fillRect(barX, 135, barWidth * (robotDestruction / 100), barHeight);
+            ctx.strokeStyle = colors.yellow;
+            ctx.lineWidth = 2;
+            ctx.strokeRect(barX, 135, barWidth, barHeight);
+            ctx.fillStyle = colors.yellow;
+            ctx.fillText(Math.floor(robotDestruction) + '%', barX + barWidth + 10, 150);
+            
+            ctx.fillStyle = colors.yellow;
+            ctx.font = 'bold 14px monospace';
+            ctx.fillText('PLANET CONQUEST', 10, 20);
+            ctx.fillStyle = colors.cyan;
+            ctx.fillText(`TILES: ${conquered}/${total}`, 10, 40);
+            
+            const allRobot = tiles.every(t => t.conqueredBy === 'robot');
+            if (allRobot) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = colors.red;
+                ctx.font = 'bold 24px monospace';
+                const text1 = 'ROBOTS WIN';
+                const text2 = 'PLANET DESTROYED';
+                ctx.fillText(text1, (canvas.width - ctx.measureText(text1).width) / 2, 220);
+                ctx.fillText(text2, (canvas.width - ctx.measureText(text2).width) / 2, 260);
+            }
+            
+            frame++;
+            requestAnimationFrame(animate);
+        }
+        
+        animate();
+    </script>
+</body>
+</html>

@@ -1,0 +1,1060 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Saturday Night Digital Fever</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      background: #000;
+      overflow: hidden;
+    }
+    canvas {
+      border: 2px solid #333;
+      max-width: 100%;
+      max-height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <script>
+    const realCanvas = document.getElementById('canvas');
+    const ctx = realCanvas.getContext('2d');
+    
+    // Wrapper exposing logical (CSS) width/height. All drawing code uses this.
+    const canvas = {
+      _real: realCanvas,
+      get width() { return parseFloat(realCanvas.style.width) || realCanvas.width; },
+      get height() { return parseFloat(realCanvas.style.height) || realCanvas.height; },
+      get style() { return realCanvas.style; },
+    };
+    
+    function resize() {
+      const size = Math.min(window.innerWidth, window.innerHeight);
+      const dpr = window.devicePixelRatio || 1;
+      realCanvas.width = size * dpr;
+      realCanvas.height = size * dpr;
+      realCanvas.style.width = size + 'px';
+      realCanvas.style.height = size + 'px';
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    resize();
+    window.addEventListener('resize', resize);
+    
+    // ========================================
+    //  DANCE FLOOR (user's original code)
+    // ========================================
+    const dotCount = 8;
+    const lineCount = 14;
+    const startTime = Date.now();
+    const introDuration = 3.2;
+    
+    function getQuadCoords(row, col, spacing, centerY, layerOffset) {
+      const z0 = row / lineCount;
+      const z1 = (row + 1) / lineCount;
+      
+      const scale0Front = 0.5;
+      const scale0Back = 0.5 + ((lineCount - 1) / lineCount) * 0.5;
+      const y0Front = centerY + (0 - lineCount / 2) * (canvas.height / lineCount) * 0.6 * scale0Front - layerOffset;
+      const y0Back = centerY + ((lineCount - 1) - lineCount / 2) * (canvas.height / lineCount) * 0.6 * scale0Back - layerOffset;
+      
+      const scaleRow0 = 0.5 + z0 * 0.5;
+      const scaleRow1 = 0.5 + z1 * 0.5;
+      const y0 = centerY + (row - lineCount / 2) * (canvas.height / lineCount) * 0.6 * scaleRow0 - layerOffset;
+      const y1 = centerY + ((row + 1) - lineCount / 2) * (canvas.height / lineCount) * 0.6 * scaleRow1 - layerOffset;
+      
+      const t0 = (y0 - y0Front) / (y0Back - y0Front);
+      const t1 = (y1 - y0Front) / (y0Back - y0Front);
+      
+      // Wider spacing: tiles span full width at front
+      const widthMult = 2.2;
+      const totalWidth = spacing * dotCount * widthMult;
+      const startX = (canvas.width - totalWidth) / 2;
+      const baseXLeft = startX + col * (totalWidth / dotCount);
+      const baseXRight = startX + (col + 1) * (totalWidth / dotCount);
+      
+      const x0Left = canvas.width / 2 + (baseXLeft - canvas.width / 2) * scale0Front;
+      const x1Left = canvas.width / 2 + (baseXLeft - canvas.width / 2) * scale0Back;
+      const x0Right = canvas.width / 2 + (baseXRight - canvas.width / 2) * scale0Front;
+      const x1Right = canvas.width / 2 + (baseXRight - canvas.width / 2) * scale0Back;
+      
+      return {
+        topLeft: x0Left + t0 * (x1Left - x0Left),
+        topRight: x0Right + t0 * (x1Right - x0Right),
+        bottomLeft: x0Left + t1 * (x1Left - x0Left),
+        bottomRight: x0Right + t1 * (x1Right - x0Right),
+        y0, y1
+      };
+    }
+    
+    function drawDanceFloor() {
+      const spacing = canvas.width / (dotCount + 1);
+      const centerY = canvas.height / 2;
+      
+      const animTime = Date.now() * 0.001 - startTime * 0.001;
+      const cycleHue = 220 + Math.sin(animTime * 0.2) * 30;
+      
+      // Dark base
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      // Radial disco light: rotating colored rays from top center with animated segments
+      const lightX = canvas.width / 2;
+      const lightY = canvas.height * 0.2;
+      const numRays = 16;
+      const rayLen = canvas.width * 1.4;
+      
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      
+      for (let i = 0; i < numRays; i++) {
+        const baseAngle = (i / numRays) * Math.PI * 2 + animTime * 0.25;
+        const hue = (i * (360 / numRays) + animTime * 35) % 360;
+        // Each ray has a width that pulses
+        const widthPulse = 0.10 + Math.sin(animTime * 3 + i * 0.7) * 0.06;
+        
+        // Draw ray as a series of animated segments rather than one solid beam
+        const segCount = 8;
+        for (let s = 0; s < segCount; s++) {
+          // Segment positions move outward over time
+          const segPhase = ((s / segCount) + animTime * 0.3) % 1;
+          // Skip segments to create gaps (some segments invisible)
+          const visible = Math.sin(animTime * 4 + i * 1.7 + s * 2.3) > -0.3;
+          if (!visible) continue;
+          
+          const r0 = segPhase * rayLen;
+          const r1 = (segPhase + 0.08) * rayLen;
+          if (r1 > rayLen) continue;
+          
+          // Fade segments based on their distance and a brightness wobble
+          const distFade = 1 - (r0 / rayLen);
+          const flicker = 0.5 + Math.sin(animTime * 5 + i + s) * 0.5;
+          const alpha = distFade * flicker * 0.5;
+          
+          const a0 = baseAngle - widthPulse;
+          const a1 = baseAngle + widthPulse;
+          
+          ctx.fillStyle = `hsla(${hue}, 100%, 60%, ${alpha})`;
+          ctx.beginPath();
+          ctx.moveTo(lightX + Math.cos(a0) * r0, lightY + Math.sin(a0) * r0);
+          ctx.lineTo(lightX + Math.cos(a1) * r0, lightY + Math.sin(a1) * r0);
+          ctx.lineTo(lightX + Math.cos(a1) * r1, lightY + Math.sin(a1) * r1);
+          ctx.lineTo(lightX + Math.cos(a0) * r1, lightY + Math.sin(a0) * r1);
+          ctx.closePath();
+          ctx.fill();
+        }
+        
+        // Faint base beam underneath the segments for cohesion
+        const beamGrad = ctx.createLinearGradient(
+          lightX, lightY,
+          lightX + Math.cos(baseAngle) * rayLen,
+          lightY + Math.sin(baseAngle) * rayLen
+        );
+        beamGrad.addColorStop(0, `hsla(${hue}, 100%, 60%, 0.25)`);
+        beamGrad.addColorStop(1, `hsla(${hue}, 100%, 60%, 0)`);
+        ctx.fillStyle = beamGrad;
+        ctx.beginPath();
+        ctx.moveTo(lightX, lightY);
+        ctx.lineTo(lightX + Math.cos(baseAngle - widthPulse * 0.5) * rayLen, lightY + Math.sin(baseAngle - widthPulse * 0.5) * rayLen);
+        ctx.lineTo(lightX + Math.cos(baseAngle + widthPulse * 0.5) * rayLen, lightY + Math.sin(baseAngle + widthPulse * 0.5) * rayLen);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.restore();
+      
+      // ---- EQUALIZER bars at the back wall of the dance floor ----
+      const eqSpacing = canvas.width / (dotCount + 1);
+      const eqCenterY = canvas.height / 2;
+      const eqBaseLayerOffset = -canvas.height * 0.35;
+      const eqLayerFloat = Math.sin(animTime * 1.2) * canvas.height * 0.04;
+      const eqLayerOffset = eqBaseLayerOffset + eqLayerFloat;
+      const eqTopRow = getQuadCoords(0, dotCount / 2, eqSpacing, eqCenterY, eqLayerOffset);
+      const eqBaseY = eqTopRow.y0;
+      
+      const eqWidth = canvas.width;
+      const eqStartX = 0;
+      const eqBarW = (eqWidth / eqBars) * 0.7;
+      const eqGap = (eqWidth / eqBars) * 0.3;
+      const eqMaxH = canvas.height * 0.45;
+      const eqDrawBottomY = eqBaseY + canvas.height * 0.08;
+      
+      // Update EQ simulation (attack-decay model)
+      const dt = Math.min(0.05, animTime - lastEqUpdateTime);
+      lastEqUpdateTime = animTime;
+      
+      for (let i = 0; i < eqBars; i++) {
+        const bar = eqState[i];
+        // Bass bias: low-index bars hit more often and harder
+        const bassBias = Math.exp(-i / eqBars * 3);
+        
+        // Trigger a new "hit" at random intervals
+        bar.nextHit -= dt;
+        if (bar.nextHit <= 0) {
+          // New random target — biased toward bass bars
+          bar.target = (0.3 + Math.random() * 0.7) * (0.4 + bassBias * 0.6);
+          // Bass hits more frequently
+          bar.nextHit = 0.05 + Math.random() * (0.4 - bassBias * 0.3);
+        }
+        
+        // Attack: fast jump to target (~10ms)
+        if (bar.height < bar.target) {
+          bar.height += (bar.target - bar.height) * Math.min(1, dt * 30);
+        } else {
+          // Decay: slow exponential fall
+          bar.height *= Math.pow(0.5, dt * 3);
+          bar.target = bar.height; // reset target so next hit can rise again
+        }
+        
+        // Peak hold marker
+        if (bar.height > bar.peak) {
+          bar.peak = bar.height;
+          bar.peakVel = 0;
+        } else {
+          bar.peakVel += dt * 0.8; // gravity
+          bar.peak = Math.max(bar.height, bar.peak - bar.peakVel * dt);
+        }
+      }
+      
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      
+      for (let i = 0; i < eqBars; i++) {
+        const bar = eqState[i];
+        const barH = bar.height * eqMaxH;
+        const peakY = eqBaseY - bar.peak * eqMaxH;
+        
+        const barX = eqStartX + i * (eqBarW + eqGap);
+        const barY = eqBaseY - barH;
+        
+        const hue = (i * 9 + animTime * 25) % 360;
+        const grad = ctx.createLinearGradient(0, barY, 0, eqDrawBottomY);
+        grad.addColorStop(0, `hsla(${hue}, 90%, 50%, 0.75)`);
+        grad.addColorStop(0.5, `hsla(${hue + 30}, 85%, 38%, 0.5)`);
+        grad.addColorStop(1, `hsla(${hue + 60}, 80%, 25%, 0.15)`);
+        ctx.fillStyle = grad;
+        ctx.fillRect(barX, barY, eqBarW, eqDrawBottomY - barY);
+        
+        // Peak hold marker (a thin floating line above the bar)
+        if (bar.peak > bar.height + 0.02) {
+          ctx.fillStyle = `hsla(${hue}, 100%, 90%, 0.95)`;
+          ctx.fillRect(barX, peakY - 2, eqBarW, 3);
+        }
+        
+        // Bar top cap glow
+        const capGlow = ctx.createRadialGradient(barX + eqBarW / 2, barY, 0, barX + eqBarW / 2, barY, eqBarW * 1.5);
+        capGlow.addColorStop(0, `hsla(${hue}, 100%, 75%, 0.5)`);
+        capGlow.addColorStop(1, `hsla(${hue}, 100%, 75%, 0)`);
+        ctx.fillStyle = capGlow;
+        ctx.beginPath();
+        ctx.arc(barX + eqBarW / 2, barY, eqBarW * 1.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      
+      ctx.restore();
+      
+      // Central radial glow
+      const gradient = ctx.createRadialGradient(
+        lightX, lightY, 0,
+        lightX, lightY, canvas.width * 0.5
+      );
+      gradient.addColorStop(0, `hsla(${cycleHue}, 80%, 60%, 0.4)`);
+      gradient.addColorStop(0.5, `hsla(${cycleHue}, 60%, 30%, 0.2)`);
+      gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      const explosionScale = 1 + Math.sin(animTime * 0.3) * 0.5;
+      const breathingScale = 1 + Math.sin(animTime * 0.5) * 0.3;
+      const burstScale = 1 + Math.sin(animTime * 0.8) * 0.4;
+      
+      // Update music simulation once per frame
+      updateMusic(animTime);
+      
+      for (let layer = 0; layer < 1; layer++) {
+        const baseLayerOffset = -canvas.height * 0.35;
+        const layerFloat = Math.sin(animTime * 1.2 + layer * 2.1) * canvas.height * 0.04;
+        const layerOffset = baseLayerOffset + layerFloat;
+        
+        const layerDarken = 1;
+        const layerAlpha = 1;
+        
+        for (let row = 0; row < lineCount - 1; row++) {
+          for (let col = 0; col < dotCount; col++) {
+            const colLift = Math.sin(animTime * 1.8 + col * 0.6 + layer * 1.3) * canvas.height * 0.02;
+            
+            const dx = col - dotCount / 2 + 0.5;
+            const dy = row - lineCount / 2 + 0.5;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const angle = Math.atan2(dy, dx);
+            
+            // Music-reactive brightness: kick drum pulse from center outward
+            const kickWave = Math.max(0, 1 - Math.abs(dist - musicState.kick * 8) * 0.5) * musicState.kick;
+            // Subtle ambient brightness
+            const ambient = 0.3 + Math.sin(animTime * 0.5 + dist * 0.3) * 0.15;
+            // Snare adds shimmer to outer tiles
+            const snareShimmer = musicState.snare * (dist / 6) * 0.4;
+            
+            let brightness = ambient + kickWave * 0.6 + snareShimmer;
+            let tileHue = musicState.floorHue + angle * 30 / Math.PI + dist * 8;
+            
+            // Random tile flashes from snare hits
+            for (const f of musicState.flashes) {
+              if (f.col === col && f.row === row) {
+                const fade = f.time / 0.7;
+                brightness += fade * 1.2;
+                tileHue = f.hue;
+              }
+            }
+            
+            brightness = Math.max(0, Math.min(1, brightness));
+            tileHue = (tileHue + 360) % 360;
+            
+            const rowAlpha = layerAlpha;
+            const coords = getQuadCoords(row, col, spacing, centerY, layerOffset);
+            
+            const displayHue = tileHue;
+            const displaySat = 90;
+            const baseLightness = 15 + brightness * 55;
+            const displayLightness = baseLightness * layerDarken;
+            
+            const tcx = (coords.topLeft + coords.topRight + coords.bottomLeft + coords.bottomRight) / 4;
+            const tcy = (coords.y0 + coords.y0 + coords.y1 + coords.y1) / 4 + colLift;
+            const tileW = Math.abs(coords.topRight - coords.topLeft);
+            const tileH = Math.abs(coords.y1 - coords.y0);
+            const tileRad = Math.max(tileW, tileH) * 0.8;
+            
+            const tileGrad = ctx.createRadialGradient(tcx, tcy, 0, tcx, tcy, tileRad);
+            tileGrad.addColorStop(0, `hsla(${displayHue}, ${displaySat}%, ${Math.min(90, displayLightness + 12)}%, ${rowAlpha})`);
+            tileGrad.addColorStop(1, `hsla(${displayHue}, ${displaySat}%, ${Math.max(4, displayLightness - 5)}%, ${rowAlpha})`);
+            ctx.fillStyle = tileGrad;
+            
+            ctx.beginPath();
+            ctx.moveTo(coords.topLeft, coords.y0 + colLift);
+            ctx.lineTo(coords.topRight, coords.y0 + colLift);
+            ctx.lineTo(coords.bottomRight, coords.y1 + colLift);
+            ctx.lineTo(coords.bottomLeft, coords.y1 + colLift);
+            ctx.closePath();
+            ctx.fill();
+            
+            // Tile border (dark edge)
+            ctx.strokeStyle = 'rgba(0, 0, 0, 0.25)';
+            ctx.lineWidth = 1;
+            ctx.lineJoin = 'round';
+            ctx.stroke();
+          }
+        }
+      }
+    }
+    
+    // ========================================
+    //  ROBOT SILHOUETTE (for trails)
+    // ========================================
+    function drawRobotShape(cx, cy, s, color, alpha, t, rotation = 0) {
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = color;
+      ctx.strokeStyle = color;
+      
+      // Apply rotation around the robot center
+      if (rotation !== 0) {
+        ctx.translate(cx, cy);
+        ctx.rotate(rotation);
+        ctx.translate(-cx, -cy);
+      }
+      
+      const beat = Math.sin(t * 8);
+      const hipSway = beat * 15 * s;
+      const bounce = Math.abs(beat) * 8 * s;
+      const bodyTilt = beat * 0.08;
+      
+      const leftBeat = (Math.sin(t * 6) + 1) / 2;
+      
+      const rightElbowX = cx + 70 * s;
+      const rightElbowY = cy + 65 * s;
+      const rightHandX = rightElbowX - 5 * s;
+      const rightHandY = rightElbowY + 75 * s;
+      
+      const leftAngle = (2 * Math.PI / 3) * (1 - leftBeat) + (-Math.PI / 2) * leftBeat;
+      const leftElbowX = cx - 60 * s + Math.cos(Math.PI - leftAngle) * 75 * s;
+      const leftElbowY = cy + Math.sin(Math.PI - leftAngle) * 75 * s;
+      const leftForearmAngle = (Math.PI / 2.5) * (1 - leftBeat) + (-Math.PI / 2) * leftBeat;
+      const leftHandX = leftElbowX + Math.cos(leftForearmAngle) * 80 * s;
+      const leftHandY = leftElbowY + Math.sin(leftForearmAngle) * 80 * s;
+      
+      const py = cy + 210 * s - bounce;
+      const kneeY = cy + 50 * s + (py - (cy + 50 * s)) / 2;
+      
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      
+      ctx.lineWidth = 24 * s;
+      ctx.beginPath();
+      ctx.moveTo(cx - 25 * s + hipSway, cy + 50 * s);
+      ctx.lineTo(cx - 32 * s + hipSway * 0.3, kneeY);
+      ctx.moveTo(cx + 25 * s + hipSway, cy + 50 * s);
+      ctx.lineTo(cx + 32 * s + hipSway * 0.3, kneeY);
+      ctx.stroke();
+      
+      ctx.beginPath();
+      ctx.moveTo(cx - 32 * s + hipSway * 0.3 - 12 * s, kneeY);
+      ctx.lineTo(cx - 32 * s + hipSway * 0.3 + 12 * s, kneeY);
+      ctx.lineTo(cx - 14 * s, py);
+      ctx.lineTo(cx - 66 * s, py);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(cx + 32 * s + hipSway * 0.3 - 12 * s, kneeY);
+      ctx.lineTo(cx + 32 * s + hipSway * 0.3 + 12 * s, kneeY);
+      ctx.lineTo(cx + 66 * s, py);
+      ctx.lineTo(cx + 14 * s, py);
+      ctx.closePath();
+      ctx.fill();
+      
+      ctx.lineWidth = 28 * s;
+      ctx.beginPath();
+      ctx.moveTo(cx - 60 * s, cy);
+      ctx.lineTo(leftElbowX, leftElbowY);
+      ctx.lineTo(leftHandX, leftHandY);
+      ctx.moveTo(cx + 60 * s, cy);
+      ctx.lineTo(rightElbowX, rightElbowY);
+      ctx.lineTo(rightHandX, rightHandY);
+      ctx.stroke();
+      
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(bodyTilt);
+      ctx.fillRect(-60 * s, -40 * s, 120 * s, 90 * s);
+      ctx.restore();
+      
+      ctx.fillRect(cx - 25 * s, cy - 50 * s, 50 * s, 20 * s);
+      ctx.fillRect(cx - 50 * s, cy - 130 * s, 100 * s, 80 * s);
+      
+      ctx.lineWidth = 6 * s;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - 128 * s);
+      ctx.lineTo(cx, cy - 170 * s);
+      ctx.stroke();
+      
+      ctx.restore();
+    }
+    
+    // ========================================
+    //  DETAILED ROBOT
+    // ========================================
+    function drawDetailedRobot(cx, cy, s, t) {
+      const beat = Math.sin(t * 8);
+      const hipSway = beat * 15 * s;
+      const bounce = Math.abs(beat) * 8 * s;
+      const bodyTilt = beat * 0.08;
+      
+      const leftBeat = (Math.sin(t * 6) + 1) / 2;
+      const leftArmUp = leftBeat > 0.5;
+      
+      const rightShoulderX = cx + 60 * s;
+      const rightElbowX = rightShoulderX + 10 * s + Math.sin(t * 4) * 3 * s;
+      const rightElbowY = cy + 65 * s;
+      const rightHandX = rightElbowX - 5 * s + Math.sin(t * 4) * 2 * s;
+      const rightHandY = rightElbowY + 75 * s;
+      
+      const leftAngle = (2 * Math.PI / 3) * (1 - leftBeat) + (-Math.PI / 2) * leftBeat;
+      const leftElbowX = cx - 60 * s + Math.cos(Math.PI - leftAngle) * 75 * s;
+      const leftElbowY = cy + Math.sin(Math.PI - leftAngle) * 75 * s;
+      const leftForearmAngle = (Math.PI / 2.5) * (1 - leftBeat) + (-Math.PI / 2) * leftBeat;
+      const leftHandX = leftElbowX + Math.cos(leftForearmAngle) * 80 * s;
+      const leftHandY = leftElbowY + Math.sin(leftForearmAngle) * 80 * s;
+      
+      const py = cy + 210 * s - bounce;
+      const kneeY = cy + 50 * s + (py - (cy + 50 * s)) / 2;
+      const leftKneeX = cx - 32 * s + hipSway * 0.3;
+      const rightKneeX = cx + 32 * s + hipSway * 0.3;
+      
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      
+      // Thighs - white pants
+      ctx.strokeStyle = '#e8e8e8';
+      ctx.lineWidth = 24 * s;
+      ctx.beginPath();
+      ctx.moveTo(cx - 25 * s + hipSway, cy + 50 * s);
+      ctx.lineTo(leftKneeX, kneeY);
+      ctx.moveTo(cx + 25 * s + hipSway, cy + 50 * s);
+      ctx.lineTo(rightKneeX, kneeY);
+      ctx.stroke();
+      
+      // Bell-bottoms - white
+      const flareGrad = ctx.createLinearGradient(0, kneeY, 0, py);
+      flareGrad.addColorStop(0, '#e8e8e8');
+      flareGrad.addColorStop(1, '#ffffff');
+      ctx.fillStyle = flareGrad;
+      ctx.beginPath();
+      ctx.moveTo(leftKneeX - 12 * s, kneeY);
+      ctx.lineTo(leftKneeX + 12 * s, kneeY);
+      ctx.lineTo(cx - 14 * s, py);
+      ctx.lineTo(cx - 66 * s, py);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(rightKneeX - 12 * s, kneeY);
+      ctx.lineTo(rightKneeX + 12 * s, kneeY);
+      ctx.lineTo(cx + 66 * s, py);
+      ctx.lineTo(cx + 14 * s, py);
+      ctx.closePath();
+      ctx.fill();
+      
+      // Shoes
+      ctx.fillStyle = '#1a0a2a';
+      ctx.fillRect(cx - 68 * s, py - 5 * s, 56 * s, 28 * s);
+      ctx.fillRect(cx + 12 * s, py - 5 * s, 56 * s, 28 * s);
+      ctx.fillStyle = '#ffcc00';
+      ctx.fillRect(cx - 68 * s, py - 5 * s, 56 * s, 4 * s);
+      ctx.fillRect(cx + 12 * s, py - 5 * s, 56 * s, 4 * s);
+      
+      // Shirt - white satin
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(bodyTilt);
+      const shirtGrad = ctx.createLinearGradient(-60 * s, 0, 60 * s, 0);
+      shirtGrad.addColorStop(0, '#e0e0e0');
+      shirtGrad.addColorStop(0.5, '#ffffff');
+      shirtGrad.addColorStop(1, '#e0e0e0');
+      ctx.fillStyle = shirtGrad;
+      ctx.beginPath();
+      ctx.moveTo(-60 * s, -20 * s);
+      ctx.arcTo(-60 * s, -40 * s, -40 * s, -40 * s, 15 * s);
+      ctx.lineTo(40 * s, -40 * s);
+      ctx.arcTo(60 * s, -40 * s, 60 * s, -20 * s, 15 * s);
+      ctx.lineTo(60 * s, 30 * s);
+      ctx.arcTo(60 * s, 50 * s, 40 * s, 50 * s, 15 * s);
+      ctx.lineTo(-40 * s, 50 * s);
+      ctx.arcTo(-60 * s, 50 * s, -60 * s, 30 * s, 15 * s);
+      ctx.closePath();
+      ctx.fill();
+      
+      ctx.fillStyle = '#0a0a0a';
+      ctx.beginPath();
+      ctx.moveTo(-18 * s, -40 * s);
+      ctx.lineTo(18 * s, -40 * s);
+      ctx.lineTo(0, 5 * s);
+      ctx.closePath();
+      ctx.fill();
+      
+      ctx.fillStyle = '#b0b0b0';
+      ctx.beginPath();
+      ctx.moveTo(-30 * s, -40 * s);
+      ctx.lineTo(-18 * s, -40 * s);
+      ctx.lineTo(-2 * s, 0);
+      ctx.lineTo(-25 * s, -5 * s);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(30 * s, -40 * s);
+      ctx.lineTo(18 * s, -40 * s);
+      ctx.lineTo(2 * s, 0);
+      ctx.lineTo(25 * s, -5 * s);
+      ctx.closePath();
+      ctx.fill();
+      
+      ctx.strokeStyle = '#ffd700';
+      ctx.lineWidth = 2 * s;
+      ctx.beginPath();
+      ctx.arc(0, 0, 15 * s, Math.PI * 0.3, Math.PI * 0.7);
+      ctx.stroke();
+      ctx.restore();
+      
+      // Sleeves - white
+      const armGrad = ctx.createLinearGradient(cx - 60 * s, cy, cx - 130 * s, cy - 70 * s);
+      armGrad.addColorStop(0, '#e0e0e0');
+      armGrad.addColorStop(1, '#ffffff');
+      ctx.strokeStyle = armGrad;
+      ctx.lineWidth = 32 * s;
+      ctx.beginPath();
+      ctx.moveTo(cx - 60 * s, cy);
+      ctx.lineTo(leftElbowX, leftElbowY);
+      ctx.stroke();
+      ctx.lineWidth = 24 * s;
+      ctx.beginPath();
+      ctx.moveTo(leftElbowX, leftElbowY);
+      ctx.lineTo(leftHandX, leftHandY);
+      ctx.stroke();
+      ctx.lineWidth = 32 * s;
+      ctx.beginPath();
+      ctx.moveTo(cx + 60 * s, cy);
+      ctx.lineTo(rightElbowX, rightElbowY);
+      ctx.stroke();
+      ctx.lineWidth = 24 * s;
+      ctx.beginPath();
+      ctx.moveTo(rightElbowX, rightElbowY);
+      ctx.lineTo(rightHandX, rightHandY);
+      ctx.stroke();
+      
+      // Joints
+      const drawJoint = (x, y) => {
+        ctx.fillStyle = '#5a5a5a';
+        ctx.beginPath();
+        ctx.arc(x, y, 14 * s, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#2a2a2a';
+        ctx.lineWidth = 2 * s;
+        ctx.stroke();
+        ctx.fillStyle = '#3a3a3a';
+        ctx.beginPath();
+        ctx.arc(x, y, 5 * s, 0, Math.PI * 2);
+        ctx.fill();
+      };
+      drawJoint(leftElbowX, leftElbowY);
+      drawJoint(rightElbowX, rightElbowY);
+      
+      // Hands
+      const handGrad = (x, y) => {
+        const g = ctx.createRadialGradient(x - 5 * s, y - 5 * s, 0, x, y, 18 * s);
+        g.addColorStop(0, '#5a5a5a');
+        g.addColorStop(0.6, '#3a3a3a');
+        g.addColorStop(1, '#1a1a1a');
+        return g;
+      };
+      ctx.fillStyle = handGrad(leftHandX, leftHandY);
+      ctx.beginPath();
+      ctx.arc(leftHandX, leftHandY, 18 * s, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = handGrad(rightHandX, rightHandY);
+      ctx.beginPath();
+      ctx.arc(rightHandX, rightHandY, 18 * s, 0, Math.PI * 2);
+      ctx.fill();
+      
+      if (leftArmUp) {
+        ctx.strokeStyle = '#3a3a3a';
+        ctx.lineWidth = 8 * s;
+        ctx.beginPath();
+        ctx.moveTo(leftHandX, leftHandY - 10 * s);
+        ctx.lineTo(leftHandX, leftHandY - 35 * s);
+        ctx.stroke();
+        ctx.fillStyle = '#4a4a4a';
+        ctx.beginPath();
+        ctx.arc(leftHandX, leftHandY - 37 * s, 4 * s, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      
+      // Neck
+      ctx.fillStyle = '#5a5a5a';
+      ctx.fillRect(cx - 25 * s, cy - 50 * s, 50 * s, 20 * s);
+      
+      // Head
+      const headGrad = ctx.createLinearGradient(cx - 50 * s, cy - 130 * s, cx + 50 * s, cy - 50 * s);
+      headGrad.addColorStop(0, '#6a6a6a');
+      headGrad.addColorStop(0.5, '#5a5a5a');
+      headGrad.addColorStop(1, '#4a4a4a');
+      ctx.fillStyle = headGrad;
+      ctx.beginPath();
+      ctx.moveTo(cx - 50 * s, cy - 110 * s);
+      ctx.lineTo(cx - 50 * s, cy - 50 * s);
+      ctx.lineTo(cx + 50 * s, cy - 50 * s);
+      ctx.lineTo(cx + 50 * s, cy - 110 * s);
+      ctx.arcTo(cx + 50 * s, cy - 130 * s, cx, cy - 130 * s, 20 * s);
+      ctx.lineTo(cx, cy - 130 * s);
+      ctx.arcTo(cx - 50 * s, cy - 130 * s, cx - 50 * s, cy - 110 * s, 20 * s);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = '#1a1a1a';
+      ctx.lineWidth = 3 * s;
+      ctx.stroke();
+      
+      // Antenna - vibrates with the beat (multi-frequency oscillation)
+      const antennaBase = { x: cx, y: cy - 128 * s };
+      // Combine fast beat-driven wobble with a slower sway
+      const antennaShakeX = (
+        Math.sin(t * 22) * 4 +
+        Math.sin(t * 35 + 1.3) * 2.5 +
+        Math.sin(t * 8) * 3
+      ) * s;
+      // Vertical pumping: stretches up/down with the beat
+      const antennaPump = (
+        Math.sin(t * 16) * 6 +
+        Math.sin(t * 25 + 0.8) * 3 +
+        Math.sin(t * 6) * 4
+      ) * s;
+      const antennaShakeY = Math.sin(t * 28) * 1.5 * s;
+      const antennaTip = {
+        x: cx + antennaShakeX,
+        y: cy - 170 * s - antennaPump + antennaShakeY
+      };
+      // Mid-point follows ~half the shake (whippy bend)
+      const antennaMid = {
+        x: cx + antennaShakeX * 0.4,
+        y: (antennaBase.y + antennaTip.y) / 2 + antennaShakeY * 0.4
+      };
+      
+      ctx.strokeStyle = '#5a5a5a';
+      ctx.lineWidth = 6 * s;
+      ctx.beginPath();
+      ctx.moveTo(antennaBase.x, antennaBase.y);
+      ctx.quadraticCurveTo(antennaMid.x, antennaMid.y, antennaTip.x, antennaTip.y);
+      ctx.stroke();
+      
+      ctx.fillStyle = '#4a4a4a';
+      ctx.beginPath();
+      ctx.arc(antennaTip.x, antennaTip.y, 8 * s, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // LED on top of antenna
+      const ledHue = (t * 90) % 360;
+      const ledX = antennaTip.x;
+      const ledY = antennaTip.y - 10 * s;
+      const ledR = 6 * s;
+      
+      // Glow halo
+      const ledGlow = ctx.createRadialGradient(ledX, ledY, 0, ledX, ledY, ledR * 4);
+      ledGlow.addColorStop(0, `hsla(${ledHue}, 100%, 70%, 0.8)`);
+      ledGlow.addColorStop(0.5, `hsla(${ledHue}, 100%, 60%, 0.3)`);
+      ledGlow.addColorStop(1, `hsla(${ledHue}, 100%, 50%, 0)`);
+      ctx.fillStyle = ledGlow;
+      ctx.beginPath();
+      ctx.arc(ledX, ledY, ledR * 4, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // LED core
+      const ledGrad = ctx.createRadialGradient(ledX - ledR * 0.3, ledY - ledR * 0.3, 0, ledX, ledY, ledR);
+      ledGrad.addColorStop(0, `hsl(${ledHue}, 100%, 90%)`);
+      ledGrad.addColorStop(0.5, `hsl(${ledHue}, 100%, 65%)`);
+      ledGrad.addColorStop(1, `hsl(${ledHue}, 100%, 40%)`);
+      ctx.fillStyle = ledGrad;
+      ctx.beginPath();
+      ctx.arc(ledX, ledY, ledR, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // Eyes
+      const eyeHue = (t * 60) % 360;
+      const drawEye = (ex, ey, hue) => {
+        const g = ctx.createRadialGradient(ex, ey, 0, ex, ey, 12 * s);
+        g.addColorStop(0, `hsl(${hue}, 100%, 80%)`);
+        g.addColorStop(0.5, `hsl(${hue}, 100%, 60%)`);
+        g.addColorStop(1, `hsl(${hue}, 100%, 40%)`);
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(ex, ey, 12 * s, 0, Math.PI * 2);
+        ctx.fill();
+      };
+      drawEye(cx - 25 * s, cy - 95 * s, eyeHue);
+      drawEye(cx + 25 * s, cy - 95 * s, eyeHue);
+      ctx.fillStyle = 'rgba(255,255,255,0.8)';
+      ctx.beginPath();
+      ctx.arc(cx - 28 * s, cy - 98 * s, 4 * s, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(cx + 22 * s, cy - 98 * s, 4 * s, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // Mouth
+      ctx.strokeStyle = '#1a1a1a';
+      ctx.lineWidth = 3 * s;
+      for (let i = 0; i < 6; i++) {
+        ctx.beginPath();
+        ctx.moveTo(cx - 30 * s + i * 12 * s, cy - 65 * s);
+        ctx.lineTo(cx - 30 * s + i * 12 * s, cy - 58 * s);
+        ctx.stroke();
+      }
+      
+      // Moustache
+      ctx.strokeStyle = '#2a2a2a';
+      ctx.lineWidth = 10 * s;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - 60 * s);
+      ctx.lineTo(cx - 30 * s, cy - 60 * s);
+      ctx.lineTo(cx - 50 * s, cy - 70 * s);
+      ctx.lineTo(cx - 65 * s, cy - 65 * s);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - 60 * s);
+      ctx.lineTo(cx + 30 * s, cy - 60 * s);
+      ctx.lineTo(cx + 50 * s, cy - 70 * s);
+      ctx.lineTo(cx + 65 * s, cy - 65 * s);
+      ctx.stroke();
+    }
+    
+    // ========================================
+    //  MUSIC SIMULATION (drives floor + EQ)
+    // ========================================
+    // Simulated musical events: kick drum hits, hi-hat ticks, chord changes
+    const musicState = {
+      // Beat: a kick that fires roughly every 0.5s with humanized timing
+      kick: 0,           // 0..1 envelope
+      kickNext: 0.5,
+      // Snare/hi-hat: faster, on offbeats
+      snare: 0,
+      snareNext: 0.25,
+      // Chord index (which palette to use), changes every few seconds randomly
+      chord: 0,
+      chordNext: 2 + Math.random() * 3,
+      // Currently active hue for the floor (interpolates toward chord hue)
+      floorHue: Math.random() * 360,
+      floorHueTarget: Math.random() * 360,
+      // Per-tile flash map (random tiles light up randomly on snare hits)
+      flashes: [], // { col, row, time, hue }
+      lastTime: 0,
+    };
+    
+    function updateMusic(animTime) {
+      const dt = Math.min(0.05, animTime - musicState.lastTime);
+      musicState.lastTime = animTime;
+      
+      // Kick drum: fires periodically with timing variance
+      musicState.kickNext -= dt;
+      if (musicState.kickNext <= 0) {
+        musicState.kick = 1;
+        musicState.kickNext = 0.42 + Math.random() * 0.16; // ~120-140 BPM with variance
+      }
+      // Kick decay (fast attack, exponential decay)
+      musicState.kick *= Math.pow(0.5, dt * 5);
+      
+      // Snare/hat: faster, irregular
+      musicState.snareNext -= dt;
+      if (musicState.snareNext <= 0) {
+        musicState.snare = 1;
+        musicState.snareNext = 0.1 + Math.random() * 0.3;
+        // On snare hit, randomly flash some tiles
+        const numFlash = 1 + Math.floor(Math.random() * 4);
+        for (let f = 0; f < numFlash; f++) {
+          musicState.flashes.push({
+            col: Math.floor(Math.random() * dotCount),
+            row: Math.floor(Math.random() * (lineCount - 1)),
+            time: 0.4 + Math.random() * 0.3, // duration
+            hue: Math.random() * 360,
+          });
+        }
+      }
+      musicState.snare *= Math.pow(0.5, dt * 8);
+      
+      // Chord change: randomly pick a new floor base hue
+      musicState.chordNext -= dt;
+      if (musicState.chordNext <= 0) {
+        musicState.floorHueTarget = Math.random() * 360;
+        musicState.chordNext = 2 + Math.random() * 4;
+      }
+      // Smoothly interpolate floor hue toward target
+      let diff = musicState.floorHueTarget - musicState.floorHue;
+      // Wrap-around shortest path
+      if (diff > 180) diff -= 360;
+      if (diff < -180) diff += 360;
+      musicState.floorHue = (musicState.floorHue + diff * dt * 2 + 360) % 360;
+      
+      // Decay flashes
+      for (const f of musicState.flashes) f.time -= dt;
+      musicState.flashes = musicState.flashes.filter(f => f.time > 0);
+    }
+    const eqBars = 40;
+    const eqState = [];
+    for (let i = 0; i < eqBars; i++) {
+      eqState.push({
+        height: 0,
+        target: 0,
+        nextHit: Math.random() * 0.3,
+        peak: 0,        // peak hold marker
+        peakVel: 0,     // peak falls slowly
+      });
+    }
+    let lastEqUpdateTime = 0;
+    let anchorX = 0, anchorY = 0;
+    
+    function computeAnchor(animTime) {
+      const spacing = canvas.width / (dotCount + 1);
+      const centerY = canvas.height / 2;
+      const baseLayerOffset = -canvas.height * 0.35;
+      const layerFloat = Math.sin(animTime * 1.2) * canvas.height * 0.04;
+      const layerOffset = baseLayerOffset + layerFloat;
+      const centerCol = dotCount / 2;
+      const topCoords = getQuadCoords(0, centerCol, spacing, centerY, layerOffset);
+      const bottomCoords = getQuadCoords(lineCount - 1, centerCol, spacing, centerY, layerOffset);
+      const floorHeight = bottomCoords.y1 - topCoords.y0;
+      const centerColLift = Math.sin(animTime * 1.8 + centerCol * 0.6) * canvas.height * 0.02;
+      anchorX = topCoords.topLeft;
+      anchorY = topCoords.y0 + centerColLift + floorHeight * 0.25;
+    }
+    // ========================================
+    //  ROBOT GLOW (radial halo around central dancer)
+    // ========================================
+    function drawRobotGlow(cx, cy, s, t) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'screen';
+      
+      // Glow center is at the robot's torso
+      const gx = cx;
+      const gy = cy - 10 * s;
+      
+      // Hue cycles slowly + pulse with the kick
+      const hue = (t * 40) % 360;
+      const pulse = 1 + musicState.kick * 0.4;
+      const glowR = 280 * s * pulse;
+      
+      // Layered glow: outer wide soft + inner bright
+      const outer = ctx.createRadialGradient(gx, gy, 0, gx, gy, glowR);
+      outer.addColorStop(0, `hsla(${hue}, 100%, 70%, 0.9)`);
+      outer.addColorStop(0.3, `hsla(${(hue + 40) % 360}, 100%, 60%, 0.5)`);
+      outer.addColorStop(0.7, `hsla(${(hue + 80) % 360}, 100%, 50%, 0.15)`);
+      outer.addColorStop(1, `hsla(${(hue + 80) % 360}, 100%, 50%, 0)`);
+      ctx.fillStyle = outer;
+      ctx.beginPath();
+      ctx.arc(gx, gy, glowR, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // Inner hot spot
+      const inner = ctx.createRadialGradient(gx, gy, 0, gx, gy, glowR * 0.35);
+      inner.addColorStop(0, `hsla(${hue}, 100%, 85%, 0.7)`);
+      inner.addColorStop(1, `hsla(${hue}, 100%, 70%, 0)`);
+      ctx.fillStyle = inner;
+      ctx.beginPath();
+      ctx.arc(gx, gy, glowR * 0.35, 0, Math.PI * 2);
+      ctx.fill();
+      
+      ctx.restore();
+    }
+    
+    // ========================================
+    //  PATH
+    // ========================================
+    function pathFn(t, side, w, h, baseScale, maxScale, passSeed) {
+      // Random-ish start point per pass (top of screen, biased to the chosen side)
+      // passSeed creates variation between passes
+      const sideSign = side; // 1 right, -1 left
+      const xJitter = Math.sin(passSeed * 12.9898) * 0.5; // -0.5..0.5
+      const yJitter = Math.sin(passSeed * 78.233) * 0.5;  // -0.5..0.5
+      const ctrlJitter = Math.sin(passSeed * 39.346) * 0.5;
+      
+      // Start: top, biased toward chosen side
+      const p0x = w * (0.5 + sideSign * (0.30 + xJitter * 0.15));
+      const p0y = h * (0.10 + yJitter * 0.10);
+      
+      // Control point: pulled outward to create the curve
+      const p1x = w * (0.5 + sideSign * (0.40 + ctrlJitter * 0.15));
+      const p1y = h * (0.55 + yJitter * 0.15);
+      
+      // End: feet land on the red anchor
+      const finalScl = maxScale;
+      const p2x = anchorX;
+      const p2y = anchorY - 210 * finalScl;
+      
+      const u = 1 - t;
+      const x = u * u * p0x + 2 * u * t * p1x + t * t * p2x;
+      const y = u * u * p0y + 2 * u * t * p1y + t * t * p2y;
+      const scl = baseScale + (maxScale - baseScale) * t;
+      return { x, y, scl };
+    }
+    
+    // ========================================
+    //  MAIN LOOP
+    // ========================================
+    let animTime = 0;
+    
+    function draw() {
+      const w = canvas.width;
+      const h = canvas.height;
+      
+      // Always paint a black background outside the camera transform
+      // so any sub-pixel/zoom-out fringe shows black instead of canvas garbage
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, w, h);
+      
+      // ---- CAMERA: subtle zoom + tilt that breathes with the music ----
+      const camTime = animTime + 0;
+      // Slow base breathing zoom (~0.3Hz). Keep zoom >= 1 to avoid revealing canvas edges.
+      const baseZoom = 1.02 + Math.sin(camTime * 1.8) * 0.015;
+      // Kick-driven punch zoom (snappy)
+      const kickZoom = 1 + (musicState.kick || 0) * 0.025;
+      const zoom = baseZoom * kickZoom;
+      // Subtle tilt mixing two slow oscillators (avoids obvious sin)
+      const tilt = (Math.sin(camTime * 0.7) * 0.6 + Math.sin(camTime * 1.13 + 1.4) * 0.4) * 0.012;
+      
+      // Apply transform centered on canvas
+      ctx.save();
+      ctx.translate(w / 2, h / 2);
+      ctx.scale(zoom, zoom);
+      ctx.rotate(tilt);
+      ctx.translate(-w / 2, -h / 2);
+      
+      // Dance floor background
+      drawDanceFloor();
+      
+      // Compute anchor for this frame so robot path can use it
+      const animTimeForAnchor = Date.now() * 0.001 - startTime * 0.001;
+      computeAnchor(animTimeForAnchor);
+      
+      // Robot timing
+      const arriveDuration = 1.5;
+      const holdDuration = 1.5;
+      const passDuration = arriveDuration + holdDuration;
+      const fullCycle = animTime % (passDuration * 2);
+      const fromRight = fullCycle < passDuration;
+      const passTime = fullCycle % passDuration;
+      const zoomCycle = Math.min(passTime / arriveDuration, 1);
+      const side = fromRight ? 1 : -1;
+      
+      // Pass index used to seed the per-pass randomness
+      const passIndex = Math.floor(animTime / passDuration);
+      const passSeed = passIndex * 17.31 + 0.5;
+      
+      const baseScale = w / 800 * 0.15;
+      const maxScale = w / 800 * 0.7;
+      
+      const cur = pathFn(zoomCycle, side, w, h, baseScale, maxScale, passSeed);
+      
+      // Trails
+      ctx.save();
+      ctx.globalCompositeOperation = 'screen';
+      const trails = [
+        { dt: -1.30, color: '#4400ff', alpha: 0.10 },
+        { dt: -1.10, color: '#8800ff', alpha: 0.13 },
+        { dt: -0.90, color: '#cc00ff', alpha: 0.16 },
+        { dt: -0.72, color: '#ff00ff', alpha: 0.20 },
+        { dt: -0.56, color: '#ff0099', alpha: 0.24 },
+        { dt: -0.42, color: '#ff3366', alpha: 0.28 },
+        { dt: -0.30, color: '#ff6600', alpha: 0.33 },
+        { dt: -0.20, color: '#ff9900', alpha: 0.38 },
+        { dt: -0.12, color: '#ffcc00', alpha: 0.44 },
+        { dt: -0.06, color: '#ffee44', alpha: 0.50 },
+      ];
+      for (const tr of trails) {
+        const pastTime = animTime + tr.dt;
+        if (pastTime < 0) continue;
+        const pastFull = pastTime % (passDuration * 2);
+        const pastFromRight = pastFull < passDuration;
+        if (pastFromRight !== fromRight) continue;
+        const pastPassTime = pastFull % passDuration;
+        if (pastPassTime > arriveDuration) continue;
+        const pastCycle = pastPassTime / arriveDuration;
+        const past = pathFn(pastCycle, pastFromRight ? 1 : -1, w, h, baseScale, maxScale, passSeed);
+        // Slight rotation that decreases as the trail gets closer to the present
+        // Older trails (more negative dt) rotate more, with side-dependent direction
+        const rotation = tr.dt * 0.5 * (pastFromRight ? -1 : 1);
+        drawRobotShape(past.x, past.y, past.scl, tr.color, tr.alpha, pastTime, rotation);
+      }
+      ctx.restore();
+      
+      // Previous robot holds at center
+      if (passTime < arriveDuration && animTime >= passDuration) {
+        const prevSide = fromRight ? -1 : 1;
+        const prevSeed = (passIndex - 1) * 17.31 + 0.5;
+        const prev = pathFn(1, prevSide, w, h, baseScale, maxScale, prevSeed);
+        drawRobotGlow(prev.x, prev.y, prev.scl, animTime);
+        drawDetailedRobot(prev.x, prev.y, prev.scl, animTime);
+      }
+      
+      // Current robot - only show glow when it has arrived (zoomCycle = 1)
+      if (zoomCycle >= 1) {
+        drawRobotGlow(cur.x, cur.y, cur.scl, animTime);
+      }
+      drawDetailedRobot(cur.x, cur.y, cur.scl, animTime);
+      
+      ctx.restore(); // end camera transform
+      
+      animTime += 0.02;
+      requestAnimationFrame(draw);
+    }
+    
+    draw();
+  </script>
+</body>
+</html>

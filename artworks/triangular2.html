@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tri-Angular Harmony</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+        canvas {
+            display: block;
+            border-radius: 20px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+// Dimensions
+const maxWidth = Math.min(window.innerWidth * 0.9, 1200);
+const aspectRatio = 0.75;
+canvas.width = Math.max(1, Math.floor(maxWidth));
+canvas.height = Math.max(1, Math.floor(maxWidth * aspectRatio));
+
+const W = canvas.width;
+const H = canvas.height;
+const CX = W / 2;
+const CY = H / 2;
+
+// Scale proportionnel
+const scale = H / 900;
+
+// Canvas offscreen pour le plasma
+const plasmaCanvas = document.createElement("canvas");
+plasmaCanvas.width = W;
+plasmaCanvas.height = H;
+const pCtx = plasmaCanvas.getContext("2d");
+let plasmaData = pCtx.createImageData(W, H);
+
+// Canvas offscreen pour les effets TV
+const tvCanvas = document.createElement("canvas");
+tvCanvas.width = W;
+tvCanvas.height = H;
+const tvCtx = tvCanvas.getContext("2d");
+
+// pré-calc sin/cos pour un cycle
+const SIN = new Float32Array(10000);
+for (let i = 0; i < SIN.length; i++) SIN[i] = Math.sin(i * 0.001);
+
+// ------------------------------------------------------------
+// PLASMA OPTIMISÉ
+// ------------------------------------------------------------
+function drawPlasma(time) {
+    const data = plasmaData.data;
+    const t1 = time * 0.05;
+    const t2 = time * 0.03;
+    const t3 = time * 0.04;
+    const t4 = time * 0.02;
+
+    let index = 0;
+
+    for (let y = 0; y < H; y += 6) {
+        for (let x = 0; x < W; x += 6) {
+
+            const v =
+                Math.sin(x * 0.01 + t1) +
+                Math.sin(y * 0.01 + t2) +
+                Math.sin((x + y) * 0.008 + t3) +
+                Math.sin(Math.sqrt(x * x + y * y) * 0.01 + t4);
+
+            const n = (v + 4) / 8;
+            const p = n * Math.PI * 2;
+
+            const paletteShift = time * 0.006;
+            const r = Math.sin(p + paletteShift) * 127 + 128;
+            const g = Math.sin(p + 2.094 + paletteShift * 1.3) * 127 + 128;
+            const b = Math.sin(p + 4.188 + paletteShift * 0.7) * 127 + 128;
+
+            for (let dy = 0; dy < 6; dy++) {
+                const yy = y + dy;
+                if (yy >= H) continue;
+
+                for (let dx = 0; dx < 6; dx++) {
+                    const xx = x + dx;
+                    if (xx >= W) continue;
+
+                    index = (yy * W + xx) * 4;
+                    data[index] = r * 0.3;
+                    data[index+1] = g * 0.3;
+                    data[index+2] = b * 0.3;
+                    data[index+3] = 255;
+                }
+            }
+        }
+    }
+    pCtx.putImageData(plasmaData, 0, 0);
+    ctx.drawImage(plasmaCanvas, 0, 0);
+}
+
+// ------------------------------------------------------------
+// RAYONS
+// ------------------------------------------------------------
+function drawRays(time) {
+    const n = 24;
+    for (let i = 0; i < n; i++) {
+        const angle = (i / n) * Math.PI * 2;
+        const offset = (time * 5 + i * 0.5) % (650 * scale);
+
+        const x1 = CX + Math.cos(angle) * offset;
+        const y1 = CY + Math.sin(angle) * offset;
+        const x2 = CX + Math.cos(angle) * (offset + 156 * scale);
+        const y2 = CY + Math.sin(angle) * (offset + 156 * scale);
+
+        const alpha = 1 - offset / (650 * scale);
+        const hue = (time * 50 + i * 15 + time * 3) % 360;
+
+        ctx.strokeStyle = `hsla(${hue}, 80%, 60%, ${alpha * 0.5})`;
+        ctx.lineWidth = 3.25 * scale;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+    }
+}
+
+// ------------------------------------------------------------
+// CERCLES
+// ------------------------------------------------------------
+function drawCircles(time) {
+    for (let i = 0; i < 8; i++) {
+        const radius = (time * 3 + i * 78 * scale) % (650 * scale);
+        const alpha = 1 - radius / (650 * scale);
+        const hue = (time * 30 + i * 45 + time * 3) % 360;
+
+        ctx.strokeStyle = `hsla(${hue}, 80%, 60%, ${alpha * 0.4})`;
+        ctx.lineWidth = 2.6 * scale;
+        ctx.beginPath();
+        ctx.arc(CX, CY, radius, 0, Math.PI * 2);
+        ctx.stroke();
+    }
+}
+
+// ------------------------------------------------------------
+// TEXTE
+// ------------------------------------------------------------
+function drawText(time) {
+    const fontSize = W * 0.12;
+    ctx.font = `bold ${fontSize}px monospace`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    const offset = fontSize * 0.0625;
+    
+    ctx.fillStyle = "rgba(0,255,255,0.6)";
+    ctx.fillText("INTARYNX", CX - offset, CY - offset);
+
+    ctx.fillStyle = "rgba(255,0,255,0.6)";
+    ctx.fillText("INTARYNX", CX + offset, CY + offset);
+
+    ctx.shadowColor = "#030";
+    ctx.shadowBlur = fontSize * 0.6;
+    ctx.fillStyle = "#030";
+    ctx.fillText("INTARYNX", CX, CY);
+
+    ctx.shadowBlur = 0;
+
+    ctx.strokeStyle = "rgba(0,0,0,0.8)";
+    ctx.lineWidth = fontSize * 0.0625;
+    ctx.strokeText("INTARYNX", CX, CY);
+}
+
+// ------------------------------------------------------------
+// SCANLINES
+// ------------------------------------------------------------
+function drawScanlines() {
+    ctx.fillStyle = "rgba(0,0,0,0.15)";
+    for (let y = 0; y < H; y += 4) {
+        ctx.fillRect(0, y, W, 1);
+    }
+}
+
+// ------------------------------------------------------------
+// BLOOM HORIZONTAL
+// ------------------------------------------------------------
+function drawBloom() {
+    const image = ctx.getImageData(0, 0, W, H);
+    const d = image.data;
+    const shift = 6;
+
+    for (let y = 0; y < H; y++) {
+        for (let x = W - 1; x >= shift; x--) {
+            const i = (y * W + x) * 4;
+            const prev = i - shift * 4;
+            d[i]   = Math.max(d[i],   d[prev] * 0.7);
+            d[i+1] = Math.max(d[i+1], d[prev+1] * 0.7);
+            d[i+2] = Math.max(d[i+2], d[prev+2] * 0.7);
+        }
+    }
+    ctx.putImageData(image, 0, 0);
+}
+
+// ------------------------------------------------------------
+// ANALOG TV EFFECTS
+// ------------------------------------------------------------
+
+// Rolling horizontal sync band (like a VHS tracking error)
+function drawVHSTracking(time) {
+    const bandHeight = 30 + Math.sin(time * 0.07) * 15;
+    const bandY = ((time * 1.8) % (H + bandHeight * 2)) - bandHeight;
+
+    const yStart = Math.max(0, Math.floor(bandY));
+    const yEnd = Math.min(H, Math.floor(bandY + bandHeight));
+    if (yStart >= yEnd) return;
+
+    const img = ctx.getImageData(0, yStart, W, yEnd - yStart);
+    const d = img.data;
+    const regionH = yEnd - yStart;
+
+    // Copy row by row from bottom to top to avoid overwrite issues
+    for (let ly = regionH - 1; ly >= 0; ly--) {
+        const globalY = yStart + ly;
+        const bandT = (globalY - bandY) / bandHeight;
+        const intensity = Math.sin(bandT * Math.PI);
+        const shift = Math.floor((Math.sin(time * 0.3) * 6 + 4) * intensity);
+
+        const row = new Uint8ClampedArray(W * 4);
+        for (let x = 0; x < W; x++) {
+            const srcX = Math.max(0, Math.min(W - 1, x - shift));
+            const si = (ly * W + srcX) * 4;
+            const di = x * 4;
+            row[di] = d[si];
+            row[di+1] = d[si+1];
+            row[di+2] = d[si+2];
+            row[di+3] = d[si+3];
+        }
+        for (let x = 0; x < W; x++) {
+            const i = (ly * W + x) * 4;
+            const di = x * 4;
+            d[i] = Math.min(255, row[di] + 15 * intensity);
+            d[i+1] = Math.min(255, row[di+1] + 15 * intensity);
+            d[i+2] = Math.min(255, row[di+2] + 15 * intensity);
+            d[i+3] = row[di+3];
+        }
+    }
+    ctx.putImageData(img, 0, yStart);
+}
+
+// Chromatic aberration (RGB channel offset)
+function drawChromaticAberration(time) {
+    const img = ctx.getImageData(0, 0, W, H);
+    const src = new Uint8ClampedArray(img.data);
+    const d = img.data;
+    const offsetR = Math.round(Math.sin(time * 0.05) * 2 + 1.5);
+    const offsetB = Math.round(Math.cos(time * 0.04) * 2 - 1.5);
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = (y * W + x) * 4;
+            // Shift red channel left
+            const rxSrc = x + offsetR;
+            if (rxSrc >= 0 && rxSrc < W) {
+                d[i] = src[(y * W + rxSrc) * 4];
+            }
+            // Green stays
+            // Shift blue channel right
+            const bxSrc = x + offsetB;
+            if (bxSrc >= 0 && bxSrc < W) {
+                d[i + 2] = src[(y * W + bxSrc) * 4 + 2];
+            }
+        }
+    }
+    ctx.putImageData(img, 0, 0);
+}
+
+// Static noise (snow) — subtle
+function drawStaticNoise(time) {
+    const img = ctx.getImageData(0, 0, W, H);
+    const d = img.data;
+    const noiseAmount = 12 + Math.sin(time * 0.1) * 5;
+
+    for (let i = 0; i < d.length; i += 4) {
+        const n = (Math.random() - 0.5) * noiseAmount;
+        d[i] += n;
+        d[i + 1] += n;
+        d[i + 2] += n;
+    }
+    ctx.putImageData(img, 0, 0);
+}
+
+// Horizontal jitter — random line offsets
+function drawHorizontalJitter(time) {
+    // Only apply occasionally
+    if (Math.random() > 0.06) return;
+
+    const img = ctx.getImageData(0, 0, W, H);
+    const d = img.data;
+
+    const startY = Math.floor(Math.random() * H);
+    const count = Math.floor(Math.random() * 8) + 2;
+    const shift = Math.floor((Math.random() - 0.5) * 16);
+
+    for (let dy = 0; dy < count && startY + dy < H; dy++) {
+        const y = startY + dy;
+        const row = new Uint8ClampedArray(W * 4);
+        for (let x = 0; x < W; x++) {
+            const srcX = Math.max(0, Math.min(W - 1, x - shift));
+            const si = (y * W + srcX) * 4;
+            const di = x * 4;
+            row[di] = d[si];
+            row[di + 1] = d[si + 1];
+            row[di + 2] = d[si + 2];
+            row[di + 3] = d[si + 3];
+        }
+        for (let x = 0; x < W; x++) {
+            const i = (y * W + x) * 4;
+            const di = x * 4;
+            d[i] = row[di];
+            d[i + 1] = row[di + 1];
+            d[i + 2] = row[di + 2];
+            d[i + 3] = row[di + 3];
+        }
+    }
+    ctx.putImageData(img, 0, 0);
+}
+
+// CRT vignette — dark corners
+function drawVignette() {
+    const grad = ctx.createRadialGradient(CX, CY, H * 0.3, CX, CY, H * 0.85);
+    grad.addColorStop(0, "rgba(0,0,0,0)");
+    grad.addColorStop(0.7, "rgba(0,0,0,0.1)");
+    grad.addColorStop(1, "rgba(0,0,0,0.65)");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+}
+
+// CRT curvature overlay (subtle barrel distortion look via shading)
+function drawCRTCurvature() {
+    // Top/bottom edge darkening for curved screen illusion
+    const edgeH = H * 0.06;
+    const edgeW = W * 0.04;
+
+    // Top edge
+    let g = ctx.createLinearGradient(0, 0, 0, edgeH);
+    g.addColorStop(0, "rgba(0,0,0,0.5)");
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, edgeH);
+
+    // Bottom edge
+    g = ctx.createLinearGradient(0, H - edgeH, 0, H);
+    g.addColorStop(0, "rgba(0,0,0,0)");
+    g.addColorStop(1, "rgba(0,0,0,0.5)");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, H - edgeH, W, edgeH);
+
+    // Left edge
+    g = ctx.createLinearGradient(0, 0, edgeW, 0);
+    g.addColorStop(0, "rgba(0,0,0,0.4)");
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, edgeW, H);
+
+    // Right edge
+    g = ctx.createLinearGradient(W - edgeW, 0, W, 0);
+    g.addColorStop(0, "rgba(0,0,0,0)");
+    g.addColorStop(1, "rgba(0,0,0,0.4)");
+    ctx.fillStyle = g;
+    ctx.fillRect(W - edgeW, 0, edgeW, H);
+}
+
+// Phosphor RGB sub-pixel pattern
+function drawPhosphorGrid() {
+    ctx.globalAlpha = 0.04;
+    ctx.fillStyle = "#f00";
+    for (let y = 0; y < H; y += 3) {
+        for (let x = 0; x < W; x += 3) {
+            ctx.fillRect(x, y, 1, 2);
+        }
+    }
+    ctx.fillStyle = "#0f0";
+    for (let y = 0; y < H; y += 3) {
+        for (let x = 1; x < W; x += 3) {
+            ctx.fillRect(x, y, 1, 2);
+        }
+    }
+    ctx.fillStyle = "#00f";
+    for (let y = 0; y < H; y += 3) {
+        for (let x = 2; x < W; x += 3) {
+            ctx.fillRect(x, y, 1, 2);
+        }
+    }
+    ctx.globalAlpha = 1.0;
+}
+
+// Occasional full-frame glitch burst
+function drawGlitchBurst(time) {
+    if (Math.random() > 0.005) return; // rare
+    ctx.save();
+    ctx.globalAlpha = 0.15;
+    ctx.drawImage(canvas, (Math.random() - 0.5) * 20, (Math.random() - 0.5) * 10);
+    ctx.globalAlpha = 1.0;
+    ctx.restore();
+}
+
+// Rolling brightness wave (simulates vertical hold drift) — overlay based
+function drawBrightnessWave(time) {
+    const waveSpeed = time * 0.6;
+    const waveFreq = 0.008;
+    const step = 4;
+    for (let y = 0; y < H; y += step) {
+        const v = Math.sin(y * waveFreq + waveSpeed) * 0.06;
+        if (v > 0) {
+            ctx.fillStyle = `rgba(255,255,255,${v})`;
+        } else {
+            ctx.fillStyle = `rgba(0,0,0,${-v})`;
+        }
+        ctx.fillRect(0, y, W, step);
+    }
+}
+
+// ------------------------------------------------------------
+// PAPILLON
+// ------------------------------------------------------------
+// ------------------------------------------------------------
+// TRIANGLES
+// ------------------------------------------------------------
+function drawButterfly(time) {
+    drawPlasma(time);
+    drawCircles(time);
+    drawRays(time);
+
+    const layers = 30;
+    const size = 300 * scale;
+    const hueBase = time * 3;
+
+    // Triangle 1 - Pointing up
+    for (let i = 0; i < layers; i++) {
+        const t = i / layers;
+        const s = size * (0.5 + t * 0.5);
+        const rot1 = time * 0.02;
+
+        ctx.save();
+        ctx.translate(CX, CY - 100 * scale);
+        ctx.rotate(rot1);
+
+        const alpha = 0.15 + t * 0.25;
+        const hue = (time * 30 + i * 12 + hueBase) % 360;
+        ctx.strokeStyle = `hsla(${hue}, 80%, 60%, ${alpha})`;
+        ctx.lineWidth = (2.6 - t * 1.3) * scale;
+
+        ctx.beginPath();
+        ctx.moveTo(0, -s * 0.577);
+        ctx.lineTo(s * 0.5, s * 0.289);
+        ctx.lineTo(-s * 0.5, s * 0.289);
+        ctx.closePath();
+        ctx.stroke();
+
+        ctx.restore();
+    }
+
+    // Triangle 2 - Pointing down-right
+    for (let i = 0; i < layers; i++) {
+        const t = i / layers;
+        const s = size * (0.5 + t * 0.5);
+        const rot2 = time * 0.03 + Math.PI * 2 / 3;
+
+        ctx.save();
+        ctx.translate(CX + 80 * scale, CY + 60 * scale);
+        ctx.rotate(rot2);
+
+        const alpha = 0.15 + t * 0.25;
+        const hue2 = (time * 30 + i * 12 + 120 + hueBase) % 360;
+        ctx.strokeStyle = `hsla(${hue2}, 80%, 60%, ${alpha})`;
+        ctx.lineWidth = (2.6 - t * 1.3) * scale;
+
+        ctx.beginPath();
+        ctx.moveTo(0, -s * 0.577);
+        ctx.lineTo(s * 0.5, s * 0.289);
+        ctx.lineTo(-s * 0.5, s * 0.289);
+        ctx.closePath();
+        ctx.stroke();
+
+        ctx.restore();
+    }
+
+    // Triangle 3 - Pointing down-left
+    for (let i = 0; i < layers; i++) {
+        const t = i / layers;
+        const s = size * (0.5 + t * 0.5);
+        const rot3 = time * 0.025 + Math.PI * 4 / 3;
+
+        ctx.save();
+        ctx.translate(CX - 80 * scale, CY + 60 * scale);
+        ctx.rotate(rot3);
+
+        const alpha = 0.15 + t * 0.25;
+        const hue3 = (time * 30 + i * 12 + 240 + hueBase) % 360;
+        ctx.strokeStyle = `hsla(${hue3}, 80%, 60%, ${alpha})`;
+        ctx.lineWidth = (2.6 - t * 1.3) * scale;
+
+        ctx.beginPath();
+        ctx.moveTo(0, -s * 0.577);
+        ctx.lineTo(s * 0.5, s * 0.289);
+        ctx.lineTo(-s * 0.5, s * 0.289);
+        ctx.closePath();
+        ctx.stroke();
+
+        ctx.restore();
+    }
+}
+
+// ------------------------------------------------------------
+// BOUCLE ANIMATION
+// ------------------------------------------------------------
+let frame = 0;
+function animate() {
+    const time = frame * 0.5;
+
+    drawButterfly(time);
+    drawText(time);
+    drawScanlines();
+    drawBloom();
+
+    // Analog TV effects
+    drawChromaticAberration(time);
+    drawVHSTracking(time);
+    drawHorizontalJitter(time);
+    drawBrightnessWave(time);
+    drawStaticNoise(time);
+    drawGlitchBurst(time);
+    drawPhosphorGrid();
+    drawVignette();
+    drawCRTCurvature();
+
+    frame++;
+    requestAnimationFrame(animate);
+}
+animate();
+    </script>
+</body>
+</html>

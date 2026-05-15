@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{display:flex;justify-content:center;align-items:center;height:100vh;background:#000;overflow:hidden}
+  canvas{width:min(100vw,100vh);height:min(100vw,100vh)}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const C=document.getElementById('c'),X=C.getContext('2d');
+const S=800,FS=400;C.width=S;C.height=S;
+
+// Noise
+const P=new Uint8Array(512),G=[[1,1],[-1,1],[1,-1],[-1,-1],[1,0],[-1,0],[0,1],[0,-1]];
+for(let i=0;i<256;i++)P[i]=i;
+for(let i=255;i>0;i--){const j=(Math.random()*i)|0;[P[i],P[j]]=[P[j],P[i]];}
+for(let i=0;i<256;i++)P[i+256]=P[i];
+function N(x,y){const Xf=Math.floor(x),Yf=Math.floor(y),xf=x-Xf,yf=y-Yf,u=xf*xf*xf*(xf*(xf*6-15)+10),v=yf*yf*yf*(yf*(yf*6-15)+10),A=Xf&255,B=Yf&255,aa=P[P[A]+B],ab=P[P[A]+B+1],ba=P[P[A+1]+B],bb=P[P[A+1]+B+1],g=(h,x,y)=>{const p=G[h&7];return p[0]*x+p[1]*y};return(g(aa,xf,yf)+(g(ba,xf-1,yf)-g(aa,xf,yf))*u)+((g(ab,xf,yf-1)+(g(bb,xf-1,yf-1)-g(ab,xf,yf-1))*u)-(g(aa,xf,yf)+(g(ba,xf-1,yf)-g(aa,xf,yf))*u))*v}
+function fbm(x,y){return .5*N(x,y)+.25*N(x*2,y*2)+.125*N(x*4,y*4)}
+
+// Palette
+const pR=new Uint8Array(256),pG=new Uint8Array(256),pB=new Uint8Array(256);
+for(let i=0;i<256;i++){const t=i/255;let r,g,b;if(t<.2){r=t/.2*40;g=0;b=0}else if(t<.45){const p=(t-.2)/.25;r=40+p*180;g=p*10;b=0}else if(t<.65){const p=(t-.45)/.2;r=220+p*35;g=10+p*60;b=0}else if(t<.85){const p=(t-.65)/.2;r=255;g=70+p*110;b=p*25}else{const p=(t-.85)/.15;r=255;g=180+p*75;b=25+p*200}pR[i]=Math.min(255,r)|0;pG[i]=Math.min(255,g)|0;pB[i]=Math.min(255,b)|0}
+
+// Text strip
+const MSG="DECEMBER 22, 2032 · ASTEROID 2024 YR₄ ";
+const sH=100,sC=document.createElement('canvas'),sX=sC.getContext('2d');
+sX.font=`bold ${sH*.85}px "Georgia","Times New Roman",serif`;
+sC.width=Math.ceil(sX.measureText(MSG).width)+20;sC.height=sH;
+sX.clearRect(0,0,sC.width,sH);sX.font=`bold ${sH*.85}px "Georgia","Times New Roman",serif`;
+sX.fillStyle='#fff';sX.textBaseline='middle';sX.fillText(MSG,0,sH/2);
+const sW=sC.width;
+
+// Timing
+const SPD=400,MS=(sW+Math.PI*S*.55)/SPD,MD=1,IT=MS+MD;
+const IX=S*.45,IY=S*.7,CS=IT+5;
+const mS={x:S*.9,y:-50},mE={x:IX,y:IY};
+
+// Skyline
+function gS(a,b,c,d,e){const r=[];let x=-20;while(x<S+50){const w=a+Math.random()*(b-a),h=c+Math.random()*(d-c);r.push({x,w,h,sp:Math.random()<e?30+Math.random()*80:0,ld:Math.random()>.5?1:-1});x+=w+Math.random()*6}return r}
+const L0=gS(20,60,60,200,.3),L1=gS(18,55,100,320,.5),L2=gS(15,50,80,260,.4);
+const W=[];
+function rL(bl,bY,col,wR,wG,wB,wA,ws){const c=document.createElement('canvas');c.width=S;c.height=S;const x=c.getContext('2d');
+for(const b of bl){x.fillStyle=col;x.fillRect(b.x,bY-b.h,b.w,b.h+2);if(b.sp>0){x.beginPath();x.moveTo(b.x+b.w*.35,bY-b.h);x.lineTo(b.x+b.w*.5,bY-b.h-b.sp);x.lineTo(b.x+b.w*.65,bY-b.h);x.fill()}
+const g=ws+3;for(let wy=bY-b.h+6;wy<bY-6;wy+=g)for(let wx=b.x+3;wx<b.x+b.w-3;wx+=g)if(Math.random()>.1){const a=wA*(.5+Math.random()*.5);x.fillStyle=`rgba(${wR},${wG},${wB},${a})`;x.fillRect(wx,wy,ws,ws);W.push({x:wx,y:wy,w:ws,h:ws,fp:Math.random()*Math.PI*2,fs:2+Math.random()*8})}}return c}
+const c0=rL(L0,S,'#0c0c1a',220,200,140,.5,2),c1=rL(L1,S,'#08081a',255,240,160,.7,3),c2=rL(L2,S,'#040412',255,250,180,.9,3);
+
+// Fire mask
+const fM=document.createElement('canvas');fM.width=FS;fM.height=FS;const fX=fM.getContext('2d');
+function dr(c,bl,bY,s){for(const b of bl){c.fillRect(b.x*s,(bY-b.h)*s,b.w*s,(b.h+2)*s);if(b.sp>0){c.beginPath();c.moveTo((b.x+b.w*.35)*s,(bY-b.h)*s);c.lineTo((b.x+b.w*.5)*s,(bY-b.h-b.sp)*s);c.lineTo((b.x+b.w*.65)*s,(bY-b.h)*s);c.fill()}}}
+fX.fillStyle='#fff';const sc=FS/S;dr(fX,L0,S,sc);dr(fX,L1,S,sc);dr(fX,L2,S,sc);
+const mD=fX.getImageData(0,0,FS,FS).data,fPx=[],fPy=[];
+const cTop=new Float32Array(FS).fill(FS);
+for(let y=0;y<FS;y++)for(let x=0;x<FS;x++)if(mD[(y*FS+x)*4]>128&&y<cTop[x])cTop[x]=y;
+for(let y=0;y<FS;y++)for(let x=0;x<FS;x++)if(mD[(y*FS+x)*4]>128){fPx.push(x);fPy.push(y)}
+const nF=fPx.length;
+const fA=new Float32Array(nF),fB=new Float32Array(nF),fC=new Float32Array(nF),fD=new Uint32Array(nF),fE=new Float32Array(nF);
+for(let k=0;k<nF;k++){const x=fPx[k],y=fPy[k];fA[k]=x*.014;fB[k]=y*.014;fC[k]=Math.max(0,1-((y-cTop[x])/(FS-cTop[x]))*2);fD[k]=(y*FS+x)*4;const sx=x*(S/FS),sy=y*(S/FS);fE[k]=IT+Math.sqrt((sx-IX)**2+(sy-IY)**2)/S*4+Math.random()*1.5+fbm(sx*.03+99,sy*.04+77)}
+const fCan=document.createElement('canvas');fCan.width=FS;fCan.height=FS;const fCtx=fCan.getContext('2d'),fImg=fCtx.createImageData(FS,FS),fBuf=new Uint8Array(fImg.data.buffer);
+
+// Sparks
+const sp=Array.from({length:300},()=>({x:0,y:0,vx:0,vy:0,sz:0,l:Math.random(),h:0,f:false}));
+let shx=0,shy=0,t=0;const cx=S/2,cy=S*.75,R=S*.55;
+
+function render(){
+t+=.016;const tsi=t-IT,col=Math.max(0,(t-CS)/5);
+if(tsi>0&&tsi<2){const a=Math.max(0,1-tsi*.5)*15;shx=(Math.random()-.5)*a;shy=(Math.random()-.5)*a}else{shx=0;shy=0}
+const cmx=Math.sin(t*.15)*8,cmy=Math.cos(t*.12)*6;
+const pS=CS+4,pY=t>pS?Math.min(S*.6,(t-pS)*80):0,oY=pY;
+const dk=tsi<0?1:Math.max(0,1-tsi*.08),gi=tsi>1?Math.min(1,(tsi-1)*.04):0;
+const tR=Math.min(255,(1+dk*14+gi*120)|0),tG=Math.min(255,(dk*5+gi*30)|0),tB=Math.min(255,(8+dk*25)|0);
+const bR=Math.min(255,(26+dk*60+gi*100)|0),bG=Math.min(255,(16+dk*30+gi*30)|0),bB=Math.min(255,(24+dk*40)|0);
+
+X.save();X.translate(cmx+shx,cmy+shy);
+
+// Sky: flat top color fills everything, then gradient on visible range
+X.fillStyle=`rgb(${tR},${tG},${tB})`;X.fillRect(-50,-50,S+100,S+100);
+const sky=X.createLinearGradient(0,oY,0,S+oY);
+sky.addColorStop(0,`rgb(${tR},${tG},${tB})`);sky.addColorStop(.5,`rgb(${(tR+bR)>>1},${(tG+bG)>>1},${(tB+bB)>>1})`);sky.addColorStop(1,`rgb(${bR},${bG},${bB})`);
+X.fillStyle=sky;X.fillRect(-50,oY,S+100,S+50);
+
+if(dk>0){const cg=X.createRadialGradient(S/2,S+oY,10,S/2,S*.5+oY,S*.6);cg.addColorStop(0,`rgba(200,160,100,${.12*dk})`);cg.addColorStop(.4,`rgba(120,80,40,${.06*dk})`);cg.addColorStop(1,'rgba(0,0,0,0)');X.fillStyle=cg;X.fillRect(-50,-50,S+100,S+100)}
+
+// Stars
+for(let i=0;i<120;i++){const sx=(Math.sin(i*127.1+i*i*.03)*.5+.5)*S,sy=(Math.cos(i*311.7+i*i*.02)*.5+.5)*S*.5+oY;if(sy<-5||sy>S+5)continue;const tw=Math.max(0,Math.sin(t*1.5+i*2.3))*.6+.2;X.fillStyle=`rgba(255,255,240,${tw})`;X.fillRect(sx,sy,.5+Math.sin(i*43.7)*.8,.5+Math.sin(i*43.7)*.8)}
+
+// Meteor
+const mT=(t-MS)/MD;
+if(mT>0&&mT<1){const t2=mT*mT,mx=mS.x+(mE.x-mS.x)*t2,my=mS.y+(mE.y-mS.y)*t2+oY,an=Math.atan2(mE.y-mS.y,mE.x-mS.x),gR=30+mT*40;
+const mg=X.createRadialGradient(mx,my,0,mx,my,gR);mg.addColorStop(0,'rgba(255,255,220,.9)');mg.addColorStop(.3,'rgba(255,200,100,.5)');mg.addColorStop(.7,'rgba(255,100,20,.2)');mg.addColorStop(1,'rgba(0,0,0,0)');X.fillStyle=mg;X.fillRect(mx-gR,my-gR,gR*2,gR*2);
+X.fillStyle='rgba(255,255,240,.95)';X.beginPath();X.arc(mx,my,4+mT*6,0,Math.PI*2);X.fill();
+const tl=80+mT*120,tx=mx-Math.cos(an)*tl,ty=my-Math.sin(an)*tl,tg=X.createLinearGradient(mx,my,tx,ty);tg.addColorStop(0,'rgba(255,200,100,.8)');tg.addColorStop(.3,'rgba(255,100,30,.4)');tg.addColorStop(1,'rgba(0,0,0,0)');X.strokeStyle=tg;X.lineWidth=3+mT*5;X.beginPath();X.moveTo(mx,my);X.lineTo(tx,ty);X.stroke();
+for(let i=0;i<12;i++){const pt=i/12,px=mx+(tx-mx)*pt+(Math.random()-.5)*15,py=my+(ty-my)*pt+(Math.random()-.5)*15;X.fillStyle=`rgba(255,${(150-pt*100)|0},${(50-pt*50)|0},${.6*(1-pt)})`;X.beginPath();X.arc(px,py,1+Math.random()*2,0,Math.PI*2);X.fill()}}
+
+// Impact
+if(tsi>0&&tsi<1.5){const fi=tsi<.15?tsi/.15:Math.max(0,1-(tsi-.15)/1.35),iy=IY+oY;X.fillStyle=`rgba(255,255,220,${fi*.7})`;X.fillRect(-50,-50,S+100,S+100);
+const ir=50+tsi*300,ig=X.createRadialGradient(IX,iy,0,IX,iy,ir);ig.addColorStop(0,`rgba(255,200,50,${fi*.8})`);ig.addColorStop(.3,`rgba(255,100,0,${fi*.5})`);ig.addColorStop(.7,`rgba(200,30,0,${fi*.2})`);ig.addColorStop(1,'rgba(0,0,0,0)');X.fillStyle=ig;X.fillRect(IX-ir,iy-ir,ir*2,ir*2);
+for(let i=0;i<20;i++){const a=Math.random()*Math.PI*2,d=tsi*(100+Math.random()*200);X.fillStyle=`rgba(255,${(180-Math.random()*80)|0},${(50+Math.random()*50)|0},${fi*.8})`;X.beginPath();X.arc(IX+Math.cos(a)*d,iy+Math.sin(a)*d-tsi*50,2+Math.random()*3,0,Math.PI*2);X.fill()}}
+
+// Text ring
+const aL=Math.PI*R,of=t*SPD-aL,tA=t<MS?1:Math.max(0,1-(t-MS)*2);
+if(tA>0){const st=Math.ceil(aL);for(let s=0;s<st;s++){const at=s/st,an=-Math.PI+at*Math.PI,sx=of+at*aL;if(sx<0||sx>=sW)continue;const px=cx+Math.cos(an)*R,py=cy+Math.sin(an)*R+oY;if(py<-sH||py>S+sH)continue;const dp=-Math.sin(an),sc2=.55+dp*.5+.25,al=.2+dp*.6;X.globalAlpha=al*tA;X.drawImage(sC,sx|0,0,1,sH,px,py-sH*sc2/2,1.5,sH*sc2)}X.globalAlpha=1}
+
+// Fire behind buildings
+if(tsi>0){fBuf.fill(0);const fl=t*1.6,s3=Math.sin(t*3)*.06;
+for(let k=0;k<nF;k++){const el=t-fE[k];if(el<0)continue;const bi=el<2?el*.5:1,tb=fC[k],ny=fB[k]+fl;let v=N(fA[k],ny)*.5+N(fA[k]*2,ny*2)*.25+.375;v=v*(.3+tb*.8)+tb*.3+s3;v*=bi;if(v<.2)v*=.3;if(v>.999)v=.999;else if(v<0)v=0;const ci=(v*255)|0;if(ci<3)continue;const p=fD[k];fBuf[p]=pR[ci];fBuf[p+1]=pG[ci];fBuf[p+2]=pB[ci];fBuf[p+3]=255}
+fCtx.putImageData(fImg,0,0);X.drawImage(fCan,0,oY,S,S);
+X.save();X.globalCompositeOperation='screen';X.globalAlpha=.35;X.filter='blur(8px)';X.drawImage(fCan,0,oY,S,S);X.globalAlpha=.15;X.filter='blur(25px)';X.drawImage(fCan,0,oY,S,S);X.restore()}
+
+// Buildings + collapse
+X.fillStyle='#000';X.fillRect(-20,S*.85+oY,S+40,S*.2);
+const ft=tsi>0?Math.min(1,tsi*.15):0;
+const Ls=[{c:c0,b:L0,d:.3},{c:c1,b:L1,d:.15},{c:c2,b:L2,d:0}];
+for(const L of Ls)for(const b of L.b){const bD=Math.abs(b.x+b.w/2-IX)/S,bt=Math.max(0,col-bD*.8-L.d-(b.h/400)*.3);
+if(bt<=0){X.drawImage(L.c,b.x,0,b.w+2,S,b.x,oY,b.w+2,S);if(ft>0){X.fillStyle=`rgba(180,40,0,${ft*.4})`;X.fillRect(b.x,oY,b.w+2,S)}}
+else if(bt<1){const si=bt*bt*b.h*.8,le=bt*bt*b.ld*20,al=Math.max(0,1-bt*1.2),sy=1-bt*.4;X.save();X.globalAlpha=al;X.translate(b.x+b.w/2+le,S+oY);X.scale(1,sy);X.translate(-(b.x+b.w/2),-S+si);X.drawImage(L.c,b.x-1,0,b.w+4,S,b.x-1,0,b.w+4,S);if(ft>0){X.fillStyle=`rgba(180,40,0,${ft*.5})`;X.fillRect(b.x-1,0,b.w+4,S)}X.restore();
+if(bt>.3){const da=Math.min(.3,(bt-.3)*.5)*al,dw=b.w*(1+bt*3),dh=30+bt*60;X.fillStyle=`rgba(150,120,80,${da})`;X.fillRect(b.x+b.w/2-dw/2,S+oY-b.h*(1-bt)-dh/2,dw,dh)}}}
+
+// Windows
+for(let i=0;i<W.length;i++){const w=W[i],wy=w.y+oY;if(wy<-10||wy>S+10)continue;
+if(tsi<0){const f=Math.sin(t*w.fs*.15+w.fp)+Math.sin(t*w.fs*.4+w.fp*3)*.3;if(f>.9){X.fillStyle='rgba(0,0,0,.5)';X.fillRect(w.x,wy,w.w,w.h)}else if(f<-.8){X.fillStyle='rgba(255,250,200,.12)';X.fillRect(w.x,wy,w.w,w.h)}}
+else{const gl=Math.min(1,tsi*.2);X.fillStyle=`rgba(200,50,0,${gl*.6})`;X.fillRect(w.x,wy,w.w,w.h)}}
+
+// Glow
+if(gi>0){const sg=X.createRadialGradient(S/2,S*.6+oY,10,S/2,S*.2+oY,S*.8);sg.addColorStop(0,`rgba(255,120,30,${.3*gi+Math.sin(t*2)*.04})`);sg.addColorStop(.4,`rgba(200,50,0,${.15*gi})`);sg.addColorStop(1,'rgba(0,0,0,0)');X.fillStyle=sg;X.fillRect(-50,-50,S+100,S+100)}
+
+// Smoke
+if(tsi>2){X.save();X.globalAlpha=.06;X.globalCompositeOperation='screen';for(let i=0;i<8;i++){const sx=S*.2+i*S*.08+fbm(i*3.7,t*.5)*150,sy=S*.3+oY+fbm(i*2.1,t*.3)*80,sr=40+i*10+Math.sin(t+i)*10;if(sy>S+sr)continue;const sg=X.createRadialGradient(sx,sy,0,sx,sy,sr);sg.addColorStop(0,'rgba(180,100,40,.3)');sg.addColorStop(1,'rgba(0,0,0,0)');X.fillStyle=sg;X.fillRect(sx-sr,sy-sr,sr*2,sr*2)}X.restore()}
+
+// Sparks
+if(tsi>0)for(let k=0;k<sp.length;k++){const e=sp[k];e.l+=.005;if(e.l>1){e.l=0;if(Math.random()<.85){e.x=Math.random()*S;e.y=S*.5+Math.random()*S*.35;e.vx=(Math.random()-.5)*1.5;e.vy=-Math.random()*3-1;e.f=true}else{const a=-Math.PI*Math.random();e.x=cx+Math.cos(a)*R;e.y=cy+Math.sin(a)*R;e.vx=Math.cos(a)*(Math.random()*2+.5);e.vy=Math.sin(a)*(Math.random()*2+.5)-Math.random()*1.5;e.f=false}e.sz=Math.random()*2.5+.5;e.h=(Math.random()*30+5)|0}
+e.x+=e.vx+Math.sin(t*2.5+e.y*.01)*.3;e.y+=e.vy;if(e.f)e.vy-=.02;const sy=e.y+oY;if(sy<-20||sy>S+20)continue;const a=(1-e.l)*.8;X.beginPath();X.arc(e.x,sy,e.sz*(1-e.l*.3),0,Math.PI*2);X.fillStyle=`hsla(${e.h},100%,${(50+e.l*25)|0}%,${a})`;X.fill()}
+
+// Post FX
+X.fillStyle=tsi>0?'rgba(255,100,30,.04)':'rgba(80,80,120,.03)';X.fillRect(-50,-50,S+100,S+100);
+X.fillStyle='rgba(255,255,255,.02)';for(let i=0;i<150;i++)X.fillRect(Math.random()*S,Math.random()*S,1,1);
+
+X.restore();
+
+// END TEXT — completely outside save/restore, no filters
+const eS=pS+5,eT=t-eS;
+if(eT>0){const m1="PROBABILITY: 0.004%",n1=Math.min(m1.length,Math.floor(eT*8)),t1=m1.substring(0,n1),a1=Math.min(1,eT*.5);
+X.save();X.globalAlpha=a1;X.font='bold 42px "Courier New",monospace';X.textAlign='center';X.textBaseline='middle';
+X.shadowColor='rgba(255,60,0,0.8)';X.shadowBlur=30;X.fillStyle=`rgba(255,${Math.max(100,(200-eT*10))|0},${Math.max(50,(150-eT*15))|0},1)`;
+X.fillText(t1,S/2,S/2);X.shadowBlur=0;
+if(n1<m1.length&&Math.sin(t*6)>0){const w=X.measureText(t1).width;X.fillStyle=`rgba(255,200,150,${a1})`;X.fillRect(S/2+w/2+2,S/2-18,3,36)}
+if(n1>=m1.length){const m2="...for now",t2=eT-m1.length/8,n2=Math.min(m2.length,Math.floor(t2*6));if(t2>0){const a2=Math.min(1,t2*.8);X.globalAlpha=a2;X.font='italic 28px Georgia,serif';X.fillStyle=`rgba(255,180,120,1)`;X.shadowColor='rgba(255,40,0,0.6)';X.shadowBlur=20;X.fillText(m2.substring(0,n2),S/2,S/2+50)}}
+X.restore()}
+
+requestAnimationFrame(render)}
+render();
+</script>
+</body>
+</html>

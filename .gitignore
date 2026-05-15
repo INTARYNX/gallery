@@ -1,0 +1,9 @@
+venv/
+__pycache__/
+*.pyc
+new/
+found/
+doc/
+.DS_Store
+shots.cmd
+web.cmd

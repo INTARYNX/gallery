@@ -1,0 +1,1529 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>The Long Walk to the Moon</title>
+<style>
+  :root{color-scheme:light dark}
+  html,body{height:100%;margin:0;background:#000;font-family:Inter,system-ui,Segoe UI,Roboto,Arial;display:flex;align-items:center;justify-content:center;}
+  #container{width:100%;height:100%;max-width:133.33vh;max-height:75vw;aspect-ratio:4/3;position:relative;background:#000;}
+  canvas{display:block;width:100%;height:100%;}
+</style>
+</head>
+<body>
+<div id="container">
+  <canvas id="c"></canvas>
+</div>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const container = document.getElementById('container');
+function updateCanvasSize(){
+  const rect = container.getBoundingClientRect();
+  canvas.width = rect.width;
+  canvas.height = rect.height;
+  W = canvas.width;
+  H = canvas.height;
+}
+let W, H, scale, isMobile;
+updateCanvasSize();
+addEventListener('resize', updateCanvasSize);
+
+function updateCanvasSize(){
+  const rect = container.getBoundingClientRect();
+  canvas.width = rect.width;
+  canvas.height = rect.height;
+  W = canvas.width;
+  H = canvas.height;
+  
+  isMobile = W < 768;
+  const referenceWidth = isMobile ? 375 : 1200;
+  const referenceHeight = isMobile ? 667 : 900;
+  scale = Math.min(W / referenceWidth, H / referenceHeight);
+}
+
+const SEG_LEN = 200;
+const ROAD_W = 400;
+const CAMERA_H = 1000;
+const CAMERA_DEPTH = 0.84;
+const DRAW_DISTANCE = 300;
+
+let segments = [];
+let seed = Math.random()*10000;
+let playerZ = 0;
+let speed = 300;
+let lastTime = performance.now();
+let time = 0;
+let dayTime = 0;
+let seasonTime = 0;
+let endSequence = false;
+let endTime = 0;
+let introSequence = true;
+let introTime = 0;
+
+let tapTimes = [];
+
+canvas.addEventListener('click', () => {
+  if(introSequence && introTime > 1) {
+    introSequence = false;
+    return;
+  }
+  
+  const now = Date.now();
+  tapTimes.push(now);
+  tapTimes = tapTimes.filter(t => now - t < 500);
+  if(tapTimes.length >= 3 && !endSequence) {
+    seasonTime = 3;
+    endSequence = true;
+    endTime = 0;
+    tapTimes = [];
+  }
+});
+
+function interpolateColor(color1, color2, t){
+  let r1, g1, b1;
+  if(color1.startsWith('rgb')) {
+    const match = color1.match(/\d+/g);
+    [r1, g1, b1] = match ? match.map(Number) : [0, 0, 0];
+  } else if(color1.startsWith('#')) {
+    r1 = parseInt(color1.slice(1,3), 16);
+    g1 = parseInt(color1.slice(3,5), 16);
+    b1 = parseInt(color1.slice(5,7), 16);
+  } else {
+    [r1, g1, b1] = [0, 0, 0];
+  }
+  
+  let r2, g2, b2;
+  if(color2.startsWith('rgb')) {
+    const match = color2.match(/\d+/g);
+    [r2, g2, b2] = match ? match.map(Number) : [0, 0, 0];
+  } else if(color2.startsWith('#')) {
+    r2 = parseInt(color2.slice(1,3), 16);
+    g2 = parseInt(color2.slice(3,5), 16);
+    b2 = parseInt(color2.slice(5,7), 16);
+  } else {
+    [r2, g2, b2] = [0, 0, 0];
+  }
+  
+  const r = Math.round(r1 + (r2 - r1) * t);
+  const g = Math.round(g1 + (g2 - g1) * t);
+  const b = Math.round(b1 + (b2 - b1) * t);
+    
+  return `rgb(${r},${g},${b})`;
+}
+
+function rand(min,max,seedOffset=0){
+  const x = Math.sin(seed + seedOffset) * 10000;
+  seed += 0.0001 + seedOffset*0.1;
+  return min + (x - Math.floor(x)) * (max-min);
+}
+function easeIn(a,b,t){ return a + (b-a)*(t*t); }
+function easeOut(a,b,t){ return a + (b-a)*(1 - Math.pow(1-t,2)); }
+
+function addSegment(curve, y){
+  const n = segments.length;
+  const sprites = [];
+    
+  function stableRandom(seed, offset = 0) {
+    const x = Math.sin(seed * 15731 + offset * 789221 + 1376312589) * 43758.5453;
+    return x - Math.floor(x);
+  }
+  
+  const r1 = stableRandom(n, 1);
+  const r2 = stableRandom(n, 2);
+  const r3 = stableRandom(n, 3);
+  const r4 = stableRandom(n, 4);
+  const r5 = stableRandom(n, 5);
+  const r6 = stableRandom(n, 6);
+  const r7 = stableRandom(n, 7);
+    
+  if(r1 > 0.7) {
+    sprites.push({
+      x: -2.5 - (r2 * 2),
+      type: 'tree',
+      variant: Math.floor(r5 * 3),
+      treeType: r2 > 0.5 ? 'fractal' : 'round',
+      hasEyes: r7 > 0.95
+    });
+  }
+  if(r2 > 0.7) {
+    sprites.push({
+      x: 2.5 + (r3 * 2),
+      type: 'tree',
+      variant: Math.floor(r6 * 3),
+      treeType: r3 > 0.5 ? 'fractal' : 'round',
+      hasEyes: r1 > 0.95
+    });
+  }
+  if(r3 > 0.8) {
+    sprites.push({
+      x: -5 - (r4 * 3),
+      type: 'tree',
+      variant: Math.floor(r1 * 3),
+      treeType: r4 > 0.5 ? 'fractal' : 'round',
+      hasEyes: r3 > 0.95
+    });
+  }
+  if(r4 > 0.8) {
+    sprites.push({
+      x: 5 + (r1 * 3),
+      type: 'tree',
+      variant: Math.floor(r2 * 3),
+      treeType: r5 > 0.5 ? 'fractal' : 'round',
+      hasEyes: r5 > 0.95
+    });
+  }
+    
+  segments.push({
+    index: n,
+    curve: curve || 0,
+    y: y || 0,
+    p1: {world: {z: n * SEG_LEN}},
+    p2: {world: {z: (n + 1) * SEG_LEN}},
+    sprites: sprites
+  });
+}
+
+function addRoad(enter, hold, leave, curve, height){
+  for(let i=0;i<enter;i++){
+    const t = i/enter;
+    addSegment(easeIn(0,curve,t), easeIn(0,height,t));
+  }
+  for(let i=0;i<hold;i++) addSegment(curve, height);
+  for(let i=0;i<leave;i++){
+    const t = i/leave;
+    addSegment(easeOut(curve,0,t), easeOut(height,0,t));
+  }
+}
+
+function buildTrack(){
+  segments.length = 0;
+  for(let i=0;i<20;i++) addSegment(0,0);
+  const sections = 60 + Math.floor(rand(0,30,1));
+  for(let s=0;s<sections;s++){
+    const type = Math.floor(rand(0,4,s));
+    if(type === 0){
+      addRoad(15 + Math.floor(rand(8,20,s+1)), 25 + Math.floor(rand(15,50,s+2)), 15 + Math.floor(rand(8,20,s+3)), rand(-2.5,2.5,s+4), 0);
+    } else if(type === 1){
+      addRoad(15 + Math.floor(rand(8,20,s+1)), 25 + Math.floor(rand(15,50,s+2)), 15 + Math.floor(rand(8,20,s+3)), 0, rand(-1200,1200,s+4));
+    } else if(type === 2){
+      addRoad(18 + Math.floor(rand(10,25,s+1)), 30 + Math.floor(rand(20,60,s+2)), 18 + Math.floor(rand(10,25,s+3)), rand(-2.2,2.2,s+4), rand(-900,900,s+5));
+    } else {
+      addRoad(12 + Math.floor(rand(6,15,s+1)), 20 + Math.floor(rand(10,30,s+2)), 12 + Math.floor(rand(6,15,s+3)), rand(1.5,2.5,s+4), rand(-400,400,s+5));
+      addRoad(12 + Math.floor(rand(6,15,s+6)), 20 + Math.floor(rand(10,30,s+7)), 12 + Math.floor(rand(6,15,s+8)), rand(-2.5,-1.5,s+9), rand(-400,400,s+10));
+    }
+  }
+  for(let i=0;i<30;i++) addSegment(0,0);
+  for(let i=0;i<segments.length;i++){
+    segments[i].p1.world.y = segments[i].y || 0;
+    segments[i].p2.world.y = (segments[i+1] ? segments[i+1].y : segments[i].y) || 0;
+    if(!segments[i].sprites) segments[i].sprites = [];
+  }
+}
+buildTrack();
+
+function project(p, cameraX, cameraY, cameraZ){
+  const dz = p.world.z - cameraZ;
+  if(dz <= 0) return null;
+  const scale = CAMERA_DEPTH / dz;
+  return {
+    x: (1 + (p.world.x - cameraX) * scale) * W/2,
+    y: Math.round((1 - (p.world.y - cameraY) * scale) * H/2),
+    w: scale * ROAD_W * W/2
+  };
+}
+
+function drawQuad(x1,y1,w1, x2,y2,w2, color){
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x1 - w1, y1);
+  ctx.lineTo(x2 - w2, y2);
+  ctx.lineTo(x2 + w2, y2);
+  ctx.lineTo(x1 + w1, y1);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function parseColor(color) {
+  if(color.startsWith('rgb')) {
+    const match = color.match(/\d+/g);
+    return match ? match.map(Number) : [0, 0, 0];
+  }
+  if(color.startsWith('#')) {
+    const r = parseInt(color.slice(1, 3), 16);
+    const g = parseInt(color.slice(3, 5), 16);
+    const b = parseInt(color.slice(5, 7), 16);
+    return [r, g, b];
+  }
+  return [0, 0, 0];
+}
+
+function drawTree(x, y, scale, nightFactor, opacity, distance, variant, hasEyes, treeType, season){
+  ctx.save();
+  ctx.globalAlpha = opacity;
+  ctx.translate(x, y);
+  ctx.scale(scale, scale);
+  
+  const trunkDay = '#5a5a5a';
+  const trunkNight = '#1a1a1a';
+  let trunkColor = interpolateColor(trunkDay, trunkNight, nightFactor);
+    
+  const trunk = parseColor(trunkColor);
+  const finalTrunk = trunk;
+  
+  const barkDark = [
+    Math.round(finalTrunk[0] * 0.7),
+    Math.round(finalTrunk[1] * 0.7),
+    Math.round(finalTrunk[2] * 0.7)
+  ];
+  
+  if(treeType === 'fractal') {
+    drawFractalTree();
+  } else {
+    drawRoundTree();
+  }
+  
+  function drawFractalTree() {
+    ctx.fillStyle = `rgb(${finalTrunk[0]},${finalTrunk[1]},${finalTrunk[2]})`;
+    
+    const depths = [3, 4, 5];
+    const angles = [20, 25, 30];
+    const lengths = [60, 80, 100];
+    
+    const depth = depths[variant % 3];
+    const angle = angles[variant % 3];
+    const length = lengths[variant % 3];
+    
+    drawBranch(0, 20, -90, length, 12, depth);
+    
+    function drawBranch(x, y, branchAngle, branchLength, width, branchDepth) {
+      if (branchDepth === 0 || branchLength < 2) return;
+      
+      const endX = x + Math.cos(branchAngle * Math.PI / 180) * branchLength;
+      const endY = y + Math.sin(branchAngle * Math.PI / 180) * branchLength;
+      
+      ctx.strokeStyle = `rgb(${finalTrunk[0]},${finalTrunk[1]},${finalTrunk[2]})`;
+      ctx.lineWidth = width;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(endX, endY);
+      ctx.stroke();
+      
+      if(width > 4) {
+        ctx.strokeStyle = `rgb(${barkDark[0]},${barkDark[1]},${barkDark[2]})`;
+        ctx.lineWidth = 1;
+        const barkLines = Math.floor(branchLength / 10);
+        for(let i = 0; i < barkLines; i++) {
+          const t = i / barkLines;
+          const bx = x + (endX - x) * t;
+          const by = y + (endY - y) * t;
+          const perpAngle = (branchAngle + 90) * Math.PI / 180;
+          const offset = width * 0.3;
+          ctx.beginPath();
+          ctx.moveTo(bx + Math.cos(perpAngle) * offset, by + Math.sin(perpAngle) * offset);
+          ctx.lineTo(bx - Math.cos(perpAngle) * offset, by - Math.sin(perpAngle) * offset);
+          ctx.stroke();
+        }
+      }
+
+      if (branchDepth > 1) {
+        drawBranch(endX, endY, branchAngle - angle, branchLength * 0.7, width * 0.7, branchDepth - 1);
+        drawBranch(endX, endY, branchAngle + angle, branchLength * 0.7, width * 0.7, branchDepth - 1);
+        
+        if (branchDepth > 2) {
+          drawBranch(endX, endY, branchAngle, branchLength * 0.6, width * 0.6, branchDepth - 1);
+        }
+      } else {
+        drawFoliage(endX, endY, width);
+      }
+    }
+  }
+  
+  function drawRoundTree() {
+    const seed1 = Math.sin(variant * 12.345) * 10000;
+    const seed2 = Math.sin(variant * 67.890) * 10000;
+    const seed3 = Math.sin(variant * 34.567) * 10000;
+    
+    const r1 = seed1 - Math.floor(seed1);
+    const r2 = seed2 - Math.floor(seed2);
+    const r3 = seed3 - Math.floor(seed3);
+    
+    const trunkWidth = 10 + r2 * 8;
+    const trunkHeight = 70 + r3 * 40;
+    const foliageY = -40 - r1 * 30;
+    const foliageSize = 40 + r2 * 30;
+    const numBranches = 3 + Math.floor(r3 * 3);
+    
+    ctx.fillStyle = `rgb(${finalTrunk[0]},${finalTrunk[1]},${finalTrunk[2]})`;
+    ctx.fillRect(-trunkWidth/2, foliageY, trunkWidth, trunkHeight);
+    
+    ctx.strokeStyle = `rgb(${barkDark[0]},${barkDark[1]},${barkDark[2]})`;
+    ctx.lineWidth = 2;
+    for(let i = 0; i < 5; i++) {
+      const xPos = -trunkWidth * 0.4 + i * (trunkWidth * 0.2);
+      ctx.beginPath();
+      ctx.moveTo(xPos, foliageY);
+      ctx.lineTo(xPos + (Math.sin(variant + i) * 2), foliageY + trunkHeight - 10);
+      ctx.stroke();
+    }
+    
+    for(let i = 0; i < numBranches; i++) {
+      const angleOffset = (Math.sin((variant + i) * 7.89) - 0.5) * 60;
+      const branchLength = 30 + (Math.sin((variant + i) * 4.56) * 0.5 + 0.5) * 30;
+      const startY = foliageY + 20 + i * 15;
+      
+      drawBranchWithFoliage(0, startY, angleOffset - 90, branchLength, i);
+    }
+    
+    function drawBranchWithFoliage(x, y, angle, length, branchIndex) {
+      const endX = x + Math.cos(angle * Math.PI / 180) * length;
+      const endY = y + Math.sin(angle * Math.PI / 180) * length;
+      
+      ctx.strokeStyle = `rgb(${finalTrunk[0]},${finalTrunk[1]},${finalTrunk[2]})`;
+      ctx.lineWidth = 4;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(endX, endY);
+      ctx.stroke();
+      
+      const leafSize = foliageSize * (0.6 + (Math.sin((variant + branchIndex) * 9.87) * 0.5 + 0.5) * 0.4);
+      
+      let foliageDay;
+      if (season < 1) {
+        foliageDay = interpolateColor('#4a6b4a', '#2d5016', season);
+      } else if (season < 2) {
+        foliageDay = interpolateColor('#2d5016', '#1a4010', season - 1);
+      } else if (season < 3) {
+        foliageDay = interpolateColor('#1a4010', '#d2691e', season - 2);
+      } else {
+        foliageDay = interpolateColor('#d2691e', '#f0f0f0', season - 3);
+      }
+      
+      const foliageNight = '#0a1a0a';
+      let foliageColor = interpolateColor(foliageDay, foliageNight, nightFactor);
+      const foliage = parseColor(foliageColor);
+      const finalFoliage = foliage;
+      
+      const winterFactor = season >= 3 ? (season - 3) : 0;
+      const sizeMultiplier = 1 - winterFactor * 0.5;
+      
+      ctx.globalAlpha = opacity * 0.6 * sizeMultiplier;
+      ctx.fillStyle = `rgb(${finalFoliage[0]},${finalFoliage[1]},${finalFoliage[2]})`;
+      ctx.beginPath();
+      ctx.arc(endX, endY, leafSize * sizeMultiplier, 0, Math.PI * 2);
+      ctx.fill();
+      
+      ctx.globalAlpha = opacity * 0.5 * sizeMultiplier;
+      const foliageLight = [
+        Math.min(255, Math.round(finalFoliage[0] * 1.3)),
+        Math.min(255, Math.round(finalFoliage[1] * 1.3)),
+        Math.min(255, Math.round(finalFoliage[2] * 1.3))
+      ];
+      ctx.fillStyle = `rgb(${foliageLight[0]},${foliageLight[1]},${foliageLight[2]})`;
+      
+      const numClusters = 2 + Math.floor((Math.sin((variant + branchIndex) * 5.43) * 0.5 + 0.5) * 2);
+      for(let j = 0; j < numClusters; j++) {
+        const clusterAngle = (j * 360 / numClusters + variant * 10) * Math.PI / 180;
+        const clusterDist = leafSize * 0.5;
+        const clusterSize = leafSize * (0.4 + (Math.sin((variant + j) * 6.78) * 0.5 + 0.5) * 0.3);
+        ctx.beginPath();
+        ctx.arc(
+          endX + Math.cos(clusterAngle) * clusterDist,
+          endY + Math.sin(clusterAngle) * clusterDist,
+          clusterSize * sizeMultiplier,
+          0, Math.PI * 2
+        );
+        ctx.fill();
+      }
+      
+      if(season < 1 && nightFactor < 0.5) {
+        const brightness = 1 - nightFactor * 0.6;
+        const flowerBrightness = (1 - nightFactor * 2) * brightness;
+        
+        const springProgress = season;
+        const flyAwayStart = 0.66;
+        const shouldFlyAway = springProgress >= flyAwayStart;
+        
+        ctx.globalAlpha = opacity * (0.4 + season * 0.4) * flowerBrightness;
+        const flowerR = Math.round(255 * brightness);
+        const flowerG = Math.round(250 * brightness);
+        const flowerB = Math.round(250 * brightness);
+        ctx.fillStyle = `rgb(${flowerR}, ${flowerG}, ${flowerB})`;
+        const numFlowers = 8 + Math.floor((Math.sin(variant + branchIndex) * 0.5 + 0.5) * 8);
+        for(let f = 0; f < numFlowers; f++) {
+          const flowerSeedAngle = Math.sin((variant + branchIndex + f) * 45.678) * 10000;
+          const flowerSeedDist = Math.sin((variant + branchIndex + f) * 78.901) * 10000;
+          
+          const baseFlowerAngle = ((flowerSeedAngle - Math.floor(flowerSeedAngle)) * 360 + f * 30) * Math.PI / 180;
+          const flowerDist = leafSize * (0.2 + (flowerSeedDist - Math.floor(flowerSeedDist)) * 0.7);
+          
+          let fx = endX + Math.cos(baseFlowerAngle) * flowerDist;
+          let fy = endY + Math.sin(baseFlowerAngle) * flowerDist;
+          
+          if(shouldFlyAway) {
+            const flyProgress = (springProgress - flyAwayStart) / (1 - flyAwayStart);
+            const drift = Math.sin(time * 2 + f) * 15 * flyProgress;
+            fx += (50 + f * 20) * flyProgress + drift;
+            fy += (Math.sin(time + f) * 10 - 30) * flyProgress;
+            ctx.globalAlpha *= (1 - flyProgress * 0.7);
+          }
+          
+          ctx.beginPath();
+          ctx.arc(fx, fy, 1.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      } else if(season >= 1 && season < 2 && nightFactor < 0.7) {
+        const brightness = 1 - nightFactor * 0.6;
+        ctx.globalAlpha = opacity * 0.7 * brightness;
+        const fruitR = Math.round(100 * brightness);
+        const fruitG = Math.round(150 * brightness);
+        const fruitB = Math.round(80 * brightness);
+        ctx.fillStyle = `rgb(${fruitR}, ${fruitG}, ${fruitB})`;
+        const numFruits = 3 + Math.floor((Math.sin(variant + branchIndex) * 0.5 + 0.5) * 3);
+        for(let f = 0; f < numFruits; f++) {
+          const fruitAngle = (f * 360 / numFruits + variant * 15) * Math.PI / 180;
+          const fruitDist = leafSize * (0.4 + (Math.sin(f * 2.5) * 0.5 + 0.5) * 0.3);
+          const fx = endX + Math.cos(fruitAngle) * fruitDist;
+          const fy = endY + Math.sin(fruitAngle) * fruitDist;
+          ctx.beginPath();
+          ctx.arc(fx, fy, 3, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      } else if(season >= 2 && season < 3 && nightFactor < 0.7) {
+        const brightness = 1 - nightFactor * 0.6;
+        ctx.globalAlpha = opacity * 0.8 * brightness;
+        const fruitR = Math.round(180 * brightness);
+        const fruitG = Math.round(40 * brightness);
+        const fruitB = Math.round(40 * brightness);
+        ctx.fillStyle = `rgb(${fruitR}, ${fruitG}, ${fruitB})`;
+        const numFruits = 3 + Math.floor((Math.sin(variant + branchIndex) * 0.5 + 0.5) * 3);
+        for(let f = 0; f < numFruits; f++) {
+          const fruitAngle = (f * 360 / numFruits + variant * 15) * Math.PI / 180;
+          const fruitDist = leafSize * (0.4 + (Math.sin(f * 2.5) * 0.5 + 0.5) * 0.3);
+          const fx = endX + Math.cos(fruitAngle) * fruitDist;
+          const fy = endY + Math.sin(fruitAngle) * fruitDist;
+          ctx.beginPath();
+          ctx.arc(fx, fy, 3, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+    
+    ctx.globalAlpha = opacity;
+  }
+  
+  function drawFoliage(endX, endY, width) {
+    let foliageDay;
+    if (season < 1) {
+      foliageDay = interpolateColor('#4a6b4a', '#2d5016', season);
+    } else if (season < 2) {
+      foliageDay = interpolateColor('#2d5016', '#1a4010', season - 1);
+    } else if (season < 3) {
+      foliageDay = interpolateColor('#1a4010', '#d2691e', season - 2);
+    } else {
+      foliageDay = interpolateColor('#d2691e', '#f0f0f0', season - 3);
+    }
+    
+    const foliageNight = '#0a1a0a';
+    let foliageColor = interpolateColor(foliageDay, foliageNight, nightFactor);
+    
+    const foliage = parseColor(foliageColor);
+    const finalFoliage = foliage;
+    
+    const foliageSize = width * 3;
+    
+    const winterFactor = season >= 3 ? (season - 3) : 0;
+    const sizeMultiplier = 1 - winterFactor * 0.5;
+    
+    ctx.globalAlpha = opacity * 0.6 * sizeMultiplier;
+    ctx.fillStyle = `rgb(${finalFoliage[0]},${finalFoliage[1]},${finalFoliage[2]})`;
+    ctx.beginPath();
+    ctx.arc(endX, endY, foliageSize * sizeMultiplier, 0, Math.PI * 2);
+    ctx.fill();
+    
+    const foliageLight = [
+      Math.min(255, Math.round(finalFoliage[0] * 1.3)),
+      Math.min(255, Math.round(finalFoliage[1] * 1.3)),
+      Math.min(255, Math.round(finalFoliage[2] * 1.3))
+    ];
+    ctx.globalAlpha = opacity * 0.4 * sizeMultiplier;
+    ctx.fillStyle = `rgb(${foliageLight[0]},${foliageLight[1]},${foliageLight[2]})`;
+    ctx.beginPath();
+    ctx.arc(endX - foliageSize * 0.3, endY - foliageSize * 0.2, foliageSize * 0.7 * sizeMultiplier, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(endX + foliageSize * 0.3, endY - foliageSize * 0.2, foliageSize * 0.7 * sizeMultiplier, 0, Math.PI * 2);
+    ctx.fill();
+    
+    ctx.globalAlpha = opacity * 0.3 * sizeMultiplier;
+    for(let i = 0; i < 3; i++) {
+      const offsetAngle = (i * 120) * Math.PI / 180;
+      const offsetDist = foliageSize * 0.5;
+      ctx.beginPath();
+      ctx.arc(
+        endX + Math.cos(offsetAngle) * offsetDist,
+        endY + Math.sin(offsetAngle) * offsetDist,
+        foliageSize * 0.5 * sizeMultiplier,
+        0, Math.PI * 2
+      );
+      ctx.fill();
+    }
+    
+    ctx.globalAlpha = opacity;
+  }
+  
+  if(hasEyes && nightFactor > 0.5) {
+    const eyeIntensity = (nightFactor - 0.5) * 2;
+    const eyeY = -40;
+    const eyeSpacing = 18;
+    
+    const glowGradient = ctx.createRadialGradient(-eyeSpacing/2, eyeY, 0, -eyeSpacing/2, eyeY, 8);
+    glowGradient.addColorStop(0, `rgba(255, 255, 100, ${eyeIntensity * 0.5})`);
+    glowGradient.addColorStop(1, 'rgba(255, 255, 100, 0)');
+    ctx.fillStyle = glowGradient;
+    ctx.fillRect(-eyeSpacing/2 - 8, eyeY - 8, 16, 16);
+    
+    const glowGradient2 = ctx.createRadialGradient(eyeSpacing/2, eyeY, 0, eyeSpacing/2, eyeY, 8);
+    glowGradient2.addColorStop(0, `rgba(255, 255, 100, ${eyeIntensity * 0.5})`);
+    glowGradient2.addColorStop(1, 'rgba(255, 255, 100, 0)');
+    ctx.fillStyle = glowGradient2;
+    ctx.fillRect(eyeSpacing/2 - 8, eyeY - 8, 16, 16);
+    
+    ctx.fillStyle = `rgba(255, 255, 100, ${eyeIntensity})`;
+    ctx.beginPath();
+    ctx.arc(-eyeSpacing/2, eyeY, 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(eyeSpacing/2, eyeY, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+    
+  ctx.restore();
+}
+
+function frame(now){
+  const dt = Math.min((now - lastTime)/1000, 0.05);
+  lastTime = now;
+  update(dt);
+  render();
+  requestAnimationFrame(frame);
+}
+
+function update(dt){
+  time += dt;
+  
+  if(introSequence) {
+    introTime += dt;
+    if(introTime > 3) {
+      introSequence = false;
+    }
+    return;
+  }
+  
+  dayTime += dt * 0.1;
+  if (dayTime > 2) dayTime -= 2;
+  
+  if(!endSequence) {
+    seasonTime += dt * 0.1 / 2;
+    if(seasonTime >= 4) {
+      seasonTime = 3.5;
+      endSequence = true;
+      endTime = 0;
+    }
+  }
+  
+  if(endSequence) {
+    seasonTime = 3;
+    endTime += dt;
+  }
+  
+  playerZ += speed * dt;
+  while(playerZ >= segments.length*SEG_LEN) playerZ -= segments.length*SEG_LEN;
+}
+
+function render(){
+  if(introSequence) {
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, W, H);
+    
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    
+    const titleFadeIn = Math.min(introTime / 1, 1);
+    const titleFadeOut = introTime > 2 ? Math.min((introTime - 2) / 1, 1) : 0;
+    const titleOpacity = titleFadeIn * (1 - titleFadeOut);
+    
+    if(titleOpacity > 0) {
+      ctx.globalAlpha = titleOpacity;
+      
+      const titleSize = Math.min(W * 0.06, 36);
+      const subtitleSize = Math.min(W * 0.03, 18);
+      
+      ctx.font = `bold ${titleSize}px Inter, sans-serif`;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText('The Long Walk to the Moon', W / 2, H / 2 - titleSize * 0.3);
+      
+      ctx.font = `${subtitleSize}px Inter, sans-serif`;
+      ctx.fillStyle = '#aaaaaa';
+      ctx.fillText('A Vanilla JS cinematic canvas by intarynx', W / 2, H / 2 + titleSize * 0.8);
+    }
+    
+    ctx.restore();
+    return;
+  }
+  
+  const cycleTime = dayTime % 2; 
+  const nightFactor = (cycleTime > 1) ? 2 - cycleTime : cycleTime;
+  const season = endSequence ? 4 : (seasonTime % 4);
+  
+  if(endSequence && endTime > 5) {
+    const starsFadeIn = Math.min((endTime - 5) / 2, 1);
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, W, H);
+    
+    const numStars = 200;
+    for(let i = 0; i < numStars; i++) {
+      const seed1 = Math.sin(i * 12.9898) * 43758.5453;
+      const seed2 = Math.sin(i * 78.233) * 43758.5453;
+      const seed3 = Math.sin(i * 45.164) * 43758.5453;
+      
+      const sx = (seed1 - Math.floor(seed1)) * W;
+      const sy = (seed2 - Math.floor(seed2)) * H;
+      const size = 0.5 + (seed3 - Math.floor(seed3)) * 1;
+      
+      const twinkle = Math.sin(time * 3 + i * 0.5) * 0.3 + 0.7;
+      const opacity = starsFadeIn * twinkle;
+      
+      ctx.fillStyle = `rgba(255, 255, 255, ${opacity})`;
+      ctx.beginPath();
+      ctx.arc(sx, sy, size, 0, Math.PI * 2);
+      ctx.fill();
+      
+      if(size > 1.2 && twinkle > 0.8) {
+        const glowSize = size * 2;
+        const glowGrad = ctx.createRadialGradient(sx, sy, 0, sx, sy, glowSize);
+        glowGrad.addColorStop(0, `rgba(255, 255, 255, ${opacity * 0.3})`);
+        glowGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        ctx.fillStyle = glowGrad;
+        ctx.beginPath();
+        ctx.arc(sx, sy, glowSize, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    
+    if(endTime > 7) {
+      const textFadeIn = Math.min((endTime - 7) / 2, 1);
+      const text = "Through all seasons, one path. At the end of the path, infinity. ";
+      
+      ctx.save();
+      ctx.globalAlpha = textFadeIn;
+      
+      const fontSize = Math.min(W * 0.035, 22);
+      ctx.font = `bold ${fontSize}px Inter, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      
+      const radius = H * 0.42;
+      const centerX = W / 2;
+      const centerY = H / 2;
+      const rotationSpeed = time * 0.25;
+      
+      const chars = [];
+      const spaceWidth = ctx.measureText(' ').width;
+      
+      for(let i = 0; i < text.length; i++) {
+        const char = text[i];
+        const width = ctx.measureText(char).width;
+        const arcLength = (width + spaceWidth * 2) * 1.5;
+        const arcAngle = arcLength / radius;
+        chars.push({ char, arcAngle });
+      }
+      
+      const totalAngle = chars.reduce((sum, c) => sum + c.arcAngle, 0);
+      const normalizer = (Math.PI * 2) / totalAngle;
+      
+      let currentAngle = rotationSpeed;
+      
+      for(let i = 0; i < chars.length; i++) {
+        const { char, arcAngle } = chars[i];
+        const normalizedArc = arcAngle * normalizer;
+        const angle = currentAngle + normalizedArc / 2;
+        
+        const x = centerX + Math.cos(angle) * radius;
+        const y = centerY + Math.sin(angle) * radius;
+        
+        const phraseFactor = i / chars.length;
+        const intensity = 1 - (phraseFactor * 0.3);
+        
+        if(char.trim()) {
+          ctx.save();
+          ctx.translate(x, y);
+          ctx.rotate(angle + Math.PI / 2);
+          
+          const wave = Math.sin(time * 2 + i * 0.3) * 0.2 + 0.8;
+          
+          ctx.fillStyle = `rgba(255, 255, 255, ${wave * intensity})`;
+          ctx.shadowColor = `rgba(255, 255, 255, ${0.6 * intensity})`;
+          ctx.shadowBlur = 8;
+          ctx.fillText(char, 0, 0);
+          
+          ctx.restore();
+        }
+        
+        currentAngle += normalizedArc;
+      }
+      
+      ctx.restore();
+    }
+    
+    return;
+  }
+  
+  let skyTopDay, skyBotDay;
+  if(endSequence) {
+    skyTopDay = '#ffffff';
+    skyBotDay = '#ffffff';
+  } else if (season < 1) {
+    skyTopDay = interpolateColor('#87ceeb', '#90d5ff', season);
+    skyBotDay = interpolateColor('#b0d4f1', '#c5e5ff', season);
+  } else if (season < 2) {
+    skyTopDay = interpolateColor('#90d5ff', '#4a9fd8', season - 1);
+    skyBotDay = interpolateColor('#c5e5ff', '#87ceeb', season - 1);
+  } else if (season < 3) {
+    skyTopDay = interpolateColor('#4a9fd8', '#a08870', season - 2);
+    skyBotDay = interpolateColor('#87ceeb', '#c5a882', season - 2);
+  } else {
+    skyTopDay = interpolateColor('#a08870', '#d0dce5', season - 3);
+    skyBotDay = interpolateColor('#c5a882', '#e8f0f5', season - 3);
+  }
+
+  const skyTopNight = endSequence ? '#ffffff' : '#000020';
+  const skyBotNight = endSequence ? '#ffffff' : '#0a0a2a';
+  const skyTop = interpolateColor(skyTopDay, skyTopNight, nightFactor);
+  const skyBot = interpolateColor(skyBotDay, skyBotNight, nightFactor);
+
+  const g = ctx.createLinearGradient(0,0,0,H/2);
+  g.addColorStop(0, skyTop);
+  g.addColorStop(1, skyBot);
+  ctx.fillStyle = g;
+  ctx.fillRect(0,0,W,H/2);
+  
+  const moonOpacity = 0.3 + nightFactor * 0.6;
+  const baseMoonSize = isMobile ? 35 : 80;
+  let moonSize = baseMoonSize + (seasonTime * 20);
+  
+  if(endSequence) {
+    const endProgress = Math.min(endTime / 5, 1);
+    moonSize = baseMoonSize + (seasonTime * 20) + (endProgress * Math.max(W, H) * 2);
+  }
+  
+  const moonX = W / 2;
+  const moonY = H * 0.2;
+  
+  const moonGlow = ctx.createRadialGradient(moonX, moonY, 0, moonX, moonY, moonSize * 2);
+  moonGlow.addColorStop(0, `rgba(255, 255, 200, ${moonOpacity * 0.3})`);
+  moonGlow.addColorStop(0.5, `rgba(255, 255, 200, ${moonOpacity * 0.1})`);
+  moonGlow.addColorStop(1, 'rgba(255, 255, 200, 0)');
+  ctx.fillStyle = moonGlow;
+  ctx.fillRect(moonX - moonSize * 2, moonY - moonSize * 2, moonSize * 4, moonSize * 4);
+  
+  ctx.fillStyle = `rgba(240, 240, 220, ${moonOpacity * 0.9})`;
+  ctx.beginPath();
+  ctx.arc(moonX, moonY, moonSize, 0, Math.PI * 2);
+  ctx.fill();
+  
+  if(moonSize < 200) {
+    ctx.fillStyle = `rgba(200, 200, 180, ${moonOpacity * 0.3})`;
+    ctx.beginPath();
+    ctx.arc(moonX - moonSize * 0.3, moonY - moonSize * 0.2, moonSize * 0.15, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(moonX + moonSize * 0.2, moonY + moonSize * 0.3, moonSize * 0.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(moonX + moonSize * 0.1, moonY - moonSize * 0.4, moonSize * 0.1, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  
+  let forestColorDay;
+  if(endSequence) {
+    forestColorDay = '#ffffff';
+  } else if (season < 1) {
+    forestColorDay = '#1a4010';
+  } else if (season < 2) {
+    forestColorDay = interpolateColor('#1a4010', '#0f2808', season - 1);
+  } else if (season < 3) {
+    forestColorDay = interpolateColor('#0f2808', '#5a4a3a', season - 2);
+  } else {
+    forestColorDay = interpolateColor('#5a4a3a', '#8090a0', season - 3);
+  }
+  
+  const forestColorNight = endSequence ? '#ffffff' : '#000000';
+  const forestColor = interpolateColor(forestColorDay, forestColorNight, nightFactor);
+  
+  const horizonY = H * 0.5;
+  
+  let forestOpacity = 1;
+  if(endSequence && endTime > 0) {
+    forestOpacity = Math.max(0, 1 - endTime / 1);
+  }
+  
+  ctx.globalAlpha = forestOpacity;
+  ctx.fillStyle = forestColor;
+  ctx.beginPath();
+  ctx.moveTo(0, horizonY);
+  
+  for(let x = 0; x <= W; x += 20 * scale) {
+    const variation = Math.sin(x * 0.05) * 8 + Math.sin(x * 0.02) * 5;
+    ctx.lineTo(x, horizonY - 15 * scale + variation);
+  }
+  
+  ctx.lineTo(W, H/2);
+  ctx.lineTo(0, H/2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  
+  if(!endSequence) {
+    const birdAppearCycle = Math.floor(time / 15);
+    const birdSeed = Math.sin(birdAppearCycle * 789.123) * 10000;
+    const shouldShowBird = (birdSeed - Math.floor(birdSeed)) > 0.6;
+    
+    if(shouldShowBird) {
+      const numBirds = (birdSeed - Math.floor(birdSeed)) > 0.8 ? 2 : 1;
+      
+      for(let i = 0; i < numBirds; i++) {
+        const birdSeed2 = Math.sin((birdAppearCycle + i) * 123.456) * 10000;
+        
+        const localTime = (time % 15) / 15;
+        const bx = localTime * W * 1.4 - W * 0.2 + i * 40 * scale;
+        const by = H * 0.12 + (birdSeed2 - Math.floor(birdSeed2)) * H * 0.15;
+        const floatY = Math.sin(time * 0.5 + i) * 5 * scale;
+        
+        const wingPhase = Math.sin(time * 4 + i * 2);
+        const wingY = Math.abs(wingPhase) * 4 * scale;
+        
+        const birdBrightness = 1 - nightFactor * 0.6;
+        const birdAlpha = 0.5;
+        ctx.strokeStyle = `rgba(${Math.round(50 * birdBrightness)}, ${Math.round(50 * birdBrightness)}, ${Math.round(50 * birdBrightness)}, ${birdAlpha})`;
+        ctx.lineWidth = 1.5 * scale;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        
+        ctx.beginPath();
+        ctx.moveTo(bx - 10 * scale, by + floatY + wingY);
+        ctx.lineTo(bx - 3 * scale, by + floatY);
+        ctx.lineTo(bx, by + floatY);
+        ctx.stroke();
+        
+        ctx.beginPath();
+        ctx.moveTo(bx + 10 * scale, by + floatY + wingY);
+        ctx.lineTo(bx + 3 * scale, by + floatY);
+        ctx.lineTo(bx, by + floatY);
+        ctx.stroke();
+      }
+    }
+  }
+
+  let grassDay;
+  if(endSequence) {
+    grassDay = '#ffffff';
+  } else if (season < 1) {
+    grassDay = interpolateColor('#3d6b3d', '#2d7c2d', season);
+  } else if (season < 2) {
+    grassDay = interpolateColor('#2d7c2d', '#1d6c1d', season - 1);
+  } else if (season < 3) {
+    grassDay = interpolateColor('#1d6c1d', '#8b6e45', season - 2);
+  } else {
+    grassDay = interpolateColor('#8b6e45', '#b5c0c8', season - 3);
+  }
+  
+  const grassNight = endSequence ? '#ffffff' : '#050505';
+  const grassColor = interpolateColor(grassDay, grassNight, nightFactor);
+  ctx.fillStyle = grassColor;
+  ctx.fillRect(0,H/2,W,H/2);
+
+  const baseSegmentIndex = Math.floor(playerZ/SEG_LEN);
+  const baseSegment = segments[baseSegmentIndex % segments.length];
+  if(!baseSegment) return;
+
+  const basePercent = (playerZ % SEG_LEN) / SEG_LEN;
+  const nextSegment = segments[(baseSegmentIndex + 1) % segments.length];
+  const interpolatedY = baseSegment.y + (nextSegment.y - baseSegment.y) * basePercent;
+
+  const cameraY = CAMERA_H + interpolatedY;
+  const cameraZ = playerZ + SEG_LEN*CAMERA_DEPTH;
+  let maxY = H;
+
+  const spritesToDraw = [];
+  let worldOpacity = 1;
+  
+  if(endSequence) {
+    if(endTime <= 1) {
+      worldOpacity = Math.max(0, 1 - endTime / 1);
+    } else {
+      worldOpacity = 0;
+    }
+  }
+  
+  const segmentPositions = [];
+  let tempX = 0;
+  let tempDx = 0;
+  
+  for(let n=0;n<DRAW_DISTANCE;n++){
+    const segIndex = (baseSegmentIndex + n) % segments.length;
+    const seg = segments[segIndex];
+    tempDx += seg.curve;
+    tempX += tempDx;
+    segmentPositions.push({x: tempX, dx: tempDx, seg: seg, segIndex: segIndex});
+  }
+  
+  const cameraX = segmentPositions[0] ? segmentPositions[0].x : 0;
+  
+  segmentPositions.forEach(({x: segX, dx: segDx, seg, segIndex}) => {
+    if(seg.sprites && seg.sprites.length > 0) {
+      seg.sprites.forEach(sprite => {
+        const spriteWorldX = segX + sprite.x * ROAD_W;
+        const spriteWorldY = seg.p1.world.y;
+        const spriteWorldZ = seg.p1.world.z;
+        
+        const spriteProj = project({world:{x: spriteWorldX, y: spriteWorldY, z: spriteWorldZ}}, cameraX, cameraY, cameraZ);
+        if(spriteProj) {
+          spritesToDraw.push({
+            x: spriteProj.x,
+            y: spriteProj.y,
+            z: spriteWorldZ,
+            scale: spriteProj.w / 100,
+            variant: sprite.variant || 0,
+            treeType: sprite.treeType || 'fractal',
+            hasEyes: sprite.hasEyes || false
+          });
+        }
+      });
+    }
+  });
+
+  for(let n=0;n<segmentPositions.length;n++){
+    const {x: segX, dx: segDx, seg, segIndex} = segmentPositions[n];
+    
+    const p1 = {world:{x: segX, y: seg.p1.world.y, z: seg.p1.world.z}};
+    const p2 = {world:{x: segX + segDx, y: seg.p2.world.y, z: seg.p2.world.z}};
+
+    const proj1 = project(p1, cameraX, cameraY, cameraZ);
+    const proj2 = project(p2, cameraX, cameraY, cameraZ);
+
+    if(!proj1 || proj2.y >= maxY) continue;
+
+    let grass1Day, grass2Day;
+    if(endSequence) {
+      grass1Day = '#ffffff';
+      grass2Day = '#f5f5f5';
+    } else if (season < 1) {
+      grass1Day = interpolateColor('#4a7a4a', '#3c8b3c', season);
+      grass2Day = interpolateColor('#3d6b3d', '#2d7c2d', season);
+    } else if (season < 2) {
+      grass1Day = interpolateColor('#3c8b3c', '#2d7c2d', season - 1);
+      grass2Day = interpolateColor('#2d7c2d', '#1d6c1d', season - 1);
+    } else if (season < 3) {
+      grass1Day = interpolateColor('#2d7c2d', '#9b7e55', season - 2);
+      grass2Day = interpolateColor('#1d6c1d', '#8b6e45', season - 2);
+    } else {
+      grass1Day = interpolateColor('#9b7e55', '#c5d0d8', season - 3);
+      grass2Day = interpolateColor('#8b6e45', '#b5c0c8', season - 3);
+    }
+        
+    const grassNight1 = endSequence ? '#ffffff' : '#0a0a0a';
+    const grassNight2 = endSequence ? '#f5f5f5' : '#050505';
+    const g1 = interpolateColor(grass1Day, grassNight1, nightFactor);
+    const g2 = interpolateColor(grass2Day, grassNight2, nightFactor);
+    
+    ctx.globalAlpha = worldOpacity;
+    
+    const checkerSize = 3;
+    const numColumns = 30;
+    const isRowEven = Math.floor(segIndex / checkerSize) % 2 === 0;
+    
+    const worldWidth = ROAD_W * 20;
+    
+    for(let col = 0; col < numColumns; col++) {
+      const isColEven = col % 2 === 0;
+      const useG1 = isRowEven ? isColEven : !isColEven;
+      const color = useG1 ? g1 : g2;
+      
+      const t1 = (col - numColumns/2) / (numColumns/2);
+      const t2 = (col + 1 - numColumns/2) / (numColumns/2);
+      
+      const worldX1Left = segX + t1 * worldWidth;
+      const worldX1Right = segX + t2 * worldWidth;
+      const worldX2Left = (segX + segDx) + t1 * worldWidth;
+      const worldX2Right = (segX + segDx) + t2 * worldWidth;
+      
+      const proj1Left = project({world:{x: worldX1Left, y: seg.p1.world.y, z: seg.p1.world.z}}, cameraX, cameraY, cameraZ);
+      const proj1Right = project({world:{x: worldX1Right, y: seg.p1.world.y, z: seg.p1.world.z}}, cameraX, cameraY, cameraZ);
+      const proj2Left = project({world:{x: worldX2Left, y: seg.p2.world.y, z: seg.p2.world.z}}, cameraX, cameraY, cameraZ);
+      const proj2Right = project({world:{x: worldX2Right, y: seg.p2.world.y, z: seg.p2.world.z}}, cameraX, cameraY, cameraZ);
+      
+      if(proj1Left && proj1Right && proj2Left && proj2Right) {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(proj1Left.x, proj1Left.y);
+        ctx.lineTo(proj2Left.x, proj2Left.y);
+        ctx.lineTo(proj2Right.x, proj2Right.y);
+        ctx.lineTo(proj1Right.x, proj1Right.y);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+
+    const roadDay1 = endSequence ? '#ffffff' : (season >= 3 ? interpolateColor('#5A4939', '#d0d0d0', season - 3) : '#5A4939');
+    const roadDay2 = endSequence ? '#f5f5f5' : (season >= 3 ? interpolateColor('#6B5A4A', '#e0e0e0', season - 3) : '#6B5A4A');
+    const roadNight1 = endSequence ? '#ffffff' : (season >= 3 ? interpolateColor('#0f0f0f', '#a0a0a0', season - 3) : '#0f0f0f');
+    const roadNight2 = endSequence ? '#f5f5f5' : (season >= 3 ? interpolateColor('#1a1a1a', '#b0b0b0', season - 3) : '#1a1a1a');
+        
+    const r1 = interpolateColor(roadDay1, roadNight1, nightFactor);
+    const r2 = interpolateColor(roadDay2, roadNight2, nightFactor);
+    const roadColor = (Math.floor(segIndex/3) % 2 === 0) ? r1 : r2;
+    drawQuad(proj1.x, proj1.y, proj1.w, proj2.x, proj2.y, proj2.w, roadColor);
+    ctx.globalAlpha = 1;
+        
+    maxY = proj2.y;
+  }
+    
+  spritesToDraw.sort((a, b) => b.z - a.z);
+  spritesToDraw.forEach(sprite => {
+    const distanceFromCamera = sprite.z - cameraZ;
+    const maxDistance = DRAW_DISTANCE * SEG_LEN;
+    const fadeStart = maxDistance * 0.7;
+
+    let opacity = worldOpacity;
+    if(distanceFromCamera > fadeStart) {
+      const fadeProgress = (distanceFromCamera - fadeStart) / (maxDistance - fadeStart);
+      opacity = (1 - Math.pow(fadeProgress, 0.5)) * worldOpacity;
+      opacity = Math.max(0, Math.min(1, opacity));
+    }
+    
+    drawTree(sprite.x, sprite.y, sprite.scale, nightFactor, opacity, distanceFromCamera, sprite.variant, sprite.hasEyes, sprite.treeType, season);
+  });
+  
+  if(endSequence && endTime > 1 && endTime < 5) {
+    const portalProgress = Math.min((endTime - 1) / 2, 1);
+    const portalOpacity = portalProgress;
+    
+    const portalX = W / 2;
+    const portalY = H * 0.45;
+    const portalWidth = isMobile ? 80 : 100;
+    const portalHeight = isMobile ? 144 : 180;
+    
+    const crossProgress = endTime > 3 ? Math.min((endTime - 3) / 1, 1) : 0;
+    
+    ctx.globalAlpha = portalOpacity;
+    
+    ctx.fillStyle = '#000000';
+    ctx.beginPath();
+    ctx.moveTo(portalX - portalWidth/2, portalY + portalHeight/2);
+    ctx.lineTo(portalX - portalWidth/2, portalY - portalHeight/2 + portalWidth/2);
+    ctx.arc(portalX, portalY - portalHeight/2 + portalWidth/2, portalWidth/2, Math.PI, 0, false);
+    ctx.lineTo(portalX + portalWidth/2, portalY + portalHeight/2);
+    ctx.closePath();
+    ctx.fill();
+    
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(portalX - portalWidth/2, portalY + portalHeight/2);
+    ctx.lineTo(portalX - portalWidth/2, portalY - portalHeight/2 + portalWidth/2);
+    ctx.arc(portalX, portalY - portalHeight/2 + portalWidth/2, portalWidth/2, Math.PI, 0, false);
+    ctx.lineTo(portalX + portalWidth/2, portalY + portalHeight/2);
+    ctx.closePath();
+    ctx.clip();
+    
+    const numStars = 30;
+    for(let i = 0; i < numStars; i++) {
+      const seed1 = Math.sin(i * 12.9898 + 100) * 43758.5453;
+      const seed2 = Math.sin(i * 78.233 + 100) * 43758.5453;
+      const seed3 = Math.sin(i * 45.164 + 100) * 43758.5453;
+      
+      const sx = portalX - portalWidth/2 + (seed1 - Math.floor(seed1)) * portalWidth;
+      const sy = portalY - portalHeight/2 + (seed2 - Math.floor(seed2)) * portalHeight;
+      const size = isMobile ? (0.4 + (seed3 - Math.floor(seed3)) * 1.2) : (0.5 + (seed3 - Math.floor(seed3)) * 1.5);
+      
+      const twinkle = Math.sin(time * 3 + i * 0.5) * 0.3 + 0.7;
+      
+      ctx.fillStyle = `rgba(255, 255, 255, ${twinkle})`;
+      ctx.beginPath();
+      ctx.arc(sx, sy, size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    
+    ctx.restore();
+    
+    if(crossProgress > 0) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(portalX - portalWidth/2, portalY + portalHeight/2);
+      ctx.lineTo(portalX - portalWidth/2, portalY - portalHeight/2 + portalWidth/2);
+      ctx.arc(portalX, portalY - portalHeight/2 + portalWidth/2, portalWidth/2, Math.PI, 0, false);
+      ctx.lineTo(portalX + portalWidth/2, portalY + portalHeight/2);
+      ctx.closePath();
+      ctx.clip();
+      
+      const glowIntensity = crossProgress;
+      const glowSize = portalWidth * 2 * crossProgress;
+      
+      const auroraGlow = ctx.createRadialGradient(portalX, portalY, 0, portalX, portalY, glowSize);
+      auroraGlow.addColorStop(0, `rgba(100, 255, 150, ${glowIntensity * 0.8})`);
+      auroraGlow.addColorStop(0.3, `rgba(150, 255, 200, ${glowIntensity * 0.6})`);
+      auroraGlow.addColorStop(0.6, `rgba(100, 200, 255, ${glowIntensity * 0.3})`);
+      auroraGlow.addColorStop(1, 'rgba(100, 255, 150, 0)');
+      ctx.fillStyle = auroraGlow;
+      ctx.fillRect(portalX - glowSize, portalY - glowSize, glowSize * 2, glowSize * 2);
+      
+      for(let i = 0; i < 20; i++) {
+        const angle = (time * 2 + i * 0.3) * Math.PI;
+        const radius = portalWidth * 0.3 + Math.sin(time * 3 + i) * (isMobile ? 12 : 15);
+        const px = portalX + Math.cos(angle) * radius * crossProgress;
+        const py = portalY + Math.sin(angle * 0.7) * radius * 0.8 * crossProgress;
+        const particleSize = Math.abs((isMobile ? 0.8 : 1) + Math.sin(time * 5 + i) * (isMobile ? 1.6 : 2));
+        
+        const colorPhase = (i / 20 + time * 0.5) % 1;
+        let particleColor;
+        if(colorPhase < 0.33) {
+          particleColor = `rgba(100, 255, 150, ${glowIntensity * 0.9})`;
+        } else if(colorPhase < 0.66) {
+          particleColor = `rgba(150, 255, 200, ${glowIntensity * 0.9})`;
+        } else {
+          particleColor = `rgba(100, 200, 255, ${glowIntensity * 0.9})`;
+        }
+        
+        ctx.fillStyle = particleColor;
+        ctx.beginPath();
+        ctx.arc(px, py, particleSize, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      
+      ctx.restore();
+    }
+    
+    ctx.strokeStyle = `rgba(100, 100, 150, ${portalOpacity * 0.5})`;
+    ctx.lineWidth = isMobile ? 1.5 : 2;
+    ctx.beginPath();
+    ctx.moveTo(portalX - portalWidth/2, portalY + portalHeight/2);
+    ctx.lineTo(portalX - portalWidth/2, portalY - portalHeight/2 + portalWidth/2);
+    ctx.arc(portalX, portalY - portalHeight/2 + portalWidth/2, portalWidth/2, Math.PI, 0, false);
+    ctx.lineTo(portalX + portalWidth/2, portalY + portalHeight/2);
+    ctx.stroke();
+    
+    ctx.globalAlpha = 1;
+  }
+
+  const roadCenterY = H * 0.75;
+  const roadCenterX = W / 2;
+  const walkCycle = Math.sin(time * 5);
+  
+  let charOpacity = 1;
+  let charScale = 1;
+  let charYOffset = 0;
+  
+  if(endSequence) {
+    if(endTime < 2) {
+      charOpacity = 1;
+    } else if(endTime < 4) {
+      const approachProgress = (endTime - 2) / 2;
+      charScale = 1 + approachProgress * 0.3;
+      charYOffset = -approachProgress * (isMobile ? 30 : 80);
+    } else {
+      const fadeProgress = (endTime - 4) / 1;
+      charOpacity = Math.max(0, 1 - fadeProgress);
+      charScale = 1.3 + fadeProgress * 0.5;
+      charYOffset = (isMobile ? -30 : -80) - fadeProgress * 100;
+    }
+  }
+  
+  const charScaleFactor = isMobile ? 0.9 : 1.8;
+  
+  ctx.save();
+  ctx.globalAlpha = charOpacity;
+  ctx.translate(roadCenterX, roadCenterY + charYOffset);
+  ctx.scale(charScale * charScaleFactor, charScale * charScaleFactor);
+  
+  if(endSequence && endTime > 2) {
+    const auraIntensity = Math.min((endTime - 2) / 2, 1);
+    const auraSize = isMobile ? 48 : 60;
+    const auraGlow = ctx.createRadialGradient(0, 0, 0, 0, 0, auraSize);
+    auraGlow.addColorStop(0, `rgba(200, 220, 255, ${auraIntensity * 0.6})`);
+    auraGlow.addColorStop(1, 'rgba(200, 220, 255, 0)');
+    ctx.fillStyle = auraGlow;
+    ctx.beginPath();
+    ctx.arc(0, 0, auraSize, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  
+  const shadowOpacity = (1 - nightFactor) * 0.35;
+  if(shadowOpacity > 0.05 && !endSequence) {
+    ctx.save();
+    ctx.globalAlpha = shadowOpacity;
+    ctx.fillStyle = '#000000';
+    ctx.filter = `blur(${3}px)`;
+    ctx.translate(0, 62);
+    ctx.scale(1.2, 0.25);
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 18, 12, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.filter = 'none';
+    ctx.restore();
+  }
+  
+  const charBrightness = 1 - nightFactor * 0.6;
+  
+  const showLantern = nightFactor > 0.6 && !endSequence;
+  
+  if(showLantern) {
+    const lanternSize = isMobile ? 1 : 1.5;
+    const lanternGlow = ctx.createRadialGradient(-15 * lanternSize, -5 * lanternSize, 0, -15 * lanternSize, -5 * lanternSize, 30 * lanternSize);
+    lanternGlow.addColorStop(0, `rgba(255, 200, 100, ${nightFactor * 0.8})`);
+    lanternGlow.addColorStop(1, 'rgba(255, 200, 100, 0)');
+    ctx.fillStyle = lanternGlow;
+    ctx.fillRect(-50 * lanternSize, -40 * lanternSize, 80 * lanternSize, 80 * lanternSize);
+    
+    ctx.fillStyle = `rgba(255, 200, 100, ${nightFactor})`;
+    ctx.beginPath();
+    ctx.arc(-15 * lanternSize, -5 * lanternSize, 3 * lanternSize, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = `rgba(139, 69, 19, ${nightFactor})`;
+    ctx.lineWidth = 1 * lanternSize;
+    ctx.strokeRect(-17 * lanternSize, -8 * lanternSize, 4 * lanternSize, 6 * lanternSize);
+  }
+  
+  const bodyR = Math.round(65 * charBrightness);
+  const bodyG = Math.round(65 * charBrightness);
+  const bodyB = Math.round(68 * charBrightness);
+  
+  const robeEdgeR = Math.round(45 * charBrightness);
+  const robeEdgeG = Math.round(45 * charBrightness);
+  const robeEdgeB = Math.round(48 * charBrightness);
+  
+  const capeSwaySmall = Math.sin(time * 5) * 1.2;
+  
+  const upperRobeGradient = ctx.createLinearGradient(-12, -10, 12, 20);
+  upperRobeGradient.addColorStop(0, `rgb(${Math.round(bodyR * 1.1)}, ${Math.round(bodyG * 1.1)}, ${Math.round(bodyB * 1.1)})`);
+  upperRobeGradient.addColorStop(1, `rgb(${bodyR}, ${bodyG}, ${bodyB})`);
+  ctx.fillStyle = upperRobeGradient;
+  
+  ctx.beginPath();
+  ctx.moveTo(-12, -10);
+  ctx.lineTo(-14 + capeSwaySmall * 0.2, 5);
+  ctx.lineTo(-15 + capeSwaySmall * 0.4, 20);
+  ctx.lineTo(15 - capeSwaySmall * 0.4, 20);
+  ctx.lineTo(14 - capeSwaySmall * 0.2, 5);
+  ctx.lineTo(12, -10);
+  ctx.closePath();
+  ctx.fill();
+  
+  const middleRobeGradient = ctx.createLinearGradient(-15, 20, 10, 30);
+  middleRobeGradient.addColorStop(0, `rgb(${Math.round(bodyR * 0.8)}, ${Math.round(bodyG * 0.8)}, ${Math.round(bodyB * 0.8)})`);
+  middleRobeGradient.addColorStop(1, `rgb(${Math.round(bodyR * 0.75)}, ${Math.round(bodyG * 0.75)}, ${Math.round(bodyB * 0.75)})`);
+  ctx.fillStyle = middleRobeGradient;
+  
+  ctx.beginPath();
+  ctx.moveTo(-15 + capeSwaySmall * 0.4, 20);
+  ctx.lineTo(-10, 30);
+  ctx.lineTo(10, 30);
+  ctx.lineTo(15 - capeSwaySmall * 0.4, 20);
+  ctx.closePath();
+  ctx.fill();
+  
+  const lowerRobeGradient = ctx.createLinearGradient(-10, 30, 10, 50);
+  lowerRobeGradient.addColorStop(0, `rgb(${Math.round(bodyR * 0.75)}, ${Math.round(bodyG * 0.75)}, ${Math.round(bodyB * 0.75)})`);
+  lowerRobeGradient.addColorStop(1, `rgb(${Math.round(bodyR * 0.5)}, ${Math.round(bodyG * 0.5)}, ${Math.round(bodyB * 0.5)})`);
+  ctx.fillStyle = lowerRobeGradient;
+  
+  ctx.beginPath();
+  ctx.moveTo(-10, 30);
+  ctx.lineTo(-10, 50);
+  ctx.lineTo(10, 50);
+  ctx.lineTo(10, 30);
+  ctx.closePath();
+  ctx.fill();
+  
+  ctx.strokeStyle = `rgb(${robeEdgeR}, ${robeEdgeG}, ${robeEdgeB})`;
+  ctx.lineWidth = 3;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(-12, -10);
+  ctx.lineTo(-14 + capeSwaySmall * 0.2, 5);
+  ctx.lineTo(-15 + capeSwaySmall * 0.4, 20);
+  ctx.lineTo(-10, 30);
+  ctx.lineTo(-10, 50);
+  ctx.stroke();
+  
+  ctx.beginPath();
+  ctx.moveTo(12, -10);
+  ctx.lineTo(14 - capeSwaySmall * 0.2, 5);
+  ctx.lineTo(15 - capeSwaySmall * 0.4, 20);
+  ctx.lineTo(10, 30);
+  ctx.lineTo(10, 50);
+  ctx.stroke();
+  
+  ctx.fillStyle = `rgba(0, 0, 0, 0.3)`;
+  ctx.beginPath();
+  ctx.moveTo(-12, -10);
+  ctx.lineTo(-14 + capeSwaySmall * 0.2, 5);
+  ctx.lineTo(-15 + capeSwaySmall * 0.4, 20);
+  ctx.lineTo(-10, 30);
+  ctx.lineTo(-10, 50);
+  ctx.lineTo(-8, 50);
+  ctx.lineTo(-8, 32);
+  ctx.lineTo(-12 + capeSwaySmall * 0.3, 20);
+  ctx.lineTo(-11 + capeSwaySmall * 0.15, 5);
+  ctx.closePath();
+  ctx.fill();
+  
+  for(let i = 0; i < 5; i++) {
+    const foldY = -5 + i * 9;
+    const foldSway = Math.sin(time * 5 + i * 0.5) * 0.6;
+    ctx.strokeStyle = `rgba(0, 0, 0, 0.15)`;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-12 + foldSway * 0.3, foldY);
+    ctx.quadraticCurveTo(0, foldY + 2, 12 - foldSway * 0.3, foldY);
+    ctx.stroke();
+  }
+  
+  const armR = Math.round(bodyR * 0.85);
+  const armG = Math.round(bodyG * 0.85);
+  const armB = Math.round(bodyB * 0.85);
+  
+  if(showLantern) {
+    ctx.strokeStyle = `rgb(${armR}, ${armG}, ${armB})`;
+    ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    
+    ctx.beginPath();
+    ctx.moveTo(-12, 2);
+    ctx.lineTo(-14, 10);
+    ctx.lineTo(-16, 6);
+    ctx.lineTo(-18, 0);
+    ctx.stroke();
+    
+    ctx.fillStyle = `rgb(${Math.round(armR * 0.9)}, ${Math.round(armG * 0.9)}, ${Math.round(armB * 0.9)})`;
+    ctx.beginPath();
+    ctx.ellipse(-18, 0, 3.5, 3, -0.3, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    ctx.fillStyle = `rgb(${armR}, ${armG}, ${armB})`;
+    ctx.beginPath();
+    ctx.moveTo(-15, -4);
+    ctx.lineTo(-15, 10);
+    ctx.lineTo(-11, 10);
+    ctx.lineTo(-11, -4);
+    ctx.arc(-13, -4, 2, 0, Math.PI, true);
+    ctx.closePath();
+    ctx.fill();
+    
+    ctx.fillStyle = `rgb(${armR}, ${armG}, ${armB})`;
+    const leftArmSwing = walkCycle * 0.3;
+    ctx.save();
+    ctx.translate(-13, 10);
+    ctx.rotate(leftArmSwing);
+    ctx.fillRect(-2, 0, 4, 15);
+    ctx.restore();
+  }
+  
+  ctx.fillStyle = `rgb(${armR}, ${armG}, ${armB})`;
+  ctx.beginPath();
+  ctx.moveTo(11, -4);
+  ctx.lineTo(11, 10);
+  ctx.lineTo(15, 10);
+  ctx.lineTo(15, -4);
+  ctx.arc(13, -4, 2, 0, Math.PI, true);
+  ctx.closePath();
+  ctx.fill();
+  
+  ctx.fillStyle = `rgb(${armR}, ${armG}, ${armB})`;
+  const rightArmSwing = walkCycle * 0.3;
+  ctx.save();
+  ctx.translate(13, 10);
+  ctx.rotate(rightArmSwing);
+  ctx.fillRect(-2, 0, 4, 15);
+  ctx.restore();
+  
+  const hoodR = Math.round(55 * charBrightness);
+  const hoodG = Math.round(55 * charBrightness);
+  const hoodB = Math.round(58 * charBrightness);
+  
+  const hoodSway = Math.sin(time * 5) * 0.4;
+  
+  ctx.fillStyle = `rgb(${hoodR}, ${hoodG}, ${hoodB})`;
+  ctx.beginPath();
+  ctx.moveTo(-7, -10);
+  ctx.lineTo(-8 + hoodSway, -16);
+  ctx.lineTo(-7 + hoodSway, -22);
+  ctx.lineTo(-4 + hoodSway * 0.6, -27);
+  ctx.lineTo(-2 + hoodSway * 0.3, -31);
+  ctx.lineTo(0, -33);
+  ctx.lineTo(2 - hoodSway * 0.3, -31);
+  ctx.lineTo(4 - hoodSway * 0.6, -27);
+  ctx.lineTo(7 - hoodSway, -22);
+  ctx.lineTo(8 - hoodSway, -16);
+  ctx.lineTo(7, -10);
+  ctx.closePath();
+  ctx.fill();
+  
+  ctx.fillStyle = `rgba(0, 0, 0, 0.4)`;
+  ctx.beginPath();
+  ctx.moveTo(-7, -10);
+  ctx.lineTo(-8 + hoodSway, -16);
+  ctx.lineTo(-7 + hoodSway, -22);
+  ctx.lineTo(-4 + hoodSway * 0.6, -27);
+  ctx.lineTo(-2 + hoodSway * 0.3, -31);
+  ctx.lineTo(0, -33);
+  ctx.lineTo(0, -26);
+  ctx.lineTo(-2 + hoodSway * 0.2, -24);
+  ctx.lineTo(-4 + hoodSway * 0.4, -19);
+  ctx.lineTo(-5 + hoodSway * 0.6, -13);
+  ctx.closePath();
+  ctx.fill();
+  
+  ctx.fillStyle = `rgba(0, 0, 0, 0.25)`;
+  ctx.beginPath();
+  ctx.moveTo(-7, -8);
+  ctx.lineTo(0, 0);
+  ctx.lineTo(7, -8);
+  ctx.closePath();
+  ctx.fill();
+  
+  ctx.strokeStyle = `rgb(${robeEdgeR}, ${robeEdgeG}, ${robeEdgeB})`;
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(-7, -10);
+  ctx.lineTo(-8 + hoodSway, -16);
+  ctx.lineTo(-7 + hoodSway, -22);
+  ctx.lineTo(-4 + hoodSway * 0.6, -27);
+  ctx.lineTo(-2 + hoodSway * 0.3, -31);
+  ctx.lineTo(0, -33);
+  ctx.lineTo(2 - hoodSway * 0.3, -31);
+  ctx.lineTo(4 - hoodSway * 0.6, -27);
+  ctx.lineTo(7 - hoodSway, -22);
+  ctx.lineTo(8 - hoodSway, -16);
+  ctx.lineTo(7, -10);
+  ctx.stroke();
+  
+  const pantsR = Math.round(35 * charBrightness);
+  const pantsG = Math.round(35 * charBrightness);
+  const pantsB = Math.round(38 * charBrightness);
+  ctx.fillStyle = `rgb(${pantsR}, ${pantsG}, ${pantsB})`;
+  ctx.fillRect(-7, 50, 6, 10 + walkCycle * 3);
+  ctx.fillRect(1, 50, 6, 10 - walkCycle * 3);
+    
+  ctx.restore();
+}
+
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Color Pencil Cube</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(135deg, #1c1917 0%, #292524 50%, #1c1917 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: system-ui, sans-serif;
+    overflow: hidden;
+  }
+  #wrap {
+    position: relative;
+    width: min(92vw, 92vh);
+    aspect-ratio: 1 / 1;
+  }
+  #wrap::before {
+    content: '';
+    position: absolute;
+    inset: -1rem;
+    background: linear-gradient(to bottom, rgba(99, 102, 241, 0.1), rgba(217, 119, 6, 0.15));
+    border-radius: 1rem;
+    filter: blur(1rem);
+    z-index: -1;
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: 0.5rem;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c"></canvas>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const wrap = document.getElementById('wrap');
+
+let W, H, DPR;
+let blots = [];
+let paperCanvas = null;
+
+const palette = [
+  '#e74c3c', '#3498db', '#2ecc71', '#f39c12',
+  '#9b59b6', '#1abc9c', '#e67e22', '#34495e',
+  '#c0392b', '#2980b9'
+];
+
+// ---------- resize ----------
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  const rect = wrap.getBoundingClientRect();
+  W = rect.width;
+  H = rect.height;
+  canvas.width = W * DPR;
+  canvas.height = H * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  paperCanvas = null;
+  drawPaper();
+}
+
+// ---------- paper texture ----------
+function buildPaperTexture() {
+  paperCanvas = document.createElement('canvas');
+  paperCanvas.width = W * DPR;
+  paperCanvas.height = H * DPR;
+  const pctx = paperCanvas.getContext('2d');
+  pctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+  // base off-white, slightly yellowed Bauhaus paper
+  const grad = pctx.createRadialGradient(W/2, H/2, W*0.1, W/2, H/2, W*0.8);
+  grad.addColorStop(0, '#f5ecd2');
+  grad.addColorStop(1, '#e8dab0');
+  pctx.fillStyle = grad;
+  pctx.fillRect(0, 0, W, H);
+
+  // fine pixel noise
+  const imgData = pctx.getImageData(0, 0, W * DPR, H * DPR);
+  const data = imgData.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const n = (Math.random() - 0.5) * 6;
+    data[i]   = Math.max(0, Math.min(255, data[i]   + n));
+    data[i+1] = Math.max(0, Math.min(255, data[i+1] + n));
+    data[i+2] = Math.max(0, Math.min(255, data[i+2] + n * 0.9));
+  }
+  pctx.putImageData(imgData, 0, 0);
+
+  // diagonal weave
+  const spacing = 4;
+  const diag = Math.sqrt(W * W + H * H);
+  for (const angle of [Math.PI / 4, -Math.PI / 4]) {
+    const sy = angle > 0 ? -diag : diag;
+    for (let d = -diag; d < diag; d += spacing) {
+      const jitter = (Math.random() - 0.5) * 1.5;
+      pctx.strokeStyle = `rgba(160, 140, 90, ${0.05 + Math.random() * 0.05})`;
+      pctx.lineWidth = 0.5 + Math.random() * 0.4;
+      pctx.beginPath();
+      pctx.moveTo(d + jitter, sy);
+      pctx.lineTo(d + jitter + Math.cos(angle) * diag * 2, sy + Math.sin(angle) * diag * 2);
+      pctx.stroke();
+    }
+  }
+
+  // micro bumps with light/shadow
+  const bumpCount = Math.floor(W * H / 8);
+  for (let i = 0; i < bumpCount; i++) {
+    const x = Math.random() * W;
+    const y = Math.random() * H;
+    const sz = 0.4 + Math.random() * 1.0;
+    pctx.fillStyle = `rgba(130, 100, 60, ${0.04 + Math.random() * 0.05})`;
+    pctx.beginPath();
+    pctx.arc(x + 0.3, y + 0.3, sz, 0, Math.PI * 2);
+    pctx.fill();
+    pctx.fillStyle = `rgba(255, 245, 215, ${0.12 + Math.random() * 0.12})`;
+    pctx.beginPath();
+    pctx.arc(x - 0.25, y - 0.25, sz * 0.85, 0, Math.PI * 2);
+    pctx.fill();
+  }
+
+  // brown specks (foxing)
+  const speckCount = Math.floor(W * H / 30000);
+  for (let i = 0; i < speckCount; i++) {
+    pctx.fillStyle = `rgba(140, 90, 40, ${0.3 + Math.random() * 0.3})`;
+    pctx.beginPath();
+    pctx.arc(Math.random() * W, Math.random() * H, 0.5 + Math.random() * 0.8, 0, Math.PI * 2);
+    pctx.fill();
+  }
+
+  // warm aged patches
+  const patchCount = Math.floor(W * H / 25000);
+  for (let i = 0; i < patchCount; i++) {
+    const x = Math.random() * W;
+    const y = Math.random() * H;
+    const r = 25 + Math.random() * 50;
+    const pg = pctx.createRadialGradient(x, y, 0, x, y, r);
+    pg.addColorStop(0, `rgba(200, 160, 90, ${0.06 + Math.random() * 0.06})`);
+    pg.addColorStop(1, 'rgba(200, 160, 90, 0)');
+    pctx.fillStyle = pg;
+    pctx.beginPath();
+    pctx.arc(x, y, r, 0, Math.PI * 2);
+    pctx.fill();
+  }
+
+  // edge darkening (vignette of age)
+  const vignette = pctx.createRadialGradient(W/2, H/2, W*0.4, W/2, H/2, W*0.75);
+  vignette.addColorStop(0, 'rgba(140, 100, 50, 0)');
+  vignette.addColorStop(1, 'rgba(140, 100, 50, 0.18)');
+  pctx.fillStyle = vignette;
+  pctx.fillRect(0, 0, W, H);
+
+  // pencil smears — realistic graphite smudges
+  const smearCount = 5 + Math.floor(Math.random() * 4);
+  for (let s = 0; s < smearCount; s++) {
+    const cx = Math.random() * W;
+    const cy = Math.random() * H;
+    const angle = Math.random() * Math.PI * 2;
+    const length = 60 + Math.random() * 180;
+    const width = 25 + Math.random() * 50;
+    const intensity = 0.08 + Math.random() * 0.12;
+
+    // direction vector and perpendicular
+    const ux = Math.cos(angle);
+    const uy = Math.sin(angle);
+    const px = -uy;
+    const py = ux;
+
+    // many short graphite strokes within the smear footprint
+    const strokeCount = 80 + Math.floor(Math.random() * 80);
+    for (let i = 0; i < strokeCount; i++) {
+      // position along the smear (gaussian-ish toward center)
+      const t = (Math.random() + Math.random() + Math.random()) / 3 - 0.5; // -0.5..0.5
+      const along = t * length;
+      // perpendicular spread (gaussian)
+      const perpT = (Math.random() + Math.random() + Math.random()) / 3 - 0.5;
+      const perp = perpT * width;
+      // density falloff from center
+      const distFactor = 1 - Math.abs(t) * 1.5;
+      if (distFactor <= 0) continue;
+      const widthFactor = 1 - Math.abs(perpT) * 1.8;
+      if (widthFactor <= 0) continue;
+
+      const sx = cx + ux * along + px * perp;
+      const sy_ = cy + uy * along + py * perp;
+
+      // small graphite stroke
+      const strokeLen = 4 + Math.random() * 14;
+      const jitter = (Math.random() - 0.5) * 0.4;
+      const ex = sx + ux * strokeLen + px * jitter * 3;
+      const ey = sy_ + uy * strokeLen + py * jitter * 3;
+
+      const alpha = intensity * distFactor * widthFactor * (0.4 + Math.random() * 0.6);
+      // graphite color: slightly cool grey
+      const grey = 30 + Math.random() * 25;
+      pctx.strokeStyle = `rgba(${grey}, ${grey}, ${grey + 5}, ${alpha})`;
+      pctx.lineWidth = 0.4 + Math.random() * 0.6;
+      pctx.lineCap = 'round';
+      pctx.beginPath();
+      pctx.moveTo(sx, sy_);
+      pctx.lineTo(ex, ey);
+      pctx.stroke();
+    }
+
+    // a few darker scratchy lines (pressure marks)
+    const scratchCount = 3 + Math.floor(Math.random() * 5);
+    for (let i = 0; i < scratchCount; i++) {
+      const t = (Math.random() - 0.5) * 0.7;
+      const along = t * length;
+      const perp = (Math.random() - 0.5) * width * 0.5;
+      const sx = cx + ux * along + px * perp;
+      const sy_ = cy + uy * along + py * perp;
+      const sl = 15 + Math.random() * 50;
+      const wob = (Math.random() - 0.5) * 0.3;
+      const ex = sx + Math.cos(angle + wob) * sl;
+      const ey = sy_ + Math.sin(angle + wob) * sl;
+      pctx.strokeStyle = `rgba(35, 35, 40, ${intensity * 1.4 * (0.3 + Math.random() * 0.5)})`;
+      pctx.lineWidth = 0.5 + Math.random() * 0.7;
+      pctx.beginPath();
+      pctx.moveTo(sx, sy_);
+      pctx.lineTo(ex, ey);
+      pctx.stroke();
+    }
+
+    // soft smudge halo (finger smear)
+    const haloGrad = pctx.createRadialGradient(cx, cy, 0, cx, cy, length * 0.6);
+    haloGrad.addColorStop(0, `rgba(60, 60, 65, ${intensity * 0.25})`);
+    haloGrad.addColorStop(0.5, `rgba(80, 80, 85, ${intensity * 0.12})`);
+    haloGrad.addColorStop(1, 'rgba(80, 80, 85, 0)');
+    pctx.save();
+    pctx.translate(cx, cy);
+    pctx.rotate(angle);
+    pctx.scale(1, width / length * 0.5);
+    pctx.translate(-cx, -cy);
+    pctx.fillStyle = haloGrad;
+    pctx.beginPath();
+    pctx.arc(cx, cy, length * 0.6, 0, Math.PI * 2);
+    pctx.fill();
+    pctx.restore();
+  }
+}
+
+function drawPaper() {
+  if (!paperCanvas) buildPaperTexture();
+  ctx.drawImage(paperCanvas, 0, 0, W, H);
+}
+
+// ---------- shape helper ----------
+function makeShape(points, baseVariation = 0.3) {
+  const seeds = [
+    { freq: 1, amp: baseVariation, phase: Math.random() * Math.PI * 2 },
+    { freq: 2, amp: baseVariation * 0.5, phase: Math.random() * Math.PI * 2 },
+    { freq: 3, amp: baseVariation * 0.3, phase: Math.random() * Math.PI * 2 },
+    { freq: 5, amp: baseVariation * 0.15, phase: Math.random() * Math.PI * 2 },
+    { freq: 7, amp: baseVariation * 0.08, phase: Math.random() * Math.PI * 2 },
+  ];
+  const offsets = [];
+  for (let i = 0; i < points; i++) {
+    const a = (i / points) * Math.PI * 2;
+    let r = 1;
+    for (const s of seeds) r += Math.sin(a * s.freq + s.phase) * s.amp;
+    offsets.push(Math.max(0.45, r));
+  }
+  return { offsets };
+}
+
+function tracePath(cx, cy, baseR, offsets, points) {
+  ctx.beginPath();
+  for (let i = 0; i <= points; i++) {
+    const a = (i / points) * Math.PI * 2;
+    const r = baseR * offsets[i % points];
+    const px = cx + Math.cos(a) * r;
+    const py = cy + Math.sin(a) * r;
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+}
+
+// ---------- watercolor blots ----------
+function createBlot() {
+  const points = 80;
+  const shape = makeShape(points, 0.22);
+  const innerShape = makeShape(points, 0.18);
+
+  const fiberCount = 14 + Math.floor(Math.random() * 10);
+  const fibers = Array.from({length: fiberCount}, () => ({
+    angle: Math.random() * Math.PI * 2,
+    length: 0.4 + Math.random() * 0.8,
+    curve: (Math.random() - 0.5) * 0.5,
+    width: 1.5 + Math.random() * 3
+  }));
+
+  const dCount = 1 + Math.floor(Math.random() * 3);
+  const droplets = Array.from({length: dCount}, () => ({
+    angle: Math.random() * Math.PI * 2,
+    dist: 0.85 + Math.random() * 0.8,
+    size: 0.05 + Math.random() * 0.15,
+    shape: makeShape(40, 0.25)
+  }));
+
+  const granules = [];
+  for (let i = 0; i < 30; i++) {
+    granules.push({
+      angle: Math.random() * Math.PI * 2,
+      dist: Math.random() * 0.85,
+      size: 8 + Math.random() * 18,
+      alpha: 0.1 + Math.random() * 0.18
+    });
+  }
+
+  return {
+    x: W * 0.15 + Math.random() * W * 0.7,
+    y: H * 0.15 + Math.random() * H * 0.7,
+    baseColor: palette[Math.floor(Math.random() * palette.length)],
+    maxRadius: Math.min(W, H) * (0.08 + Math.random() * 0.12),
+    radius: 0,
+    growSpeed: 0.6 + Math.random() * 1.0,
+    life: 0,
+    maxLife: 900 + Math.random() * 500,
+    points,
+    shape,
+    innerShape,
+    fibers,
+    droplets,
+    granules,
+    breathPhase: Math.random() * Math.PI * 2,
+    breathSpeed: 0.008 + Math.random() * 0.006,
+    breathAmp: 0.025 + Math.random() * 0.025
+  };
+}
+
+function updateBlot(b) {
+  if (b.radius < b.maxRadius) {
+    b.radius += b.growSpeed;
+    b.growSpeed *= 0.994;
+  }
+  b.breathPhase += b.breathSpeed;
+  b.life++;
+}
+
+function drawBlot(b) {
+  if (b.radius < 1) return;
+
+  const breath = 1 + Math.sin(b.breathPhase) * b.breathAmp;
+  const r = b.radius * breath;
+
+  let alpha;
+  if (b.life < 80) alpha = Math.min(1, b.life / 80) * 0.92;
+  else if (b.life > b.maxLife - 280) alpha = Math.max(0, (b.maxLife - b.life) / 280) * 0.92;
+  else alpha = 0.92;
+
+  ctx.save();
+
+  const bleedSize = r * 1.7;
+  const outerGrad = ctx.createRadialGradient(b.x, b.y, r * 0.4, b.x, b.y, bleedSize);
+  outerGrad.addColorStop(0, b.baseColor + '55');
+  outerGrad.addColorStop(0.35, b.baseColor + '33');
+  outerGrad.addColorStop(0.7, b.baseColor + '11');
+  outerGrad.addColorStop(1, b.baseColor + '00');
+  ctx.globalAlpha = alpha * 0.6;
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = outerGrad;
+  ctx.beginPath();
+  ctx.arc(b.x, b.y, bleedSize, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = alpha * 0.35;
+  for (const f of b.fibers) {
+    const x1 = b.x + Math.cos(f.angle) * r * 0.85;
+    const y1 = b.y + Math.sin(f.angle) * r * 0.85;
+    const x2 = b.x + Math.cos(f.angle + f.curve) * r * 1.05;
+    const y2 = b.y + Math.sin(f.angle + f.curve) * r * 1.05;
+    const x3 = b.x + Math.cos(f.angle + f.curve * 1.3) * r * (1.15 + f.length * 0.5);
+    const y3 = b.y + Math.sin(f.angle + f.curve * 1.3) * r * (1.15 + f.length * 0.5);
+    const fiberGrad = ctx.createLinearGradient(x1, y1, x3, y3);
+    fiberGrad.addColorStop(0, b.baseColor + '00');
+    fiberGrad.addColorStop(0.3, b.baseColor + '33');
+    fiberGrad.addColorStop(0.6, b.baseColor + '1a');
+    fiberGrad.addColorStop(1, b.baseColor + '00');
+    ctx.strokeStyle = fiberGrad;
+    ctx.lineWidth = f.width * 2.5;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.quadraticCurveTo(x2, y2, x3, y3);
+    ctx.stroke();
+  }
+
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = alpha * 0.7;
+  const mainGrad = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, r);
+  mainGrad.addColorStop(0, b.baseColor + '88');
+  mainGrad.addColorStop(0.5, b.baseColor + '66');
+  mainGrad.addColorStop(0.85, b.baseColor + '33');
+  mainGrad.addColorStop(1, b.baseColor + '00');
+  ctx.fillStyle = mainGrad;
+  tracePath(b.x, b.y, r, b.shape.offsets, b.points);
+  ctx.fill();
+
+  ctx.globalCompositeOperation = 'multiply';
+  ctx.globalAlpha = alpha * 0.25;
+  const innerGrad = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, r * 0.6);
+  innerGrad.addColorStop(0, b.baseColor + '66');
+  innerGrad.addColorStop(1, b.baseColor + '00');
+  ctx.fillStyle = innerGrad;
+  tracePath(b.x, b.y, r * 0.6, b.innerShape.offsets, b.points);
+  ctx.fill();
+
+  ctx.globalCompositeOperation = 'multiply';
+  for (const g of b.granules) {
+    const gx = b.x + Math.cos(g.angle) * r * g.dist;
+    const gy = b.y + Math.sin(g.angle) * r * g.dist;
+    ctx.globalAlpha = alpha * g.alpha * 0.15;
+    const gGrad = ctx.createRadialGradient(gx, gy, 0, gx, gy, g.size);
+    gGrad.addColorStop(0, b.baseColor + '44');
+    gGrad.addColorStop(0.6, b.baseColor + '15');
+    gGrad.addColorStop(1, b.baseColor + '00');
+    ctx.fillStyle = gGrad;
+    ctx.beginPath();
+    ctx.arc(gx, gy, g.size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.globalCompositeOperation = 'multiply';
+  ctx.globalAlpha = alpha * 0.5;
+  for (const d of b.droplets) {
+    const dx = b.x + Math.cos(d.angle) * r * d.dist;
+    const dy = b.y + Math.sin(d.angle) * r * d.dist;
+    const dr = r * d.size;
+    const dropGrad = ctx.createRadialGradient(dx, dy, 0, dx, dy, dr * 1.4);
+    dropGrad.addColorStop(0, b.baseColor + '99');
+    dropGrad.addColorStop(0.6, b.baseColor + '55');
+    dropGrad.addColorStop(1, b.baseColor + '00');
+    ctx.fillStyle = dropGrad;
+    tracePath(dx, dy, dr, d.shape.offsets, 40);
+    ctx.fill();
+  }
+
+  ctx.globalCompositeOperation = 'screen';
+  ctx.globalAlpha = alpha * 0.1;
+  const hl = ctx.createRadialGradient(b.x - r * 0.2, b.y - r * 0.2, 0, b.x - r * 0.2, b.y - r * 0.2, r * 0.6);
+  hl.addColorStop(0, '#ffffff');
+  hl.addColorStop(1, '#ffffff00');
+  ctx.fillStyle = hl;
+  ctx.beginPath();
+  ctx.arc(b.x - r * 0.2, b.y - r * 0.2, r * 0.6, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+// ---------- 3D cube hand-drawn ----------
+// cube vertices in local space
+const cubeVertices = [
+  [-1, -1, -1], [ 1, -1, -1], [ 1,  1, -1], [-1,  1, -1],
+  [-1, -1,  1], [ 1, -1,  1], [ 1,  1,  1], [-1,  1,  1],
+];
+// edges as pairs of vertex indices
+const cubeEdges = [
+  [0,1],[1,2],[2,3],[3,0], // back face
+  [4,5],[5,6],[6,7],[7,4], // front face
+  [0,4],[1,5],[2,6],[3,7], // connectors
+];
+// faces (for hidden line detection): vertex indices in CCW when viewed from outside
+const cubeFaces = [
+  { verts: [0,3,2,1], normal: [0,0,-1] }, // back
+  { verts: [4,5,6,7], normal: [0,0, 1] }, // front
+  { verts: [0,1,5,4], normal: [0,-1,0] }, // bottom
+  { verts: [3,7,6,2], normal: [0, 1,0] }, // top
+  { verts: [0,4,7,3], normal: [-1,0,0] }, // left
+  { verts: [1,2,6,5], normal: [ 1,0,0] }, // right
+];
+
+// pre-generated smear pattern per cube level per edge
+// each smear: { t (along 0..1), side (-1 or 1), offset (perp distance factor), length (along factor), angleJitter, alpha, width }
+function makeEdgeSmears() {
+  const all = [];
+  for (let e = 0; e < cubeEdges.length; e++) {
+    const smears = [];
+    const count = 3 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < count; i++) {
+      smears.push({
+        t: Math.random(),
+        side: Math.random() < 0.5 ? -1 : 1,
+        offset: 1 + Math.random() * 4,
+        length: 0.05 + Math.random() * 0.1,
+        angleJitter: (Math.random() - 0.5) * 0.4,
+        alpha: 0.18 + Math.random() * 0.25,
+        width: 0.5 + Math.random() * 0.5,
+        dark: Math.random() < 0.25
+      });
+    }
+    all.push(smears);
+  }
+  return all;
+}
+
+// generate smears for each cube level (4 max)
+const cubeEdgeSmears = [];
+for (let n = 0; n < 4; n++) cubeEdgeSmears.push(makeEdgeSmears());
+
+let cubeAngleX = 0.4;
+let cubeAngleY = 0.6;
+let cubeCount = 1;
+let cubeCountPhase = 0; // frames since last change
+const CUBE_HOLD_FRAMES = 120; // frames to wait between add/remove
+let growing = true; // true = adding cubes, false = removing
+let cubeProgress = [0];
+const EDGE_DRAW_FRAMES = 8; // frames to draw a single edge
+
+// Bauhaus-inspired primary palette for cube edges
+const bauhausColors = [
+  'rgba(20, 18, 22, 1)',     // black (outer)
+  'rgba(220, 50, 47, 1)',    // red
+  'rgba(38, 80, 160, 1)',    // blue
+  'rgba(245, 200, 40, 1)',   // yellow
+];
+
+// matching smear colors (RGB triplets) for each cube level — slightly desaturated/darkened
+const smearColors = [
+  [55, 50, 55],     // dark grey for black cube
+  [150, 40, 40],    // muted red
+  [40, 65, 120],    // muted blue
+  [180, 145, 40],   // muted ochre/yellow
+];
+
+function rotate3(v, ax, ay) {
+  // rotate around Y
+  let [x, y, z] = v;
+  let cy = Math.cos(ay), sy = Math.sin(ay);
+  let x1 = x * cy + z * sy;
+  let z1 = -x * sy + z * cy;
+  // rotate around X
+  let cx = Math.cos(ax), sx = Math.sin(ax);
+  let y2 = y * cx - z1 * sx;
+  let z2 = y * sx + z1 * cx;
+  return [x1, y2, z2];
+}
+
+function project(v, scale, cx, cy) {
+  const persp = 4;
+  const f = persp / (persp - v[2]);
+  return { x: cx + v[0] * scale * f, y: cy + v[1] * scale * f, z: v[2] };
+}
+
+// hand-drawn line: jittered polyline with slight overshoot, double pass
+function drawHandLine(x1, y1, x2, y2, color, weight, alpha) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const len = Math.hypot(dx, dy);
+  if (len < 0.5) return;
+
+  // slight overshoot/undershoot at endpoints (sketch feel)
+  const overA = (Math.random() - 0.5) * 4;
+  const overB = (Math.random() - 0.5) * 4;
+  const ux = dx / len, uy = dy / len;
+  const sx = x1 - ux * overA;
+  const sy = y1 - uy * overA;
+  const ex = x2 + ux * overB;
+  const ey = y2 + uy * overB;
+
+  const segs = Math.max(6, Math.floor(len / 8));
+  // perpendicular for jitter
+  const px = -uy, py = ux;
+
+  // two passes for sketchy look
+  for (let pass = 0; pass < 2; pass++) {
+    ctx.beginPath();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = weight * (pass === 0 ? 1 : 0.6);
+    ctx.globalAlpha = alpha * (pass === 0 ? 1 : 0.55);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    const passOffset = (Math.random() - 0.5) * 1.2;
+    let prevX = sx + px * passOffset;
+    let prevY = sy + py * passOffset;
+    ctx.moveTo(prevX, prevY);
+
+    for (let i = 1; i <= segs; i++) {
+      const t = i / segs;
+      // smooth low-frequency wobble + small high-freq noise
+      const wobble = Math.sin(t * Math.PI * 2 + pass * 1.7) * 1.4 + (Math.random() - 0.5) * 1.6;
+      const along = (Math.random() - 0.5) * 0.8;
+      const bx = sx + (ex - sx) * t + ux * along + px * (wobble + passOffset);
+      const by = sy + (ey - sy) * t + uy * along + py * (wobble + passOffset);
+      ctx.lineTo(bx, by);
+    }
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawCube() {
+  const cx = W / 2;
+  const cy = H / 2;
+  const baseScale = Math.min(W, H) * 0.18;
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-over';
+
+  for (let n = 0; n < cubeCount; n++) {
+    const factor = Math.pow(0.65, n);
+    const scale = baseScale * factor;
+    const color = bauhausColors[n % bauhausColors.length];
+
+    const transformed = cubeVertices.map(v => rotate3(v, cubeAngleX, cubeAngleY));
+    const projected = transformed.map(v => project(v, scale, cx, cy));
+
+    const prog = cubeProgress[n] || 0;
+    const fullEdges = Math.floor(prog);
+    const partial = prog - fullEdges;
+
+    // draw edge smears (bavures) BEFORE the line so the line sits on top
+    const smearsForCube = cubeEdgeSmears[n];
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    let currentColor = null;
+    let currentWidth = null;
+
+    for (let i = 0; i < cubeEdges.length; i++) {
+      const edgeProgress = i < fullEdges ? 1 : (i === fullEdges ? partial : 0);
+      if (edgeProgress <= 0) continue;
+
+      const [a, b] = cubeEdges[i];
+      const pa = projected[a];
+      const pb = projected[b];
+      const dx = pb.x - pa.x;
+      const dy = pb.y - pa.y;
+      const len = Math.hypot(dx, dy);
+      if (len < 1) continue;
+      const ux = dx / len, uy = dy / len;
+      const px_ = -uy, py_ = ux;
+      const baseRGB = smearColors[n % smearColors.length];
+
+      for (const sm of smearsForCube[i]) {
+        if (sm.t > edgeProgress) continue;
+        const cx_ = pa.x + dx * sm.t;
+        const cy_ = pa.y + dy * sm.t;
+        const offX = px_ * sm.side * sm.offset;
+        const offY = py_ * sm.side * sm.offset;
+        const angle = Math.atan2(uy, ux) + sm.angleJitter;
+        const sl = len * sm.length;
+        const dirX = Math.cos(angle);
+        const dirY = Math.sin(angle);
+        const sx = cx_ + offX - dirX * sl * 0.5;
+        const sy_ = cy_ + offY - dirY * sl * 0.5;
+        const ex = cx_ + offX + dirX * sl * 0.5;
+        const ey = cy_ + offY + dirY * sl * 0.5;
+
+        const factor = sm.dark ? 0.6 : 1;
+        const r = Math.floor(baseRGB[0] * factor);
+        const g = Math.floor(baseRGB[1] * factor);
+        const bl = Math.floor(baseRGB[2] * factor);
+        const color = `rgba(${r}, ${g}, ${bl}, ${sm.alpha})`;
+
+        if (color !== currentColor || sm.width !== currentWidth) {
+          if (currentColor !== null) ctx.stroke();
+          ctx.beginPath();
+          ctx.strokeStyle = color;
+          ctx.lineWidth = sm.width;
+          currentColor = color;
+          currentWidth = sm.width;
+        }
+        ctx.moveTo(sx, sy_);
+        ctx.lineTo(ex, ey);
+      }
+    }
+    if (currentColor !== null) ctx.stroke();
+
+    for (let i = 0; i < cubeEdges.length; i++) {
+      if (i < fullEdges) {
+        const [a, b] = cubeEdges[i];
+        const pa = projected[a];
+        const pb = projected[b];
+        drawHandLine(pa.x, pa.y, pb.x, pb.y, color, 1.6, 0.9);
+      } else if (i === fullEdges && partial > 0) {
+        const [a, b] = cubeEdges[i];
+        const pa = projected[a];
+        const pb = projected[b];
+        const ex = pa.x + (pb.x - pa.x) * partial;
+        const ey = pa.y + (pb.y - pa.y) * partial;
+        drawHandLine(pa.x, pa.y, ex, ey, color, 1.6, 0.9);
+      }
+    }
+  }
+
+  ctx.restore();
+}
+
+// ---------- main loop ----------
+let lastBlotSpawn = 0;
+
+function loop(t) {
+  if (t - lastBlotSpawn > 500 + Math.random() * 900 && blots.length < 10) {
+    blots.push(createBlot());
+    lastBlotSpawn = t;
+  }
+
+  blots = blots.filter(b => b.life < b.maxLife);
+
+  drawPaper();
+
+  for (const b of blots) {
+    updateBlot(b);
+    drawBlot(b);
+  }
+
+  cubeAngleY += 0.012;
+  cubeAngleX += 0.005;
+
+  // progressively draw the latest cube being added (or erase the latest when removing)
+  if (growing) {
+    const idx = cubeCount - 1;
+    if ((cubeProgress[idx] || 0) < cubeEdges.length) {
+      cubeProgress[idx] = Math.min(cubeEdges.length, (cubeProgress[idx] || 0) + 1 / EDGE_DRAW_FRAMES);
+    } else {
+      // current cube fully drawn → wait then add next
+      cubeCountPhase++;
+      if (cubeCountPhase >= CUBE_HOLD_FRAMES) {
+        cubeCountPhase = 0;
+        if (cubeCount < 4) {
+          cubeCount++;
+          cubeProgress[cubeCount - 1] = 0;
+        } else {
+          growing = false;
+        }
+      }
+    }
+  } else {
+    // removing: erase the innermost (last) cube progressively
+    const idx = cubeCount - 1;
+    if ((cubeProgress[idx] || 0) > 0) {
+      cubeProgress[idx] = Math.max(0, cubeProgress[idx] - 1 / EDGE_DRAW_FRAMES);
+    } else {
+      cubeCountPhase++;
+      if (cubeCountPhase >= CUBE_HOLD_FRAMES) {
+        cubeCountPhase = 0;
+        if (cubeCount > 1) {
+          cubeProgress.pop();
+          cubeCount--;
+        } else {
+          growing = true;
+        }
+      }
+    }
+  }
+
+  drawCube();
+
+  requestAnimationFrame(loop);
+}
+
+window.addEventListener('resize', resize);
+resize();
+for (let i = 0; i < 4; i++) blots.push(createBlot());
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<base href="/upstride/">
+    <title>Bleak Midwinter</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #000;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        function resizeCanvas() {
+            const aspectRatio = 4 / 3;
+            let width = window.innerWidth;
+            let height = window.innerHeight;
+            
+            if (width / height > aspectRatio) {
+                width = height * aspectRatio;
+            } else {
+                height = width / aspectRatio;
+            }
+            
+            canvas.width = width;
+            canvas.height = height;
+            canvas.style.position = 'absolute';
+            canvas.style.left = '50%';
+            canvas.style.top = '50%';
+            canvas.style.transform = 'translate(-50%, -50%)';
+        }
+        
+        resizeCanvas();
+        
+        let cameraZ = 0;
+        let cameraX = 0;
+        let cameraY = 100;
+        let frostLevel = 0;
+        let speed = 1.2;
+        let altitude = 1000;
+        let reachedBottom = false;
+        let endTime = 0;
+        let startTime = Date.now();
+        let fadeToBlackStart = 0;
+        let blackoutComplete = false;
+        let weatherStarted = false;
+        
+        const slopeRate = -0.1 - Math.random() * 0.1;
+        const xFreq = 0.005 + Math.random() * 0.006;
+        const zFreq = 0.008 + Math.random() * 0.008;
+        const xAmp = 15 + Math.random() * 20;
+        const zAmp = 10 + Math.random() * 16;
+        const xPhase = Math.random() * Math.PI * 2;
+        const zPhase = Math.random() * Math.PI * 2;
+        
+        function getHeight(x, z) {
+            return z * slopeRate + Math.sin(x * xFreq + xPhase) * xAmp + Math.cos(z * zFreq + zPhase) * zAmp;
+        }
+        
+        const snowflakes = [];
+        for (let i = 0; i < 200; i++) {
+            snowflakes.push({
+                x: (Math.random() - 0.5) * 400,
+                y: (Math.random() - 0.5) * 200,
+                z: Math.random() * 400 + 10,
+                speed: Math.random() * 2 + 1
+            });
+        }
+        
+        const trees = [];
+        for (let i = 0; i < 15; i++) {
+            const side = Math.random() > 0.5 ? 1 : -1;
+            trees.push({
+                x: side * (Math.random() * 100 + 200),
+                z: Math.random() * 1200 - 600,
+                size: Math.random() * 0.5 + 0.7
+            });
+        }
+        
+        function drawSky() {
+            const elapsed = (Date.now() - startTime) / 1000;
+            
+            if (elapsed < 3) {
+                // Beautiful clear blue sky at start
+                const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+                gradient.addColorStop(0, '#4a9eff');
+                gradient.addColorStop(1, '#b8d9ff');
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            } else {
+                // Transition to overcast
+                const transition = Math.min(1, (elapsed - 3) / 2);
+                const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+                
+                const r1 = 74 + (208 - 74) * transition;
+                const g1 = 158 + (216 - 158) * transition;
+                const b1 = 255 + (224 - 255) * transition;
+                
+                const r2 = 184 + (232 - 184) * transition;
+                const g2 = 217 + (238 - 217) * transition;
+                const b2 = 255 + (244 - 255) * transition;
+                
+                gradient.addColorStop(0, 'rgb(' + r1 + ', ' + g1 + ', ' + b1 + ')');
+                gradient.addColorStop(1, 'rgb(' + r2 + ', ' + g2 + ', ' + b2 + ')');
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                if (transition >= 1) {
+                    const grainDensity = 800;
+                    for (let i = 0; i < grainDensity; i++) {
+                        const x = (Math.random() * canvas.width);
+                        const y = (Math.random() * canvas.height * 0.6);
+                        const size = 1 + Math.floor(Math.random() * 3);
+                        const alpha = Math.random() * 0.3;
+                        ctx.fillStyle = 'rgba(255, 255, 255, ' + alpha + ')';
+                        ctx.fillRect(x, y, size, size);
+                    }
+                }
+            }
+            
+            // Mountains with distance-based colors (no transparency)
+            const baseY = canvas.height * 0.42;
+            
+            // Far mountains (very light, almost white)
+            for (let i = 0; i < 4; i++) {
+                const peakX = (i * canvas.width / 3) - (cameraZ * 0.008) % canvas.width;
+                const peakHeight = 50 + Math.sin(i * 2.1) * 20;
+                const peakY = baseY - peakHeight;
+                const width = canvas.width / 3;
+                
+                ctx.fillStyle = i % 2 === 0 ? '#e0ecf8' : '#d0dce8';
+                ctx.beginPath();
+                ctx.moveTo(peakX - width * 1.3, baseY);
+                ctx.lineTo(peakX, peakY);
+                ctx.lineTo(peakX + width * 1.3, baseY);
+                ctx.closePath();
+                ctx.fill();
+            }
+            
+            // Mid mountains (medium)
+            for (let i = 0; i < 6; i++) {
+                const peakX = (i * canvas.width / 5) - (cameraZ * 0.012) % canvas.width;
+                const peakHeight = 65 + Math.sin(i * 1.7) * 25;
+                const peakY = baseY - peakHeight;
+                const width = canvas.width / 4;
+                
+                if (i % 3 === 0) ctx.fillStyle = '#a8c0d8';
+                else if (i % 3 === 1) ctx.fillStyle = '#98b0c8';
+                else ctx.fillStyle = '#88a0b8';
+                
+                ctx.beginPath();
+                ctx.moveTo(peakX - width * 1.2, baseY);
+                ctx.lineTo(peakX, peakY);
+                ctx.lineTo(peakX + width * 1.2, baseY);
+                ctx.closePath();
+                ctx.fill();
+            }
+            
+            // Near mountains (darker)
+            for (let i = 0; i < 8; i++) {
+                const peakX = (i * canvas.width / 6) - (cameraZ * 0.015) % canvas.width;
+                const peakHeight = 70 + Math.sin(i * 1.5) * 30;
+                const peakY = baseY - peakHeight;
+                const width = canvas.width / 4;
+                
+                if (i % 4 === 0) ctx.fillStyle = '#7090a8';
+                else if (i % 4 === 1) ctx.fillStyle = '#608098';
+                else if (i % 4 === 2) ctx.fillStyle = '#507088';
+                else ctx.fillStyle = '#406078';
+                
+                ctx.beginPath();
+                ctx.moveTo(peakX - width * 1.2, baseY);
+                ctx.lineTo(peakX, peakY);
+                ctx.lineTo(peakX + width * 1.2, baseY);
+                ctx.closePath();
+                ctx.fill();
+            }
+        }
+        
+        function drawTerrain() {
+            const horizonY = canvas.height * 0.42;
+            const gridSize = 15;
+            const viewDistance = 400;
+            const terrainWidth = canvas.width * 0.8;
+            
+            for (let z = viewDistance; z > 5; z -= gridSize) {
+                const worldZ = cameraZ - z;
+                
+                ctx.beginPath();
+                
+                for (let x = -terrainWidth; x <= terrainWidth; x += gridSize) {
+                    const worldX = cameraX + x;
+                    const height = getHeight(worldX, worldZ);
+                    
+                    const scale = 300 / (z + 50);
+                    const screenX = canvas.width / 2 + x * scale;
+                    const heightDiff = cameraY - height;
+                    const screenY = horizonY + heightDiff * scale;
+                    
+                    if (x === -terrainWidth) {
+                        ctx.moveTo(screenX, screenY);
+                    } else {
+                        ctx.lineTo(screenX, screenY);
+                    }
+                }
+                
+                ctx.lineTo(canvas.width, canvas.height);
+                ctx.lineTo(0, canvas.height);
+                ctx.closePath();
+                
+                const brightness = Math.max(220, 255 - z * 0.15);
+                const blue = Math.max(230, 255 - z * 0.1);
+                ctx.fillStyle = 'rgb(' + brightness + ', ' + brightness + ', ' + blue + ')';
+                ctx.fill();
+                
+                if (z % 30 < gridSize) {
+                    ctx.strokeStyle = 'rgba(200, 210, 220, ' + (0.4 - z * 0.0008) + ')';
+                    ctx.lineWidth = 0.5;
+                    ctx.stroke();
+                }
+            }
+        }
+        
+        function drawTrees() {
+            // 1. SORTING: Draw far trees first, near trees last (Painter's Algorithm)
+            trees.sort((a, b) => (b.z - cameraZ) - (a.z - cameraZ)); 
+
+            const horizonY = canvas.height * 0.42;
+            const treeTrunkRatio = 0.3;
+
+            trees.forEach(tree => {
+                const worldZ = tree.z - cameraZ;
+                const worldX = tree.x - cameraX;
+                
+                if (worldZ > -500 && worldZ < 10) {
+                    const scale = 300 / (-worldZ + 50);
+                    const screenX = canvas.width / 2 + worldX * scale;
+                    
+                    const distanceFade = 1 - Math.max(0, Math.min(1, (-worldZ - 100) / 300));
+                    
+                    const groundHeight = getHeight(tree.x, tree.z);
+                    const sinkAmount = (1 - distanceFade) * 15;
+                    const screenY_ground = horizonY + (cameraY - groundHeight + sinkAmount) * scale;
+                    
+                    const treeHeight = 40 * tree.size * scale;
+                    const treeWidth = 15 * tree.size * scale;
+                    const trunkHeight = treeHeight * treeTrunkRatio;
+                    const trunkY_top = screenY_ground - trunkHeight;
+                    const treeY_peak = screenY_ground - treeHeight;
+
+                    // --- PARTIAL OCCLUSION CALCULATION ---
+                    
+                    const occlusionZ = tree.z - 5;
+                    const closerTerrainHeight = getHeight(tree.x, occlusionZ);
+                    
+                    const closerWorldZ = occlusionZ - cameraZ;
+                    const closerScale = 300 / (-closerWorldZ + 50);
+                    const screenY_closerTerrain = horizonY + (cameraY - closerTerrainHeight) * closerScale;
+
+                    const clippingY = Math.min(screenY_ground, screenY_closerTerrain);
+                    
+                    if (treeY_peak > clippingY) {
+                        return; 
+                    }
+
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.rect(0, 0, canvas.width, clippingY); 
+                    ctx.clip();
+                    
+                    // TRUNK
+                    const trunkR = 220 + (60 - 220) * distanceFade;
+                    const trunkG = 220 + (50 - 220) * distanceFade;
+                    const trunkB = 220 + (40 - 220) * distanceFade;
+                    ctx.fillStyle = 'rgba(' + trunkR + ', ' + trunkG + ', ' + trunkB + ', ' + Math.min(1, scale * 0.8) + ')';
+                    ctx.fillRect(screenX - treeWidth * 0.15, trunkY_top, treeWidth * 0.3, trunkHeight);
+                    
+                    // CONE/CANOPY
+                    const coneR = 220 + (40 - 220) * distanceFade;
+                    const coneG = 220 + (80 - 220) * distanceFade;
+                    const coneB = 220 + (50 - 220) * distanceFade;
+                    ctx.fillStyle = 'rgba(' + coneR + ', ' + coneG + ', ' + coneB + ', ' + Math.min(1, scale * 0.8) + ')';
+                    ctx.beginPath();
+                    ctx.moveTo(screenX, treeY_peak);
+                    ctx.lineTo(screenX - treeWidth, trunkY_top); 
+                    ctx.lineTo(screenX + treeWidth, trunkY_top);
+                    ctx.closePath();
+                    ctx.fill();
+                    
+                    // SNOW ON CONE
+                    ctx.fillStyle = 'rgba(255, 255, 255, ' + Math.min(0.8, scale * 0.6) + ')';
+                    ctx.beginPath();
+                    ctx.moveTo(screenX, treeY_peak); 
+                    ctx.lineTo(screenX - treeWidth * 0.3, screenY_ground - treeHeight * 0.5); 
+                    ctx.lineTo(screenX + treeWidth * 0.3, screenY_ground - treeHeight * 0.5);
+                    ctx.closePath();
+                    ctx.fill();
+
+                    ctx.restore();
+                }
+            });
+        }
+        
+        function drawSnow() {
+            const elapsed = (Date.now() - startTime) / 1000;
+            if (elapsed < 3) return;
+            
+            const snowIntensity = Math.min(1, (elapsed - 3) / 5);
+            const activeFlakes = Math.floor(snowflakes.length * snowIntensity);
+            
+            // Wind swirl effect
+            const windTime = elapsed * 2;
+            const windStrength = Math.sin(windTime * 0.5) * 30;
+            
+            for (let i = 0; i < activeFlakes; i++) {
+                const flake = snowflakes[i];
+                flake.z -= flake.speed * 8;
+                
+                // Add swirling wind effect
+                const swirl = Math.sin(windTime + i * 0.1) * windStrength;
+                flake.x += swirl * 0.05;
+                
+                if (flake.z < 1) {
+                    flake.z = 400;
+                    flake.x = (Math.random() - 0.5) * 400;
+                    flake.y = (Math.random() - 0.5) * 200;
+                }
+                
+                const scale = 300 / flake.z;
+                const screenX = canvas.width / 2 + flake.x * scale;
+                const screenY = canvas.height * 0.3 + flake.y * scale;
+                
+                const prevZ = flake.z + flake.speed * 8;
+                const prevScale = 300 / prevZ;
+                const prevX = canvas.width / 2 + (flake.x - swirl * 0.05) * prevScale;
+                const prevY = canvas.height * 0.3 + flake.y * prevScale;
+                
+                const size = Math.max(1, 3 * scale);
+                const alpha = Math.min(1, scale * 2);
+                
+                // Triangle trail instead of line
+                ctx.fillStyle = 'rgba(255, 255, 255, ' + (alpha * 0.6) + ')';
+                ctx.beginPath();
+                ctx.moveTo(prevX, prevY);
+                ctx.lineTo(screenX - size * 0.5, screenY);
+                ctx.lineTo(screenX + size * 0.5, screenY);
+                ctx.closePath();
+                ctx.fill();
+                
+                ctx.fillStyle = 'rgba(255, 255, 255, ' + alpha + ')';
+                ctx.beginPath();
+                ctx.arc(screenX, screenY, size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+        
+        function drawFrost() {
+            const elapsed = (Date.now() - startTime) / 1000;
+            if (elapsed < 3) return;
+            
+            frostLevel += 0.001;
+            
+            if (frostLevel > 0) {
+                const crystalCount = Math.floor(frostLevel * 500);
+                for (let i = 0; i < crystalCount; i++) {
+                    const seed = i * 12345;
+                    const x = (seed % canvas.width);
+                    const y = ((seed * 7) % canvas.height);
+                    const size = ((seed % 5) + 1) * Math.min(1, frostLevel * 2);
+                    const alpha = Math.min(0.3, frostLevel * 0.5);
+                    
+                    ctx.fillStyle = 'rgba(255, 255, 255, ' + alpha + ')';
+                    ctx.fillRect(x, y, size, size);
+                }
+                
+                const frostAlpha = Math.min(0.9, frostLevel);
+                const gradient = ctx.createRadialGradient(
+                    canvas.width/2, canvas.height/2, 0,
+                    canvas.width/2, canvas.height/2, canvas.width * 0.7
+                );
+                gradient.addColorStop(0, 'rgba(255, 255, 255, 0)');
+                gradient.addColorStop(1, 'rgba(255, 255, 255, ' + (frostAlpha * 0.8) + ')');
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                if (frostLevel > 1) {
+                    ctx.fillStyle = 'rgba(255, 255, 255, ' + Math.min(1, (frostLevel - 1) * 0.5) + ')';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                }
+                
+                // Start fade to black when fully frosted
+                if (frostLevel >= 3.5 && fadeToBlackStart === 0) {
+                    fadeToBlackStart = Date.now();
+                }
+            }
+        }
+        
+        function drawBlackout() {
+            if (fadeToBlackStart === 0) return;
+            
+            const fadeElapsed = (Date.now() - fadeToBlackStart) / 1000;
+            const fadeDuration = 3;
+            const blackAlpha = Math.min(1, fadeElapsed / fadeDuration);
+            
+            ctx.fillStyle = 'rgba(0, 0, 0, ' + blackAlpha + ')';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            if (blackAlpha >= 1 && !blackoutComplete) {
+                blackoutComplete = true;
+                setTimeout(() => {
+                    altitude = 0;
+                    reachedBottom = true;
+                }, 1000);
+            }
+        }
+        
+        function drawHUD() {
+            if (reachedBottom) return;
+            
+            const hudHeight = 70;
+            const hudY = canvas.height - hudHeight;
+            
+            ctx.fillStyle = '#2a3f5f';
+            ctx.fillRect(0, hudY, canvas.width, hudHeight);
+            
+            ctx.fillStyle = '#4a6f9f';
+            ctx.fillRect(0, hudY, canvas.width, 2);
+            
+            const panelWidth = (canvas.width - 40) / 3;
+            const gap = 10;
+            
+            function corruptText(text) {
+                if (frostLevel < 1.8) return text;
+                const chars = '█▓▒░#@$%&*!?<>[]{}';
+                let result = '';
+                const corruptChance = frostLevel > 2.2 ? 1 : 0.5;
+                for (let i = 0; i < text.length; i++) {
+                    if (text[i] === ' ') {
+                        result += ' ';
+                    } else if (Math.random() > corruptChance) {
+                        result += text[i];
+                    } else {
+                        result += chars[Math.floor(Math.random() * chars.length)];
+                    }
+                }
+                return result;
+            }
+            
+            // Left panel - Speed
+            const leftX = gap;
+            ctx.fillStyle = '#1a2f4f';
+            ctx.fillRect(leftX, hudY + 10, panelWidth, 50);
+            ctx.strokeStyle = '#4a6f9f';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(leftX, hudY + 10, panelWidth, 50);
+            
+            ctx.fillStyle = '#00ff88';
+            ctx.font = 'bold 14px monospace';
+            ctx.fillText(corruptText('SPEED'), leftX + 10, hudY + 28);
+            
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 24px monospace';
+            ctx.fillText(corruptText(Math.floor(speed * 10) + ' km/h'), leftX + 10, hudY + 52);
+            
+            // Center panel - Altitude
+            const centerX = gap + panelWidth + gap;
+            ctx.fillStyle = '#1a2f4f';
+            ctx.fillRect(centerX, hudY + 10, panelWidth, 50);
+            ctx.strokeStyle = '#4a6f9f';
+            ctx.strokeRect(centerX, hudY + 10, panelWidth, 50);
+            
+            ctx.fillStyle = '#ffaa00';
+            ctx.font = 'bold 14px monospace';
+            ctx.fillText(corruptText('ALTITUDE'), centerX + 10, hudY + 28);
+            
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 24px monospace';
+            ctx.fillText(corruptText(altitude + ' m'), centerX + 10, hudY + 52);
+            
+            // Right panel - Heading
+            const rightX = gap + panelWidth + gap + panelWidth + gap;
+            ctx.fillStyle = '#1a2f4f';
+            ctx.fillRect(rightX, hudY + 10, panelWidth, 50);
+            ctx.strokeStyle = '#4a6f9f';
+            ctx.strokeRect(rightX, hudY + 10, panelWidth, 50);
+            
+            ctx.fillStyle = '#ff5555';
+            ctx.font = 'bold 14px monospace';
+            ctx.fillText(corruptText('HEADING'), rightX + 10, hudY + 28);
+            
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 24px monospace';
+            ctx.fillText(corruptText('180 N'), rightX + 10, hudY + 52);
+        }
+        
+        function animate() {
+            const elapsed = (Date.now() - startTime) / 1000;
+            
+            // Progressive speed increase from 12 to 25 km/h
+            if (elapsed < 3) {
+                speed = 1.2;
+            } else if (elapsed < 8) {
+                const progress = (elapsed - 3) / 5;
+                speed = 1.2 + (2.5 - 1.2) * progress;
+            } else {
+                speed = 2.5;
+            }
+            
+            cameraZ -= speed;
+            cameraY = getHeight(cameraX, cameraZ) + 12;
+            
+            altitude = Math.max(0, Math.floor(1000 + cameraZ * 0.1));
+            if (altitude <= 0) {
+                reachedBottom = true;
+            }
+            
+            trees.forEach(tree => {
+                if (tree.z - cameraZ > 10) {
+                    tree.z = cameraZ - 1200;
+                    const side = Math.random() > 0.5 ? 1 : -1;
+                    tree.x = side * (Math.random() * 100 + 200);
+                    tree.size = Math.random() * 0.5 + 0.7;
+                }
+            });
+            
+            if (reachedBottom) {
+                if (endTime === 0) endTime = Date.now();
+                const elapsed = (Date.now() - endTime) / 1000;
+                
+                // Pure white base
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                const centerX = canvas.width / 2;
+                const centerY = canvas.height / 2;
+                
+                // Multiple pulsing light rings
+                for (let ring = 0; ring < 5; ring++) {
+                    const offset = ring * 0.3;
+                    const pulse = Math.sin(elapsed * 2 + offset) * 0.4 + 0.6;
+                    const radius = canvas.height * (0.3 + ring * 0.15) * pulse;
+                    
+                    const glow = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius);
+                    const colors = [
+                        'rgba(255, 255, 255, ',
+                        'rgba(255, 250, 200, ',
+                        'rgba(255, 240, 180, ',
+                        'rgba(240, 230, 200, ',
+                        'rgba(220, 220, 255, '
+                    ];
+                    glow.addColorStop(0, colors[ring] + (pulse * 0.8) + ')');
+                    glow.addColorStop(0.5, colors[ring] + (pulse * 0.4) + ')');
+                    glow.addColorStop(1, 'rgba(255, 255, 255, 0)');
+                    ctx.fillStyle = glow;
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                }
+                
+                // Ethereal particles floating
+                const particleCount = 50;
+                for (let i = 0; i < particleCount; i++) {
+                    const angle = (i / particleCount) * Math.PI * 2 + elapsed * 0.5;
+                    const dist = 100 + Math.sin(elapsed + i) * 50;
+                    const x = centerX + Math.cos(angle) * dist;
+                    const y = centerY + Math.sin(angle) * dist;
+                    const size = 3 + Math.sin(elapsed * 2 + i) * 2;
+                    const alpha = 0.3 + Math.sin(elapsed * 3 + i) * 0.3;
+                    
+                    ctx.fillStyle = 'rgba(255, 255, 240, ' + alpha + ')';
+                    ctx.beginPath();
+                    ctx.arc(x, y, size, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                
+                // Slowly rotating rays
+                ctx.save();
+                ctx.translate(centerX, centerY);
+                ctx.rotate(elapsed * 0.2);
+                for (let i = 0; i < 12; i++) {
+                    const rayAngle = (i / 12) * Math.PI * 2;
+                    ctx.save();
+                    ctx.rotate(rayAngle);
+                    const rayGradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+                    rayGradient.addColorStop(0, 'rgba(255, 255, 240, 0.2)');
+                    rayGradient.addColorStop(0.3, 'rgba(255, 255, 240, 0.1)');
+                    rayGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+                    ctx.fillStyle = rayGradient;
+                    ctx.fillRect(-20, 0, 40, canvas.height);
+                    ctx.restore();
+                }
+                ctx.restore();
+                
+                // Scrolling poem text
+                if (elapsed > 2) {
+                    const scrollY = centerY + 150 - (elapsed - 2) * 25;
+                    ctx.textAlign = 'center';
+                    
+                    const lines = [
+                        "In the bleak midwinter",
+                        "Frosty wind made moan,",
+                        "Earth stood hard as iron,",
+                        "Water like a stone;",
+                        "",
+                        "Snow had fallen,",
+                        "Snow on snow,",
+                        "Snow on snow,",
+                        "",
+                        "In the bleak midwinter,",
+                        "Long ago."
+                    ];
+                    
+                    lines.forEach((line, i) => {
+                        const lineY = scrollY + i * 45;
+                        if (lineY > -50 && lineY < canvas.height + 50) {
+                            const fadeIn = Math.min(1, (canvas.height - lineY) / 200);
+                            const fadeOut = Math.min(1, (lineY + 50) / 200);
+                            const alpha = Math.min(fadeIn, fadeOut) * 0.7;
+                            
+                            ctx.fillStyle = 'rgba(80, 90, 110, ' + alpha + ')';
+                            ctx.font = 'italic 28px serif';
+                            ctx.fillText(line, centerX, lineY);
+                        }
+                    });
+                }
+            } else {
+                drawSky();
+                drawTerrain();
+                drawTrees();
+                drawSnow();
+                drawFrost();
+                drawBlackout();
+            }
+            
+            drawHUD();
+            
+            requestAnimationFrame(animate);
+        }
+        
+        window.addEventListener('resize', resizeCanvas);
+        
+        animate();
+    </script>
+</body>
+</html>

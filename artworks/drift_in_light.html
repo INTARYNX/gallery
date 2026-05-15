@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Drift in Light</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: #000;
+            overflow: hidden;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="sky"></canvas>
+    <script>
+        const canvas = document.getElementById('sky');
+        const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
+        
+        let w, h, cx, cy, radius;
+        let skyInit = false;
+        
+        function resize() {
+            w = canvas.width = window.innerWidth;
+            h = canvas.height = window.innerHeight;
+            radius = Math.min(w, h) * 0.4;
+            cx = w / 2;
+            cy = h / 2 + radius * 0.15;
+            skyInit = false;
+        }
+        
+        resize();
+        window.addEventListener('resize', () => {
+            resize();
+            drawSky();
+        });
+
+        const trails = [];
+        let lastTime = 0;
+        let offset = 0;
+        const maxTrails = 12;
+        let globalHueShift = 0;
+
+        function drawSky() {
+            ctx.fillStyle = '#0a0012';
+            ctx.fillRect(0, 0, w, h);
+            
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius - 2, 0, Math.PI * 2);
+            ctx.clip();
+            
+            ctx.fillStyle = '#0d0018';
+            ctx.fillRect(0, 0, w, h);
+            
+            for (let i = 0; i < 800; i++) {
+                const x = Math.random() * w;
+                const y = Math.random() * h;
+                const hue = Math.random() * 360;
+                const a = Math.random() * 0.5;
+                const size = Math.random() * 2 + 0.5;
+                ctx.fillStyle = `hsla(${hue},80%,80%,${a})`;
+                ctx.fillRect(x, y, size, size);
+            }
+            
+            ctx.restore();
+        }
+
+        function createTrail() {
+            if (trails.length >= maxTrails) return;
+            
+            const side = Math.random() * 4 | 0;
+            let sx, sy, tx, ty;
+            const off = (Math.random() - 0.5) * radius * 1.5;
+            
+            if (side === 0) {
+                sx = cx - radius; sy = cy + off;
+                tx = cx + radius; ty = cy + off;
+            } else if (side === 1) {
+                sx = cx + radius; sy = cy + off;
+                tx = cx - radius; ty = cy + off;
+            } else if (side === 2) {
+                sx = cx + off; sy = cy - radius;
+                tx = cx + off; ty = cy + radius;
+            } else {
+                sx = cx + off; sy = cy + radius;
+                tx = cx + off; ty = cy - radius;
+            }
+            
+            const dx = tx - sx;
+            const dy = ty - sy;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const speed = 1.8;
+            
+            trails.push({
+                pts: [],
+                x: sx,
+                y: sy,
+                dx: (dx / dist) * speed,
+                dy: (dy / dist) * speed,
+                max: dist / speed,
+                age: 0,
+                hue: Math.random() * 360,
+                curve: (Math.random() - 0.5) * 0.008,
+                wobbleFreq: 0.02 + Math.random() * 0.04,
+                wobbleAmp: 0.3 + Math.random() * 0.7
+            });
+        }
+
+        function draw(t, time) {
+            const segments = Math.floor(t.pts.length / 2);
+            
+            for (let i = 0; i < segments; i++) {
+                const idx = i * 2;
+                if (idx >= t.pts.length) break;
+                
+                const p = t.pts[idx];
+                const age = t.pts.length - idx + t.age;
+                const fade = Math.max(0, (400 - age) / 400);
+                const pulse = 0.7 + 0.3 * Math.sin(time * 0.003 + idx * 0.05);
+                const a = Math.pow(fade, 1.0) * 0.25 * pulse;
+                
+                const spread = radius * (0.012 + (age / 400) * 0.1);
+                const hue = (t.hue + globalHueShift + idx * 0.8) % 360;
+                const hue2 = (hue + 60) % 360;
+                
+                const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, spread);
+                g.addColorStop(0, `hsla(${hue},100%,95%,${a * 0.9})`);
+                g.addColorStop(0.2, `hsla(${hue},90%,75%,${a * 0.7})`);
+                g.addColorStop(0.5, `hsla(${hue2},80%,60%,${a * 0.4})`);
+                g.addColorStop(0.8, `hsla(${(hue2 + 40) % 360},70%,50%,${a * 0.15})`);
+                g.addColorStop(1, `hsla(${(hue + 120) % 360},60%,40%,0)`);
+                
+                ctx.fillStyle = g;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, spread, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        function drawNebulaRing(time) {
+            const ringCount = 3;
+            for (let r = 0; r < ringCount; r++) {
+                const rRadius = radius * (0.3 + r * 0.25);
+                const hue = (globalHueShift * 0.5 + r * 120) % 360;
+                const wobble = Math.sin(time * 0.001 + r) * radius * 0.03;
+                const a = 0.03 + 0.015 * Math.sin(time * 0.002 + r * 2);
+                
+                ctx.beginPath();
+                ctx.arc(cx, cy, rRadius + wobble, 0, Math.PI * 2);
+                ctx.strokeStyle = `hsla(${hue},70%,60%,${a})`;
+                ctx.lineWidth = radius * 0.06;
+                ctx.stroke();
+            }
+        }
+
+        function animate(time) {
+            if (!w || !h) return requestAnimationFrame(animate);
+            
+            if (!skyInit) {
+                drawSky();
+                skyInit = true;
+            }
+
+            globalHueShift = (time * 0.02) % 360;
+
+            ctx.globalAlpha = 0.06;
+            const bgHue = (globalHueShift * 0.3) % 360;
+            ctx.fillStyle = `hsl(${bgHue},30%,4%)`;
+            ctx.fillRect(0, 0, w, h);
+            ctx.globalAlpha = 1;
+
+            if (time - lastTime > 800) {
+                createTrail();
+                lastTime = time;
+            }
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+            ctx.clip();
+
+            drawNebulaRing(time);
+
+            for (let i = trails.length - 1; i >= 0; i--) {
+                const t = trails[i];
+                
+                if (t.pts.length < t.max) {
+                    const tmp = t.dx;
+                    const c = Math.cos(t.curve);
+                    const s = Math.sin(t.curve);
+                    t.dx = t.dx * c - t.dy * s;
+                    t.dy = tmp * s + t.dy * c;
+                    
+                    const wobble = Math.sin(t.pts.length * t.wobbleFreq) * t.wobbleAmp;
+                    const perpX = -t.dy;
+                    const perpY = t.dx;
+                    const pLen = Math.sqrt(perpX * perpX + perpY * perpY);
+                    
+                    t.x += t.dx + (perpX / pLen) * wobble;
+                    t.y += t.dy + (perpY / pLen) * wobble;
+                    
+                    const dx = t.x - cx;
+                    const dy = t.y - cy;
+                    const d = Math.sqrt(dx * dx + dy * dy);
+                    const distort = 1 + (d / radius) * 0.3;
+                    const angle = Math.atan2(dy, dx);
+                    const newD = d * distort;
+                    
+                    t.pts.push({
+                        x: cx + Math.cos(angle) * newD,
+                        y: cy + Math.sin(angle) * newD
+                    });
+                } else {
+                    t.age++;
+                }
+
+                draw(t, time);
+
+                if (t.age > 400) trails.splice(i, 1);
+            }
+            
+            ctx.restore();
+            
+            offset += 0.3;
+
+            const vg = ctx.createRadialGradient(cx, cy, radius * 0.6, cx, cy, radius);
+            const edgeHue = (globalHueShift + 90) % 360;
+            vg.addColorStop(0, 'rgba(0,0,0,0)');
+            vg.addColorStop(0.7, 'rgba(0,0,0,0)');
+            vg.addColorStop(0.85, `hsla(${edgeHue},50%,10%,0.3)`);
+            vg.addColorStop(1, `hsla(${edgeHue},40%,5%,0.7)`);
+            
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+            ctx.clip();
+            ctx.fillStyle = vg;
+            ctx.fillRect(0, 0, w, h);
+            ctx.restore();
+
+            requestAnimationFrame(animate);
+        }
+
+        createTrail();
+        animate(0);
+    </script>
+</body>
+</html>

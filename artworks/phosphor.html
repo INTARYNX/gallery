@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Phosphor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #000;
+            font-family: 'Courier New', monospace;
+        }
+        body::after {
+            content: "";
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            background: radial-gradient(circle at center, rgba(0,0,0,0) 40%, rgba(0,0,0,0.7) 100%);
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            position: fixed;
+            top: 0;
+            left: 0;
+        }
+        .controls {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(15, 5, 25, 0.92);
+            border: 1px solid rgba(0, 32, 96, 0.6);
+            border-radius: 6px;
+            padding: 20px;
+            color: #fff;
+            min-width: 280px;
+            backdrop-filter: blur(12px);
+            box-shadow: 0 0 20px rgba(0, 32, 96, 0.25);
+            z-index: 100;
+        }
+        .controls h3 {
+            margin: 0 0 15px 0;
+            color: #4169E1;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            font-size: 14px;
+            text-shadow: 0 0 8px rgba(65, 105, 225, 0.5);
+            opacity: 0.9;
+        }
+        .control-group {
+            margin-bottom: 15px;
+        }
+        .control-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.8);
+            text-transform: uppercase;
+        }
+        .control-group input[type="range"] {
+            width: 100%;
+            height: 3px;
+            background: rgba(255, 255, 255, 0.1);
+            outline: none;
+            border-radius: 2px;
+        }
+        .control-group input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 14px;
+            height: 14px;
+            background: #4169E1;
+            cursor: pointer;
+            border-radius: 50%;
+            box-shadow: 0 0 10px rgba(65, 105, 225, 0.6);
+        }
+        .control-group input[type="range"]::-moz-range-thumb {
+            width: 14px;
+            height: 14px;
+            background: #4169E1;
+            cursor: pointer;
+            border-radius: 50%;
+            border: none;
+            box-shadow: 0 0 10px rgba(65, 105, 225, 0.6);
+        }
+        .value {
+            float: right;
+            color: rgba(255, 0, 255, 0.8);
+            font-size: 11px;
+        }
+        .toggle-btn {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 32, 96, 0.15);
+            border: 1px solid rgba(65, 105, 225, 0.4);
+            color: rgba(65, 105, 225, 0.9);
+            padding: 10px 15px;
+            cursor: pointer;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            z-index: 101;
+            backdrop-filter: blur(10px);
+        }
+        .toggle-btn:hover {
+            background: rgba(0, 32, 96, 0.3);
+            box-shadow: 0 0 15px rgba(65, 105, 225, 0.3);
+        }
+        .controls.hidden {
+            display: none;
+        }
+        
+        @media (max-width: 768px) {
+            .controls {
+                min-width: 240px;
+                padding: 15px;
+                top: 10px;
+                right: 10px;
+            }
+            .toggle-btn {
+                top: 10px;
+                right: 10px;
+                padding: 8px 12px;
+                font-size: 11px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <button class="toggle-btn" onclick="toggleControls()">⚙ CONTROLS</button>
+    <div class="controls hidden" id="controls">
+        <h3>Controls</h3>
+        
+        <div class="control-group">
+            <label>Glitch Intensity <span class="value" id="val-glitch">0.5</span></label>
+            <input type="range" id="glitch" min="0" max="1" step="0.01" value="0.5">
+        </div>
+        
+        <div class="control-group">
+            <label>Glitch Frequency <span class="value" id="val-freq">0.15</span></label>
+            <input type="range" id="frequency" min="0" max="1" step="0.01" value="0.15">
+        </div>
+        
+        <div class="control-group">
+            <label>Palette Shift <span class="value" id="val-palette">0.3</span></label>
+            <input type="range" id="palette" min="0" max="1" step="0.01" value="0.3">
+        </div>
+        
+        <div class="control-group">
+            <label>Tunnel Speed <span class="value" id="val-tunnel">0.5</span></label>
+            <input type="range" id="tunnel" min="0" max="2" step="0.1" value="0.5">
+        </div>
+        
+        <div class="control-group">
+            <label>Kaleidoscope Segments <span class="value" id="val-segments">8</span></label>
+            <input type="range" id="segments" min="3" max="16" step="1" value="8">
+        </div>
+        
+        <div class="control-group">
+            <label>Effect Density <span class="value" id="val-density">2</span></label>
+            <input type="range" id="density" min="1" max="4" step="1" value="2">
+        </div>
+    </div>
+    
+    <script>
+        const canvas = document.getElementById('canvas');
+        const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+        
+        if (!gl) {
+            alert('WebGL not supported');
+        }
+        
+        const params = {
+            glitchIntensity: 0.5,
+            glitchFrequency: 0.15,
+            paletteShift: 0.3,
+            tunnelSpeed: 0.5,
+            segments: 8,
+            density: 2
+        };
+        
+        function toggleControls() {
+            document.getElementById('controls').classList.toggle('hidden');
+        }
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            ['glitch', 'frequency', 'palette', 'tunnel', 'segments', 'density'].forEach(id => {
+                const input = document.getElementById(id);
+                const valueDisplay = document.getElementById('val-' + id);
+                
+                if (!input || !valueDisplay) return;
+                
+                input.addEventListener('input', (e) => {
+                    const value = parseFloat(e.target.value);
+                    valueDisplay.textContent = value.toFixed(id === 'segments' || id === 'density' ? 0 : 2);
+                    
+                    switch(id) {
+                        case 'glitch': params.glitchIntensity = value; break;
+                        case 'frequency': params.glitchFrequency = value; break;
+                        case 'palette': params.paletteShift = value; break;
+                        case 'tunnel': params.tunnelSpeed = value; break;
+                        case 'segments': params.segments = value; break;
+                        case 'density': params.density = value; break;
+                    }
+                });
+            });
+        });
+        
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            gl.viewport(0, 0, canvas.width, canvas.height);
+        }
+        resize();
+        window.addEventListener('resize', resize);
+        
+        const vsSource = `
+            attribute vec2 position;
+            void main() {
+                gl_Position = vec4(position, 0.0, 1.0);
+            }
+        `;
+        
+        const fsSource = `
+            precision highp float;
+            uniform float time;
+            uniform vec2 resolution;
+            uniform float uGlitchIntensity;
+            uniform float uGlitchFrequency;
+            uniform float uPaletteShift;
+            uniform float uTunnelSpeed;
+            uniform float uSegments;
+            uniform float uDensity;
+            
+            vec3 palette(float t) {
+                float shift = sin(time * 0.2) * uPaletteShift;
+                return vec3(0.2, 0.1, 0.3) + vec3(0.6, 0.4, 0.8) * cos(6.28318 * (t + vec3(0.0, 0.15, 0.25) + shift));
+            }
+            
+            float hash(vec2 p) {
+                return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+            }
+            
+            vec3 processEffect(vec2 uv, float time) {
+                vec2 uv0 = uv;
+                vec3 color = vec3(0.0);
+                
+                for(float i = 0.0; i < 4.0; i++) {
+                    if(i >= uDensity) break;
+                    
+                    uv = fract(uv * (1.8 + i * 0.2)) - 0.5;
+                    float d = length(uv) * exp(-length(uv0) * 0.5);
+                    d = abs(sin(d * 6.0 + time) * 0.15);
+                    
+                    float intensity = pow(0.02 / (d + 0.015), 0.9);
+                    color += palette(length(uv0) + i * 0.8 - time * 0.2) * intensity;
+                }
+                
+                return color * 0.6;
+            }
+            
+            void main() {
+                vec2 uv = (gl_FragCoord.xy * 2.0 - resolution) / min(resolution.x, resolution.y);
+                vec2 screenUV = gl_FragCoord.xy / resolution;
+                
+                // Calibration basée sur la résolution réelle
+                float minDim = min(resolution.x, resolution.y);
+                float maxDim = max(resolution.x, resolution.y);
+                float aspectRatio = maxDim / minDim;
+                
+                // Scale adaptatif : plus l'écran est petit, plus les glitches sont forts
+                // Référence : 1920px = scale 1.0, 400px = scale 4.8
+                float glitchScale = 1920.0 / max(minDim, 400.0);
+                
+                // Glitch trigger
+                float glitchTime = floor(time * 3.0);
+                float glitchRand = hash(vec2(glitchTime, 0.0));
+                float glitchActive = step(1.0 - uGlitchFrequency, glitchRand);
+                float glitchPower = glitchActive * uGlitchIntensity * glitchScale;
+                
+                // RGB split - proportionnel à la résolution
+                float rgbOffset = glitchPower * 0.08;
+                vec2 uvR = uv + vec2(rgbOffset, 0.0);
+                vec2 uvG = uv;
+                vec2 uvB = uv - vec2(rgbOffset, 0.0);
+                
+                // Block displacement - hauteur adaptée à la résolution
+                float blockHeight = minDim / 15.0; // ~128px pour 1920, ~26px pour 400
+                float blockIndex = floor(screenUV.y * resolution.y / blockHeight);
+                float blockHash = hash(vec2(blockIndex, glitchTime * 2.0));
+                float blockShift = step(0.5, blockHash) * glitchPower * 0.15 * sin(time * 10.0 + blockIndex);
+                
+                uvR.x += blockShift;
+                uvG.x += blockShift;
+                uvB.x += blockShift;
+                
+                float r = length(uv);
+                if(r > 1.0) {
+                    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+                    return;
+                }
+                
+                float z = sqrt(1.0 - r * r);
+                
+                // Process each RGB channel with hemisphere mapping
+                vec3 finalColor = vec3(0.0);
+                
+                for(int ch = 0; ch < 3; ch++) {
+                    vec2 uvCh = ch == 0 ? uvR : (ch == 1 ? uvG : uvB);
+                    float rCh = length(uvCh);
+                    
+                    if(rCh <= 1.0) {
+                        float zCh = sqrt(1.0 - rCh * rCh);
+                        float thetaCh = atan(uvCh.y, uvCh.x);
+                        float phiCh = acos(zCh);
+                        
+                        float segmentAngle = 6.28318 / uSegments;
+                        float angleCh = mod(thetaCh, segmentAngle);
+                        angleCh = abs(angleCh - segmentAngle * 0.5);
+                        vec2 uvProc = vec2(cos(angleCh), sin(angleCh)) * phiCh;
+                        
+                        vec3 channelColor = processEffect(uvProc, time);
+                        finalColor[ch] = channelColor[ch];
+                    }
+                }
+                
+                // Channel swap glitch
+                if(glitchPower > 0.4) {
+                    finalColor.rgb = finalColor.brg;
+                }
+                
+                // Center focus
+                float center = smoothstep(1.0, 0.0, r);
+                finalColor *= 0.8 + 0.2 * center;
+                
+                // Tunnel effect
+                float phi = acos(z);
+                float tunnel = fract(10.0 / max(phi, 0.05) + time * uTunnelSpeed);
+                finalColor += step(0.5, fract(tunnel * 10.0)) * 0.1;
+                
+                // Pixelation - taille adaptée à la résolution
+                if(glitchPower > 0.3) {
+                    float pixelSize = minDim / 18.0; // ~106px pour 1920, ~22px pour 400
+                    vec2 pixelCoord = floor(gl_FragCoord.xy / pixelSize);
+                    float pixelNoise = hash(pixelCoord + glitchTime);
+                    finalColor *= 0.3 + 0.7 * pixelNoise;
+                }
+                
+                // Post-processing
+                finalColor *= (0.6 + 0.4 * z);
+                finalColor = pow(finalColor, vec3(0.9));
+                finalColor = clamp(finalColor, 0.0, 1.0);
+                finalColor += smoothstep(0.0, 1.0, length(finalColor)) * 0.15;
+                
+                // Grain
+                float grain = hash(gl_FragCoord.xy + time * 100.0) * 0.02;
+                finalColor += grain;
+                
+                // Scanlines
+                float scan = sin(gl_FragCoord.y * 3.14159);
+                finalColor *= 0.9 + 0.1 * scan * scan;
+                
+                // Vignette
+                float vignette = smoothstep(0.9, 0.4, length(screenUV - 0.5));
+                finalColor *= vignette;
+                
+                // Tone mapping
+                finalColor = finalColor / (1.0 + finalColor);
+                
+                // Breathing effect
+                finalColor *= 0.97 + 0.03 * sin(time * 0.6 + r * 3.0);
+                
+                // Inversion de couleurs glitch
+                if(glitchPower > 0.5) {
+                    finalColor = vec3(1.0) - finalColor;
+                }
+                
+                // RGB mask (CRT effect)
+                float mask = sin(gl_FragCoord.x * 3.14159);
+                finalColor.r *= 0.9 + 0.1 * mask;
+                finalColor.g *= 0.9 + 0.1 * sin(gl_FragCoord.x * 3.14159 + 2.1);
+                finalColor.b *= 0.9 + 0.1 * sin(gl_FragCoord.x * 3.14159 + 4.2);
+                
+                gl_FragColor = vec4(finalColor, 1.0);
+            }
+        `;
+        
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error('Shader compile error:', gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+        
+        const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+        const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+        
+        const program = gl.createProgram();
+        gl.attachShader(program, vertexShader);
+        gl.attachShader(program, fragmentShader);
+        gl.linkProgram(program);
+        
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+            console.error('Program link error:', gl.getProgramInfoLog(program));
+        }
+        
+        gl.useProgram(program);
+        
+        const vertices = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
+        const buffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+        
+        const positionLocation = gl.getAttribLocation(program, 'position');
+        gl.enableVertexAttribArray(positionLocation);
+        gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+        
+        const timeLocation = gl.getUniformLocation(program, 'time');
+        const resolutionLocation = gl.getUniformLocation(program, 'resolution');
+        const glitchIntensityLocation = gl.getUniformLocation(program, 'uGlitchIntensity');
+        const glitchFrequencyLocation = gl.getUniformLocation(program, 'uGlitchFrequency');
+        const paletteShiftLocation = gl.getUniformLocation(program, 'uPaletteShift');
+        const tunnelSpeedLocation = gl.getUniformLocation(program, 'uTunnelSpeed');
+        const segmentsLocation = gl.getUniformLocation(program, 'uSegments');
+        const densityLocation = gl.getUniformLocation(program, 'uDensity');
+        
+        function animate(time) {
+            time *= 0.001;
+            
+            let organicTime = time * 0.5;
+            organicTime += Math.sin(time * 0.3) * 0.5;
+            organicTime += Math.sin(time * 0.17) * 0.3;
+            organicTime += Math.cos(time * 0.41) * 0.2;
+            
+            gl.uniform1f(timeLocation, organicTime);
+            gl.uniform2f(resolutionLocation, canvas.width, canvas.height);
+            gl.uniform1f(glitchIntensityLocation, params.glitchIntensity);
+            gl.uniform1f(glitchFrequencyLocation, params.glitchFrequency);
+            gl.uniform1f(paletteShiftLocation, params.paletteShift);
+            gl.uniform1f(tunnelSpeedLocation, params.tunnelSpeed);
+            gl.uniform1f(segmentsLocation, params.segments);
+            gl.uniform1f(densityLocation, params.density);
+            
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+            
+            requestAnimationFrame(animate);
+        }
+        
+        animate(0);
+    </script>
+</body>
+</html>

@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cube</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: #000;
+        }
+        canvas {
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const size = Math.min(window.innerWidth, window.innerHeight, 800);
+        canvas.width = size;
+        canvas.height = size;
+        const centerX = size / 2;
+        const centerY = size / 2;
+        const radius = size / 2 - 20;
+
+        let t = 0;
+        const trails = [];
+        const maxTrails = 60;
+
+        function drawCube(angle, alpha = 1, isMain = false) {
+            const cubeSize = 80 + Math.sin(t * 0.01) * 30;
+            const vertices = [
+                [-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1],
+                [-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]
+            ].map(v => v.map(c => c * cubeSize));
+
+            const rotated = vertices.map(v => {
+                let [x, y, z] = v;
+                const cosX = Math.cos(angle), sinX = Math.sin(angle);
+                const cosY = Math.cos(angle * 0.7), sinY = Math.sin(angle * 0.7);
+                
+                let y1 = y * cosX - z * sinX;
+                let z1 = y * sinX + z * cosX;
+                let x1 = x * cosY - z1 * sinY;
+                z1 = x * sinY + z1 * cosY;
+                
+                return [x1 + centerX, y1 + centerY];
+            });
+
+            const edges = [
+                [0,1],[1,2],[2,3],[3,0],
+                [4,5],[5,6],[6,7],[7,4],
+                [0,4],[1,5],[2,6],[3,7]
+            ];
+
+            const hue = isMain ? ((t * 0.5) + 180) % 360 : (t * 0.5) % 360;
+            ctx.strokeStyle = `hsla(${hue}, 100%, 50%, ${alpha})`;
+            ctx.lineWidth = 2;
+            
+            const breathe = Math.sin(t * 0.02) * 0.15;
+            
+            edges.forEach(([i, j]) => {
+                ctx.beginPath();
+                const [x1, y1] = rotated[i];
+                const [x2, y2] = rotated[j];
+                
+                const steps = 20;
+                for (let s = 0; s <= steps; s++) {
+                    const progress = s / steps;
+                    const x = x1 + (x2 - x1) * progress;
+                    const y = y1 + (y2 - y1) * progress;
+                    
+                    const curve = Math.sin(progress * Math.PI) * breathe;
+                    const dx = -(y2 - y1) * curve;
+                    const dy = (x2 - x1) * curve;
+                    
+                    if (s === 0) {
+                        ctx.moveTo(x + dx, y + dy);
+                    } else {
+                        ctx.lineTo(x + dx, y + dy);
+                    }
+                }
+                ctx.stroke();
+            });
+        }
+
+        function animate() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+            ctx.fillRect(0, 0, size, size);
+
+            trails.push({ angle: t * 0.02, alpha: 1 });
+            if (trails.length > maxTrails) trails.shift();
+
+            trails.forEach((trail, i) => {
+                trail.alpha -= 0.015;
+                if (trail.alpha > 0) {
+                    ctx.globalAlpha = trail.alpha * 0.3;
+                    drawCube(trail.angle, trail.alpha * 0.3);
+                }
+            });
+
+            ctx.globalAlpha = 1;
+            drawCube(t * 0.02, 1, true);
+
+            t += 1;
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+    </script>
+</body>
+</html>

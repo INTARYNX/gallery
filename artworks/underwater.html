@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Underwater</title>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: #000;
+        }
+        canvas {
+            max-width: 90vmin;
+            max-height: 90vmin;
+            width: 100%;
+            height: auto;
+            border-radius: 20px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 800;
+        canvas.height = 800;
+
+        let offset = 0;
+        const scrollSpeed = 3;
+        let hueShift = 0;
+        let lightRayTimer = 0;
+        let lightRayIntensity = 0;
+        let currentDrift = 0;
+        let creatureTime = 0;
+
+        // Bubbles
+        const bubbles = [];
+        for (let i = 0; i < 60; i++) {
+            const depth = Math.random();
+            bubbles.push({
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height,
+                radius: depth * 5 + 0.5,
+                speed: depth * 1.2 + 0.4,
+                opacity: depth * 0.4 + 0.05,
+                wobble: Math.random() * Math.PI * 2,
+                wobbleSpeed: 0.8 + Math.random() * 0.4,
+                scrollSpeed: 0.3 + depth * 0.5
+            });
+        }
+
+        // Sardine schools avec vrai algorithme Boids
+        const sardines = [];
+        const fishCount = 120;
+        
+        for (let i = 0; i < fishCount; i++) {
+            const depth = Math.random();
+            sardines.push({
+                x: Math.random() * canvas.width,
+                y: 100 + Math.random() * 400,
+                vx: (Math.random() - 0.5) * 2,
+                vy: (Math.random() - 0.5) * 2,
+                size: (1.5 + Math.random() * 1) * (0.6 + depth * 0.8),
+                shimmer: Math.random() * Math.PI * 2,
+                shimmerSpeed: (0.05 + Math.random() * 0.1) * (0.7 + depth * 0.6),
+                depth: depth
+            });
+        }
+        
+        const visualRange = 50;
+        const protectedRange = 12;
+        const centeringFactor = 0.003;
+        const avoidFactor = 0.03;
+        const matchingFactor = 0.03;
+        const maxSpeed = 5;
+        const minSpeed = 2.5;
+        const scrollBias = 4;
+        let boidsFrame = 0; // Pour optimisation calcul 1/2 frames
+
+        // Seaweed/kelp vegetation améliorée
+        const vegetation = [];
+        for (let i = 0; i < 35; i++) {
+            const x = Math.random() * canvas.width;
+            const baseY = 530 + Math.random() * 270;
+            const segments = Math.floor(Math.random() * 12) + 8;
+            const height = Math.random() * 200 + 120;
+            const type = Math.random();
+            vegetation.push({
+                x: x,
+                baseY: baseY,
+                segments: segments,
+                height: height,
+                phase: Math.random() * Math.PI * 2,
+                speed: 0.2 + Math.random() * 0.3,
+                width: 1.5 + Math.random() * 2.5,
+                color: type > 0.7 ? '#1a5a4a' : type > 0.4 ? '#2a4a5a' : '#1a4a3a',
+                depth: Math.random(),
+                scrollSpeed: 0.5 + Math.random() * 0.4,
+                curvature: 0.5 + Math.random() * 0.5,
+                branches: type > 0.6 ? Math.floor(Math.random() * 3) + 2 : 0
+            });
+        }
+
+        // Perlin noise
+        const permutation = [];
+        for (let i = 0; i < 256; i++) permutation[i] = i;
+        for (let i = 255; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [permutation[i], permutation[j]] = [permutation[j], permutation[i]];
+        }
+        const p = [...permutation, ...permutation];
+
+        function fade(t) {
+            return t * t * t * (t * (t * 6 - 15) + 10);
+        }
+
+        function lerp(t, a, b) {
+            return a + t * (b - a);
+        }
+
+        function grad(hash, x, y) {
+            const h = hash & 15;
+            const u = h < 8 ? x : y;
+            const v = h < 4 ? y : h === 12 || h === 14 ? x : 0;
+            return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
+        }
+
+        function perlin(x, y) {
+            const X = Math.floor(x) & 255;
+            const Y = Math.floor(y) & 255;
+            x -= Math.floor(x);
+            y -= Math.floor(y);
+            const u = fade(x);
+            const v = fade(y);
+            const a = p[X] + Y;
+            const aa = p[a];
+            const ab = p[a + 1];
+            const b = p[X + 1] + Y;
+            const ba = p[b];
+            const bb = p[b + 1];
+            return lerp(v, lerp(u, grad(p[aa], x, y), grad(p[ba], x - 1, y)),
+                           lerp(u, grad(p[ab], x, y - 1), grad(p[bb], x - 1, y - 1)));
+        }
+
+        const layers = [
+            { baseY: 530, amplitude: 18, frequency: 0.01, phase: 0, colors: ['#4a7a8a', '#3a6a7a'], speed: 0.08 },
+            { baseY: 550, amplitude: 16, frequency: 0.012, phase: 1.5, colors: ['#3e6e7e', '#2e5e6e'], speed: 0.1 },
+            { baseY: 570, amplitude: 15, frequency: 0.014, phase: 3, colors: ['#326272', '#225262'], speed: 0.12 },
+            { baseY: 590, amplitude: 14, frequency: 0.011, phase: 0.5, colors: ['#2a5a6a', '#1a4a5a'], speed: 0.15 },
+            { baseY: 610, amplitude: 13, frequency: 0.016, phase: 2.5, colors: ['#265666', '#164656'], speed: 0.18 },
+            { baseY: 630, amplitude: 12, frequency: 0.018, phase: 1, colors: ['#225262', '#124252'], speed: 0.2 },
+            { baseY: 650, amplitude: 11, frequency: 0.013, phase: 4, colors: ['#1e4e5e', '#0e3e4e'], speed: 0.22 },
+            { baseY: 670, amplitude: 10, frequency: 0.019, phase: 2, colors: ['#1a4a5a', '#0a3a4a'], speed: 0.25 },
+            { baseY: 690, amplitude: 9, frequency: 0.015, phase: 0.8, colors: ['#164656', '#063646'], speed: 0.28 },
+            { baseY: 710, amplitude: 8, frequency: 0.021, phase: 3.5, colors: ['#124252', '#023242'], speed: 0.3 },
+            { baseY: 730, amplitude: 7, frequency: 0.017, phase: 1.2, colors: ['#0e3e4e', '#002e3e'], speed: 0.32 },
+            { baseY: 750, amplitude: 6, frequency: 0.022, phase: 2.8, colors: ['#0a3a4a', '#002a3a'], speed: 0.35 },
+            { baseY: 770, amplitude: 5, frequency: 0.014, phase: 4.5, colors: ['#083848', '#002838'], speed: 0.38 },
+            { baseY: 790, amplitude: 4, frequency: 0.023, phase: 1.8, colors: ['#063644', '#002634'], speed: 0.4 }
+        ];
+
+        function hslToHex(h, s, l) {
+            l /= 100;
+            const a = s * Math.min(l, 1 - l) / 100;
+            const f = n => {
+                const k = (n + h / 30) % 12;
+                const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+                return Math.round(255 * color).toString(16).padStart(2, '0');
+            };
+            return `#${f(0)}${f(8)}${f(4)}`;
+        }
+
+        function shiftColor(hexColor, hueShift) {
+            const r = parseInt(hexColor.slice(1, 3), 16);
+            const g = parseInt(hexColor.slice(3, 5), 16);
+            const b = parseInt(hexColor.slice(5, 7), 16);
+            
+            const max = Math.max(r, g, b) / 255;
+            const min = Math.min(r, g, b) / 255;
+            const l = (max + min) / 2;
+            
+            let h, s;
+            if (max === min) {
+                h = s = 0;
+            } else {
+                const d = max - min;
+                s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+                switch (max * 255) {
+                    case r:
+                        h = ((g - b) / 255 / d + (g < b ? 6 : 0)) / 6;
+                        break;
+                    case g:
+                        h = ((b - r) / 255 / d + 2) / 6;
+                        break;
+                    case b:
+                        h = ((r - g) / 255 / d + 4) / 6;
+                        break;
+                }
+            }
+            
+            // Restrict hue shift to underwater range (blue-green: 180-210)
+            const baseHue = h * 360;
+            const underwaterRange = 30; // degrees of variation
+            const centerHue = 195; // cyan-blue center
+            const shiftAmount = Math.sin(hueShift * Math.PI / 180) * underwaterRange;
+            h = ((centerHue + shiftAmount) % 360) / 360;
+            
+            s = s * 100;
+            const lPercent = l * 100;
+            
+            return hslToHex(h * 360, s, lPercent);
+        }
+
+        function drawSeafloor(context, layer, scrollOffset) {
+            context.beginPath();
+            context.moveTo(0, canvas.height);
+            
+            let minY = layer.baseY - layer.amplitude;
+            
+            for (let x = 0; x <= canvas.width; x++) {
+                const noise = perlin((x + scrollOffset) * 0.008, layer.baseY * 0.008) * 0.6;
+                const y = layer.baseY + Math.sin(((x + scrollOffset) * layer.frequency) + layer.phase) * layer.amplitude + (noise * layer.amplitude);
+                context.lineTo(x, y);
+                minY = Math.min(minY, y);
+            }
+            
+            context.lineTo(canvas.width, canvas.height);
+            context.closePath();
+            
+            const gradient = context.createLinearGradient(0, minY, 0, canvas.height);
+            const color0 = shiftColor(layer.colors[0], hueShift);
+            const color1 = shiftColor(layer.colors[1], hueShift);
+            gradient.addColorStop(0, color0);
+            gradient.addColorStop(1, color1);
+            context.fillStyle = gradient;
+            context.fill();
+        }
+
+        function animate() {
+            // Draw everything to main canvas first
+            const waterGradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            waterGradient.addColorStop(0, shiftColor('#2a5a7a', hueShift));
+            waterGradient.addColorStop(0.3, shiftColor('#1a4a6a', hueShift));
+            waterGradient.addColorStop(1, shiftColor('#0a2a3a', hueShift));
+            ctx.fillStyle = waterGradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Caustics
+            for (let i = 0; i < 100; i++) {
+                const x = Math.random() * canvas.width;
+                const y = Math.random() * canvas.height * 0.4;
+                const opacity = Math.random() * 0.03;
+                ctx.fillStyle = `rgba(150, 200, 220, ${opacity})`;
+                ctx.fillRect(x, y, 2, 2);
+            }
+
+            // Light rays
+            lightRayTimer++;
+            if (lightRayTimer > 150 && Math.random() < 0.02) {
+                lightRayIntensity = 0.8;
+                lightRayTimer = 0;
+            }
+            if (lightRayIntensity > 0) {
+                for (let i = 0; i < 5; i++) {
+                    const rayGradient = ctx.createLinearGradient(
+                        canvas.width * (0.2 + i * 0.15), 0,
+                        canvas.width * (0.25 + i * 0.15), canvas.height * 0.5
+                    );
+                    rayGradient.addColorStop(0, `rgba(100, 180, 220, ${lightRayIntensity * 0.15})`);
+                    rayGradient.addColorStop(1, `rgba(100, 180, 220, 0)`);
+                    ctx.fillStyle = rayGradient;
+                    ctx.fillRect(canvas.width * (0.18 + i * 0.15), 0, 40, canvas.height * 0.5);
+                }
+                lightRayIntensity *= 0.96;
+                if (lightRayIntensity < 0.01) lightRayIntensity = 0;
+            }
+
+            currentDrift = Math.sin(offset * 0.008) * 1.2;
+
+            // Bubbles
+            bubbles.forEach(bubble => {
+                ctx.beginPath();
+                bubble.wobble += 0.05 * bubble.wobbleSpeed;
+                const wobbleX = Math.sin(bubble.wobble) * 3;
+                const wobbleY = Math.cos(bubble.wobble * 1.3) * 1.5;
+                ctx.arc(bubble.x + wobbleX, bubble.y + wobbleY, bubble.radius, 0, Math.PI * 2);
+                
+                // Bubble highlight for realism
+                const gradient = ctx.createRadialGradient(
+                    bubble.x + wobbleX - bubble.radius * 0.3, 
+                    bubble.y + wobbleY - bubble.radius * 0.3, 
+                    0,
+                    bubble.x + wobbleX, 
+                    bubble.y + wobbleY, 
+                    bubble.radius
+                );
+                gradient.addColorStop(0, `rgba(255, 255, 255, ${bubble.opacity * 1.5})`);
+                gradient.addColorStop(0.4, `rgba(200, 230, 255, ${bubble.opacity})`);
+                gradient.addColorStop(1, `rgba(200, 230, 255, ${bubble.opacity * 0.3})`);
+                ctx.fillStyle = gradient;
+                ctx.fill();
+                
+                bubble.y -= bubble.speed;
+                bubble.x -= scrollSpeed * bubble.scrollSpeed + currentDrift * 0.2;
+                
+                if (bubble.y < -bubble.radius * 2) {
+                    bubble.y = canvas.height + bubble.radius * 2;
+                    bubble.x = Math.random() * canvas.width + canvas.width * 0.2;
+                }
+                if (bubble.x < -50) {
+                    bubble.x = canvas.width + 50;
+                    bubble.y = Math.random() * canvas.height;
+                }
+            });
+
+            // Sardines avec Boids algorithm optimisé
+            boidsFrame++;
+            const shouldUpdateBoids = boidsFrame % 2 === 0; // Calcul 1 frame sur 2
+            
+            if (shouldUpdateBoids) {
+                sardines.forEach((boid, index) => {
+                    let xpos_avg = 0, ypos_avg = 0;
+                    let xvel_avg = 0, yvel_avg = 0;
+                    let neighboring_boids = 0;
+                    let close_dx = 0, close_dy = 0;
+                    
+                    // Optimisation: limiter le nombre de voisins vérifiés
+                    const maxNeighborsToCheck = 30;
+                    let neighborsChecked = 0;
+                    
+                    // Calcul des règles Boids
+                    for (let j = index + 1; j < sardines.length && neighborsChecked < maxNeighborsToCheck; j++) {
+                        const other = sardines[j];
+                        neighborsChecked++;
+                        
+                        const dx = boid.x - other.x;
+                        const dy = boid.y - other.y;
+                        
+                        if (Math.abs(dx) < visualRange && Math.abs(dy) < visualRange) {
+                            const squared_distance = dx * dx + dy * dy;
+                            
+                            if (squared_distance < protectedRange * protectedRange) {
+                                close_dx += dx;
+                                close_dy += dy;
+                            } else if (squared_distance < visualRange * visualRange) {
+                                xvel_avg += other.vx;
+                                yvel_avg += other.vy;
+                                xpos_avg += other.x;
+                                ypos_avg += other.y;
+                                neighboring_boids++;
+                            }
+                        }
+                    }
+                    
+                    if (neighboring_boids > 0) {
+                        xvel_avg /= neighboring_boids;
+                        yvel_avg /= neighboring_boids;
+                        xpos_avg /= neighboring_boids;
+                        ypos_avg /= neighboring_boids;
+                        
+                        boid.vx += (xpos_avg - boid.x) * centeringFactor;
+                        boid.vy += (ypos_avg - boid.y) * centeringFactor;
+                        boid.vx += (xvel_avg - boid.vx) * matchingFactor;
+                        boid.vy += (yvel_avg - boid.vy) * matchingFactor;
+                    }
+                    
+                    boid.vx += close_dx * avoidFactor;
+                    boid.vy += close_dy * avoidFactor;
+                    
+                    // Biais directionnel
+                    boid.vx += scrollBias * 0.2;
+                    
+                    // Interaction avec le courant
+                    boid.vy += currentDrift * 0.08;
+                    
+                    // Courant vertical léger (Perlin)
+                    const verticalCurrent = perlin(boid.x * 0.005, offset * 0.01) * 0.3;
+                    boid.vy += verticalCurrent;
+                    
+                    // Limiter vitesse
+                    const speed = Math.sqrt(boid.vx * boid.vx + boid.vy * boid.vy);
+                    if (speed > maxSpeed) {
+                        boid.vx = (boid.vx / speed) * maxSpeed;
+                        boid.vy = (boid.vy / speed) * maxSpeed;
+                    } else if (speed < minSpeed) {
+                        boid.vx = (boid.vx / speed) * minSpeed;
+                        boid.vy = (boid.vy / speed) * minSpeed;
+                    }
+                    
+                    // Éviter les bords
+                    const margin = 50;
+                    if (boid.x < margin) boid.vx += 0.5;
+                    if (boid.x > canvas.width - margin) boid.vx -= 0.5;
+                    if (boid.y < margin) boid.vy += 0.5;
+                    if (boid.y > canvas.height - margin) boid.vy -= 0.5;
+                });
+            }
+            
+            // Mise à jour positions et rendu
+            sardines.forEach(boid => {
+                // Appliquer le mouvement propre du poisson
+                boid.x += boid.vx;
+                boid.y += boid.vy;
+                
+                // Appliquer le scrolling du monde (vers la gauche)
+                boid.x -= scrollSpeed;
+                
+                // Wrap around
+                if (boid.x < -50) boid.x = canvas.width + 50;
+                if (boid.x > canvas.width + 50) boid.x = -50;
+                if (boid.y < -50) boid.y = canvas.height + 50;
+                if (boid.y > canvas.height + 50) boid.y = -50;
+                
+                // Rendu scintillant avec profondeur
+                boid.shimmer += boid.shimmerSpeed;
+                const shimmerValue = Math.abs(Math.sin(boid.shimmer));
+                
+                // Luminosité selon profondeur (plus clair près de la surface)
+                const depthBrightness = 60 + (1 - boid.y / canvas.height) * 50;
+                const brightness = depthBrightness + shimmerValue * 60;
+                
+                // Alpha selon profondeur (plus opaque au premier plan)
+                const baseAlpha = 0.15 + boid.depth * 0.3;
+                const alpha = baseAlpha + shimmerValue * 0.25;
+                
+                // Teinte légère selon profondeur
+                const tintShift = boid.depth * 15;
+                
+                const angle = Math.atan2(boid.vy, boid.vx);
+                
+                ctx.save();
+                ctx.translate(boid.x, boid.y);
+                ctx.rotate(angle);
+                
+                ctx.strokeStyle = `rgba(${brightness}, ${brightness + tintShift}, ${brightness + 20 + tintShift}, ${alpha})`;
+                ctx.lineWidth = boid.size * 0.8;
+                ctx.lineCap = 'round';
+                
+                ctx.beginPath();
+                ctx.moveTo(-boid.size * 2, 0);
+                ctx.lineTo(boid.size * 2, 0);
+                ctx.stroke();
+                
+                if (shimmerValue > 0.7) {
+                    ctx.fillStyle = `rgba(255, 255, 255, ${(shimmerValue - 0.7) * 2 * boid.depth})`;
+                    ctx.beginPath();
+                    ctx.arc(0, 0, boid.size * 0.5, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                
+                ctx.restore();
+            });
+
+            // Seafloor layers
+            layers.forEach(layer => {
+                drawSeafloor(ctx, layer, offset * layer.speed);
+            });
+
+            // Draw vegetation améliorée
+            vegetation.forEach(plant => {
+                const sway = Math.sin(offset * 0.02 * plant.speed + plant.phase) * 20;
+                const sway2 = Math.sin(offset * 0.03 * plant.speed + plant.phase + 1) * 12;
+                
+                // Update plant position for scrolling
+                plant.x -= scrollSpeed * plant.scrollSpeed;
+                if (plant.x < -50) {
+                    plant.x = canvas.width + 50;
+                    plant.baseY = 530 + Math.random() * 270;
+                }
+                
+                const baseColor = shiftColor(plant.color, hueShift);
+                ctx.strokeStyle = baseColor;
+                ctx.lineWidth = plant.width;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                
+                // Tige principale avec courbure
+                ctx.beginPath();
+                ctx.moveTo(plant.x, plant.baseY);
+                
+                for (let i = 1; i <= plant.segments; i++) {
+                    const progress = i / plant.segments;
+                    const segmentHeight = (plant.height / plant.segments) * i;
+                    const swayAmount = (sway * progress + sway2 * progress * 0.5) * plant.curvature;
+                    const y = plant.baseY - segmentHeight;
+                    const x = plant.x + swayAmount;
+                    
+                    ctx.lineTo(x, y);
+                    
+                    // Branches latérales
+                    if (plant.branches > 0 && i % Math.ceil(plant.segments / plant.branches) === 0 && i < plant.segments - 2) {
+                        const branchX = x;
+                        const branchY = y;
+                        const branchLen = plant.height * 0.15;
+                        const branchSway = Math.sin(offset * 0.04 + i) * 8;
+                        
+                        ctx.globalAlpha = (0.5 + plant.depth * 0.3) * 0.8;
+                        ctx.lineWidth = plant.width * 0.6;
+                        
+                        // Branche gauche
+                        ctx.moveTo(branchX, branchY);
+                        ctx.lineTo(branchX - branchLen * 0.5 + branchSway, branchY - branchLen * 0.7);
+                        
+                        // Branche droite
+                        ctx.moveTo(branchX, branchY);
+                        ctx.lineTo(branchX + branchLen * 0.5 - branchSway, branchY - branchLen * 0.7);
+                        
+                        ctx.globalAlpha = 0.6 + plant.depth * 0.3;
+                        ctx.lineWidth = plant.width;
+                        ctx.moveTo(x, y);
+                    }
+                }
+                
+                ctx.globalAlpha = 0.6 + plant.depth * 0.3;
+                ctx.stroke();
+                ctx.globalAlpha = 1;
+            });
+
+            // Fog
+            const fogGradient = ctx.createLinearGradient(0, 400, 0, 600);
+            fogGradient.addColorStop(0, 'rgba(20, 50, 70, 0)');
+            fogGradient.addColorStop(0.5, 'rgba(15, 40, 60, 0.2)');
+            fogGradient.addColorStop(1, 'rgba(20, 50, 70, 0)');
+            ctx.fillStyle = fogGradient;
+            ctx.fillRect(0, 400, canvas.width, 200);
+
+            // Apply distortion
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const pixels = imageData.data;
+            const distorted = ctx.createImageData(canvas.width, canvas.height);
+            const result = distorted.data;
+            
+            const T = offset * 0.03;
+            const amplitude = 1.5;
+            const frequency = 2;
+            
+            for (let y = 0; y < canvas.height; y++) {
+                for (let x = 0; x < canvas.width; x++) {
+                    const xs = Math.round(amplitude * Math.sin(2 * Math.PI * (frequency * y / canvas.height + T)));
+                    const ys = Math.round(amplitude * Math.cos(2 * Math.PI * (frequency * x / canvas.width + T)));
+                    
+                    const srcX = Math.max(0, Math.min(canvas.width - 1, x + xs));
+                    const srcY = Math.max(0, Math.min(canvas.height - 1, y + ys));
+                    
+                    const destIdx = (y * canvas.width + x) * 4;
+                    const srcIdx = (srcY * canvas.width + srcX) * 4;
+                    
+                    result[destIdx] = pixels[srcIdx];
+                    result[destIdx + 1] = pixels[srcIdx + 1];
+                    result[destIdx + 2] = pixels[srcIdx + 2];
+                    result[destIdx + 3] = 255;
+                }
+            }
+            
+            ctx.putImageData(distorted, 0, 0);
+            
+            // Créature marine générative (optimisée)
+            creatureTime += Math.PI / 45;
+            const creatureX = 400;
+            const creatureY = 150;
+            const creatureScale = 2;
+            
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+            ctx.lineWidth = 1;
+            ctx.lineCap = 'round';
+            
+            ctx.beginPath();
+            let firstPoint = true;
+            
+            // Précalcul des valeurs constantes
+            const sinT = Math.sin(creatureTime);
+            const cosT = Math.cos(creatureTime);
+            const timeDiv16 = creatureTime / 16;
+            
+            for (let i = 0; i < 10000; i++) {
+                const x = i % 200;
+                const y = i / 55;
+                
+                const k = 9 * Math.cos(x / 8);
+                const e = y / 8 - 12.5;
+                const eSq = e * e;
+                const d = Math.sqrt(k * k + eSq * eSq) / 99 + sinT / 6 + 0.5;
+                
+                const angle = Math.atan2(k, e);
+                const q = 99 - e * Math.sin(angle * 7) / d + k * (3 + Math.cos(d * d - creatureTime) * 2);
+                const c = d / 2 + e / 69 - timeDiv16;
+                
+                const px = q * Math.sin(c) * creatureScale + creatureX;
+                const py = (q + 19 * d) * Math.cos(c) * creatureScale + creatureY;
+                
+                if (firstPoint) {
+                    ctx.moveTo(px, py);
+                    firstPoint = false;
+                } else {
+                    ctx.lineTo(px, py);
+                }
+            }
+            
+            ctx.stroke();
+
+            offset += scrollSpeed;
+            hueShift = (hueShift + 0.15) % 360;
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+    </script>
+</body>
+</html>

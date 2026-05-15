@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Genuary 2026 #22</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background: #f0f0f0;
+            font-family: monospace;
+            gap: 15px;
+        }
+        canvas {
+            display: block;
+            background: #fff;
+            border: 1px solid #000;
+            max-width: 90vmin;
+            max-height: 90vmin;
+        }
+        #sourceCanvas {
+            display: none;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        button {
+            padding: 10px 20px;
+            font-family: monospace;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="sourceCanvas" width="100" height="100"></canvas>
+    <canvas id="canvas" width="1600" height="1600"></canvas>
+    <div class="controls">
+        <button onclick="regeneratePattern()">Regenerate</button>
+        <button onclick="downloadSVG()">Download SVG</button>
+    </div>
+    <script>
+        const sourceCanvas = document.getElementById('sourceCanvas');
+        const sourceCtx = sourceCanvas.getContext('2d');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        const gridSize = 100;
+        const squareSize = 1600 / gridSize;
+        let pathData = null;
+        let grayLevels = [];
+        
+        function generatePattern() {
+            const w = gridSize;
+            const h = gridSize;
+            const imageData = sourceCtx.createImageData(w, h);
+            const data = imageData.data;
+            
+            const cx = w / 2;
+            const cy = h / 2;
+            const branches = Math.floor(Math.random() * 5) + 3;
+            const rotation = Math.random() * Math.PI * 2;
+            const scale = 0.3 + Math.random() * 0.4;
+            
+            grayLevels = [];
+            
+            for (let py = 0; py < h; py++) {
+                grayLevels[py] = [];
+                for (let px = 0; px < w; px++) {
+                    const dx = (px - cx) / 30;
+                    const dy = (py - cy) / 30;
+                    const dist = Math.sqrt(dx*dx + dy*dy);
+                    const angle = Math.atan2(dy, dx) + rotation;
+                    
+                    let value = 0;
+                    
+                    const spiral = Math.sin(dist * 8 * scale - angle * branches) * 0.5 + 0.5;
+                    const decay = Math.exp(-dist * 0.5);
+                    const detail = Math.sin(dist * 20 + angle * 10) * 0.1 + 
+                                   Math.sin(dist * 40 - angle * 7) * 0.05;
+                    
+                    value = (spiral * decay + detail) * decay;
+                    
+                    const color = Math.floor(Math.max(0, Math.min(255, value * 255)));
+                    const idx = (py * w + px) * 4;
+                    data[idx] = color;
+                    data[idx + 1] = color;
+                    data[idx + 2] = color;
+                    data[idx + 3] = 255;
+                    
+                    grayLevels[py][px] = value;
+                }
+            }
+            
+            sourceCtx.putImageData(imageData, 0, 0);
+        }
+
+        function generatePath() {
+            let lastPoint = null;
+            let path = [];
+
+            for (let row = 0; row < gridSize; row++) {
+                const rowDirection = row % 2 === 0 ? 1 : -1;
+                const startCol = rowDirection === 1 ? 0 : gridSize - 1;
+
+                for (let colStep = 0; colStep < gridSize; colStep++) {
+                    const col = startCol + colStep * rowDirection;
+                    const isHorizontal = (row + col) % 2 === 0;
+
+                    const density = grayLevels[row][col];
+                    const numLines = Math.floor(1 + density * 6);
+                    const step = density > 0.7 ? 0.5 : (density > 0.4 ? 1 : 2);
+
+                    let squareLines = [];
+
+                    if (isHorizontal) {
+                        for (let n = 0; n < numLines; n++) {
+                            const y = row * squareSize + (n + 1) * squareSize / (numLines + 1);
+                            let line = [];
+
+                            for (let x = col * squareSize; x <= (col + 1) * squareSize; x += step) {
+                                line.push({x: x, y: y});
+                            }
+
+                            squareLines.push(line);
+                        }
+                    } else {
+                        for (let n = 0; n < numLines; n++) {
+                            const x = col * squareSize + (n + 1) * squareSize / (numLines + 1);
+                            let line = [];
+
+                            for (let y = row * squareSize; y <= (row + 1) * squareSize; y += step) {
+                                line.push({x: x, y: y});
+                            }
+
+                            squareLines.push(line);
+                        }
+                    }
+
+                    if (lastPoint && squareLines.length > 0) {
+                        let bestLineIdx = 0;
+                        let bestReverse = false;
+                        let minDist = Infinity;
+
+                        for (let i = 0; i < squareLines.length; i++) {
+                            const line = squareLines[i];
+                            const distStart = Math.hypot(lastPoint.x - line[0].x, lastPoint.y - line[0].y);
+                            const distEnd = Math.hypot(lastPoint.x - line[line.length-1].x, lastPoint.y - line[line.length-1].y);
+
+                            if (distStart < minDist) {
+                                minDist = distStart;
+                                bestLineIdx = i;
+                                bestReverse = false;
+                            }
+                            if (distEnd < minDist) {
+                                minDist = distEnd;
+                                bestLineIdx = i;
+                                bestReverse = true;
+                            }
+                        }
+
+                        const firstLine = squareLines[bestLineIdx];
+                        const targetPoint = bestReverse ? firstLine[firstLine.length-1] : firstLine[0];
+                        
+                        if (minDist > 2) {
+                            path.push(targetPoint);
+                        }
+
+                        const firstL = squareLines.splice(bestLineIdx, 1)[0];
+                        if (bestReverse) firstL.reverse();
+                        
+                        for (let p of firstL) {
+                            path.push(p);
+                        }
+                        lastPoint = firstL[firstL.length - 1];
+
+                        while (squareLines.length > 0) {
+                            let closestIdx = 0;
+                            let closestReverse = false;
+                            let minD = Infinity;
+
+                            for (let i = 0; i < squareLines.length; i++) {
+                                const line = squareLines[i];
+                                const d1 = Math.hypot(lastPoint.x - line[0].x, lastPoint.y - line[0].y);
+                                const d2 = Math.hypot(lastPoint.x - line[line.length-1].x, lastPoint.y - line[line.length-1].y);
+
+                                if (d1 < minD) {
+                                    minD = d1;
+                                    closestIdx = i;
+                                    closestReverse = false;
+                                }
+                                if (d2 < minD) {
+                                    minD = d2;
+                                    closestIdx = i;
+                                    closestReverse = true;
+                                }
+                            }
+
+                            const nextLine = squareLines.splice(closestIdx, 1)[0];
+                            if (closestReverse) nextLine.reverse();
+
+                            for (let p of nextLine) {
+                                path.push(p);
+                            }
+                            lastPoint = nextLine[nextLine.length - 1];
+                        }
+                    } else if (squareLines.length > 0) {
+                        for (let line of squareLines) {
+                            for (let p of line) {
+                                path.push(p);
+                                lastPoint = p;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            return path;
+        }
+
+        function drawPath() {
+            ctx.clearRect(0, 0, 1600, 1600);
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            
+            if (pathData.length > 0) {
+                ctx.moveTo(pathData[0].x, pathData[0].y);
+                for (let i = 1; i < pathData.length; i++) {
+                    ctx.lineTo(pathData[i].x, pathData[i].y);
+                }
+            }
+            
+            ctx.stroke();
+        }
+
+        function downloadSVG() {
+            let svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1600" height="1600" xmlns="http://www.w3.org/2000/svg">
+  <path d="`;
+            
+            if (pathData.length > 0) {
+                svg += `M ${pathData[0].x.toFixed(2)} ${pathData[0].y.toFixed(2)}`;
+                for (let i = 1; i < pathData.length; i++) {
+                    svg += ` L ${pathData[i].x.toFixed(2)} ${pathData[i].y.toFixed(2)}`;
+                }
+            }
+            
+            svg += `" stroke="black" fill="none" stroke-width="1"/>
+</svg>`;
+            
+            const blob = new Blob([svg], {type: 'image/svg+xml'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'plotter_pattern.svg';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function regeneratePattern() {
+            generatePattern();
+            pathData = generatePath();
+            drawPath();
+        }
+
+        function regeneratePath() {
+            pathData = generatePath();
+            drawPath();
+        }
+
+        generatePattern();
+        pathData = generatePath();
+        drawPath();
+    </script>
+</body>
+</html>

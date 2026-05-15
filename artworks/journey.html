@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Journey</title>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: #000;
+        }
+        canvas {
+            max-width: 90vmin;
+            max-height: 90vmin;
+            width: 100%;
+            height: auto;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 800;
+        canvas.height = 800;
+
+        let offset = 0;
+        const scrollSpeed = 5;
+        let hueShift = 0;
+        let lightningTimer = 0;
+        let lightningFlash = 0;
+        let lightningShadow = 0;
+        let windDrift = 0;
+
+        // Rain drops with varied depth
+        const raindrops = [];
+        for (let i = 0; i < 150; i++) {
+            const depth = Math.random();
+            raindrops.push({
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height,
+                length: depth * 25 + 5,
+                speed: depth * 4 + 1,
+                opacity: depth * 0.4 + 0.05,
+                width: depth * 1.5 + 0.3
+            });
+        }
+
+        // Perlin noise implementation
+        const permutation = [];
+        for (let i = 0; i < 256; i++) permutation[i] = i;
+        for (let i = 255; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [permutation[i], permutation[j]] = [permutation[j], permutation[i]];
+        }
+        const p = [...permutation, ...permutation];
+
+        function fade(t) {
+            return t * t * t * (t * (t * 6 - 15) + 10);
+        }
+
+        function lerp(t, a, b) {
+            return a + t * (b - a);
+        }
+
+        function grad(hash, x, y) {
+            const h = hash & 15;
+            const u = h < 8 ? x : y;
+            const v = h < 4 ? y : h === 12 || h === 14 ? x : 0;
+            return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
+        }
+
+        function perlin(x, y) {
+            const X = Math.floor(x) & 255;
+            const Y = Math.floor(y) & 255;
+            x -= Math.floor(x);
+            y -= Math.floor(y);
+            const u = fade(x);
+            const v = fade(y);
+            const a = p[X] + Y;
+            const aa = p[a];
+            const ab = p[a + 1];
+            const b = p[X + 1] + Y;
+            const ba = p[b];
+            const bb = p[b + 1];
+            return lerp(v, lerp(u, grad(p[aa], x, y), grad(p[ba], x - 1, y)),
+                           lerp(u, grad(p[ab], x, y - 1), grad(p[bb], x - 1, y - 1)));
+        }
+
+        const layers = [
+            { baseY: 180, amplitude: 35, frequency: 0.008, phase: 0, colors: ['#c0d0e0', '#8a9faf'], speed: 0.1 },
+            { baseY: 210, amplitude: 33, frequency: 0.012, phase: 1.5, colors: ['#b0c5d5', '#7d92a2'], speed: 0.15 },
+            { baseY: 240, amplitude: 31, frequency: 0.015, phase: 3, colors: ['#a0b8ca', '#708595'], speed: 0.2 },
+            { baseY: 270, amplitude: 29, frequency: 0.01, phase: 0.5, colors: ['#90abbe', '#647888'], speed: 0.25 },
+            { baseY: 300, amplitude: 27, frequency: 0.018, phase: 2.5, colors: ['#809eb0', '#5d7080'], speed: 0.3 },
+            { baseY: 330, amplitude: 25, frequency: 0.025, phase: 1, colors: ['#7091a5', '#566978'], speed: 0.35 },
+            { baseY: 360, amplitude: 23, frequency: 0.02, phase: 4, colors: ['#608498', '#4f6270'], speed: 0.4 },
+            { baseY: 390, amplitude: 21, frequency: 0.022, phase: 2, colors: ['#50778c', '#485b68'], speed: 0.45 },
+            { baseY: 420, amplitude: 19, frequency: 0.028, phase: 0.8, colors: ['#456a80', '#425560'], speed: 0.5 },
+            { baseY: 450, amplitude: 17, frequency: 0.03, phase: 3.5, colors: ['#3a6078', '#3b4e58'], speed: 0.55 },
+            { baseY: 480, amplitude: 15, frequency: 0.026, phase: 1.2, colors: ['#35586c', '#354850'], speed: 0.6 },
+            { baseY: 510, amplitude: 14, frequency: 0.032, phase: 2.8, colors: ['#305560', '#2f4548'], speed: 0.65 },
+            { baseY: 540, amplitude: 13, frequency: 0.024, phase: 4.5, colors: ['#2d5558', '#2d4540'], speed: 0.7 },
+            { baseY: 570, amplitude: 12, frequency: 0.035, phase: 1.8, colors: ['#2a504c', '#2a4238'], speed: 0.75 },
+            { baseY: 600, amplitude: 11, frequency: 0.038, phase: 3.2, colors: ['#284a40', '#284030'], speed: 0.8 },
+            { baseY: 625, amplitude: 10, frequency: 0.029, phase: 0.6, colors: ['#254538', '#263d32'], speed: 0.85 },
+            { baseY: 650, amplitude: 9, frequency: 0.033, phase: 2.1, colors: ['#234030', '#243b2e'], speed: 0.9 },
+            { baseY: 670, amplitude: 8, frequency: 0.027, phase: 4.8, colors: ['#203a28', '#22382a'], speed: 0.95 },
+            { baseY: 690, amplitude: 7, frequency: 0.036, phase: 1.4, colors: ['#1e3524', '#203628'], speed: 1.0 },
+            { baseY: 710, amplitude: 6, frequency: 0.04, phase: 3.7, colors: ['#1c3020', '#1e3326'], speed: 1.05 }
+        ];
+
+        function hslToHex(h, s, l) {
+            l /= 100;
+            const a = s * Math.min(l, 1 - l) / 100;
+            const f = n => {
+                const k = (n + h / 30) % 12;
+                const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+                return Math.round(255 * color).toString(16).padStart(2, '0');
+            };
+            return `#${f(0)}${f(8)}${f(4)}`;
+        }
+
+        function shiftColor(hexColor, hueShift) {
+            const r = parseInt(hexColor.slice(1, 3), 16);
+            const g = parseInt(hexColor.slice(3, 5), 16);
+            const b = parseInt(hexColor.slice(5, 7), 16);
+            
+            const max = Math.max(r, g, b) / 255;
+            const min = Math.min(r, g, b) / 255;
+            const l = (max + min) / 2;
+            
+            let h, s;
+            if (max === min) {
+                h = s = 0;
+            } else {
+                const d = max - min;
+                s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+                switch (max * 255) {
+                    case r:
+                        h = ((g - b) / 255 / d + (g < b ? 6 : 0)) / 6;
+                        break;
+                    case g:
+                        h = ((b - r) / 255 / d + 2) / 6;
+                        break;
+                    case b:
+                        h = ((r - g) / 255 / d + 4) / 6;
+                        break;
+                }
+            }
+            
+            h = ((h * 360 + hueShift) % 360 + 360) % 360;
+            s = s * 100;
+            const lPercent = l * 100;
+            
+            return hslToHex(h, s, lPercent);
+        }
+
+        function drawSinusoidalMountain(layer, scrollOffset) {
+            ctx.beginPath();
+            ctx.moveTo(0, canvas.height);
+            
+            let minY = layer.baseY - layer.amplitude;
+            
+            for (let x = 0; x <= canvas.width; x++) {
+                const noise = perlin((x + scrollOffset) * 0.01, layer.baseY * 0.01) * 0.5;
+                const y = layer.baseY + Math.sin(((x + scrollOffset) * layer.frequency) + layer.phase) * layer.amplitude + (noise * layer.amplitude);
+                ctx.lineTo(x, y);
+                minY = Math.min(minY, y);
+            }
+            
+            ctx.lineTo(canvas.width, canvas.height);
+            ctx.closePath();
+            
+            const gradient = ctx.createLinearGradient(0, minY, 0, canvas.height);
+            const color0 = shiftColor(layer.colors[0], hueShift);
+            const color1 = shiftColor(layer.colors[1], hueShift);
+            gradient.addColorStop(0, color0);
+            gradient.addColorStop(1, color1);
+            ctx.fillStyle = gradient;
+            ctx.fill();
+            
+            // Lightning shadow overlay
+            if (lightningShadow > 0) {
+                ctx.fillStyle = `rgba(0, 0, 0, ${lightningShadow * 0.4})`;
+                ctx.fill();
+            }
+        }
+
+        function animate() {
+            // Sky with gradient and shifting hue
+            const skyGradient = ctx.createLinearGradient(0, 0, 0, canvas.height * 0.4);
+            skyGradient.addColorStop(0, shiftColor('#5a8fc0', hueShift));
+            skyGradient.addColorStop(1, shiftColor('#6fa3d9', hueShift));
+            ctx.fillStyle = skyGradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Sky noise texture
+            for (let i = 0; i < 50; i++) {
+                const x = Math.random() * canvas.width;
+                const y = Math.random() * canvas.height * 0.5;
+                const opacity = Math.random() * 0.02;
+                ctx.fillStyle = `rgba(255, 255, 255, ${opacity})`;
+                ctx.fillRect(x, y, 1, 1);
+            }
+
+            // Lightning flash
+            lightningTimer++;
+            if (lightningTimer > 200 && Math.random() < 0.01) {
+                lightningFlash = 1;
+                lightningTimer = 0;
+            }
+            if (lightningFlash > 0) {
+                ctx.fillStyle = `rgba(255, 255, 255, ${lightningFlash * 0.3})`;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                lightningFlash *= 0.8;
+                if (lightningFlash < 0.01) lightningFlash = 0;
+            }
+
+            // Draw rain with varied depth
+            raindrops.forEach(drop => {
+                ctx.beginPath();
+                ctx.moveTo(drop.x, drop.y);
+                ctx.lineTo(drop.x + 2, drop.y + drop.length);
+                ctx.strokeStyle = `rgba(255, 255, 255, ${drop.opacity + lightningFlash * 0.2})`;
+                ctx.lineWidth = drop.width;
+                ctx.stroke();
+                
+                drop.y += drop.speed;
+                drop.x += 0.5;
+                
+                if (drop.y > canvas.height) {
+                    drop.y = -drop.length;
+                    drop.x = Math.random() * canvas.width;
+                }
+            });
+
+            // Draw all layers with parallax effect and lightning influence
+            layers.forEach(layer => {
+                drawSinusoidalMountain(layer, offset * layer.speed);
+            });
+
+            offset += scrollSpeed;
+            hueShift = (hueShift + 0.1) % 360;
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+    </script>
+</body>
+</html>

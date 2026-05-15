@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Tape</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #0a0a0a;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        const resize = () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        };
+        
+        resize();
+        window.addEventListener('resize', resize);
+        
+        const w = () => canvas.width;
+        const h = () => canvas.height;
+
+        let time = 0;
+
+        const drawCassette = (ctx, x, y, time) => {
+            ctx.save();
+            ctx.translate(x + 50, y + 32);
+            ctx.rotate(-Math.PI / 2);
+            ctx.translate(-50, -32);
+            
+            ctx.fillStyle = '#1c1c1c';
+            ctx.fillRect(0, 0, 100, 64);
+            
+            ctx.fillStyle = '#e8e8d0';
+            ctx.fillRect(4, 4, 92, 28);
+            
+            ctx.strokeStyle = '#d0d0d0';
+            ctx.lineWidth = 0.3;
+            for (let i = 0; i < 3; i++) {
+                ctx.beginPath();
+                ctx.moveTo(8, 10 + i * 6);
+                ctx.lineTo(88, 10 + i * 6);
+                ctx.stroke();
+            }
+            
+            ctx.fillStyle = '#3a5a9a';
+            ctx.font = 'italic 11px cursive';
+            ctx.fillText('Mix Tape', 10, 28);
+            
+            ctx.fillStyle = 'rgba(30, 25, 20, 0.4)';
+            ctx.fillRect(8, 36, 84, 20);
+            
+            const spools = [[25, 46], [75, 46]];
+            
+            // Bande magnétique visible entre les bobines
+            ctx.save();
+            const leftSpoolSize = 6 - Math.sin(time * 0.5) * 1.5;
+            const rightSpoolSize = 6 + Math.sin(time * 0.5) * 1.5;
+            
+            // Bobine gauche (se vide)
+            ctx.fillStyle = '#1a1410';
+            ctx.beginPath();
+            ctx.arc(25, 46, leftSpoolSize, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Bobine droite (se remplit)
+            ctx.fillStyle = '#1a1410';
+            ctx.beginPath();
+            ctx.arc(75, 46, rightSpoolSize, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Bande qui traverse
+            ctx.fillStyle = '#1a1410';
+            ctx.fillRect(25 + leftSpoolSize, 44, 50 - leftSpoolSize - rightSpoolSize, 4);
+            
+            // Reflets sur la bande
+            ctx.fillStyle = 'rgba(139, 90, 43, 0.3)';
+            ctx.fillRect(25 + leftSpoolSize, 44.5, 50 - leftSpoolSize - rightSpoolSize, 1.5);
+            ctx.restore();
+            
+            spools.forEach(([sx, sy]) => {
+                ctx.fillStyle = '#2d2d2d';
+                ctx.beginPath();
+                ctx.arc(sx, sy, 8, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.save();
+                ctx.translate(sx, sy);
+                ctx.rotate(time * 2);
+                
+                ctx.fillStyle = '#151515';
+                ctx.beginPath();
+                ctx.arc(0, 0, 4, 0, Math.PI * 2);
+                ctx.fill();
+                
+                for (let i = 0; i < 6; i++) {
+                    ctx.save();
+                    ctx.rotate((Math.PI * 2 / 6) * i);
+                    ctx.fillStyle = '#808080';
+                    ctx.fillRect(-1, -7, 2, 6);
+                    ctx.restore();
+                }
+                
+                ctx.strokeStyle = '#a0a0a0';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.arc(0, 0, 2, 0, Math.PI * 2);
+                ctx.stroke();
+                
+                ctx.restore();
+            });
+            
+            ctx.fillStyle = '#0d0d0d';
+            [[10, 10], [90, 10], [10, 54], [90, 54]].forEach(([sx, sy]) => {
+                ctx.beginPath();
+                ctx.arc(sx, sy, 1.5, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            
+            ctx.strokeStyle = '#2a2a2a';
+            ctx.lineWidth = 1.5;
+            ctx.strokeRect(0, 0, 100, 64);
+            
+            ctx.restore();
+        };
+
+        const cassetteX = 10;
+        let cassetteY = () => h() / 2 - 50;
+        const tapeStartX = cassetteX + 80;
+        const tapeLength = 60;
+        const transitionZone = 40;
+
+        const animate = () => {
+            time += 0.1;
+            
+            const beat = Math.sin(time * 0.5) * 0.5 + 0.5;
+            const organicAmp = 0.85 + beat * 0.3;
+            const organicFreq = 1.0;
+            
+            const colorShift = Math.sin(time * 0.15) * 10;
+            const analogDrift = Math.sin(time * 0.08) * 0.3;
+            
+            const bgGrad = ctx.createRadialGradient(w()/2, h()/2, 0, w()/2, h()/2, w()/2);
+            bgGrad.addColorStop(0, '#1a1a2e');
+            bgGrad.addColorStop(0.5, '#0f0f1e');
+            bgGrad.addColorStop(1, '#050510');
+            ctx.fillStyle = bgGrad;
+            ctx.fillRect(0, 0, w(), h());
+            
+            // Grille oscilloscope
+            ctx.strokeStyle = 'rgba(0, 255, 100, 0.1)';
+            ctx.lineWidth = 1;
+            
+            const gridSpacing = 50;
+            const tapeCenter = cassetteY() + 32;
+            
+            // Lignes verticales
+            for (let x = 0; x < w(); x += gridSpacing) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, h());
+                ctx.stroke();
+            }
+            
+            // Lignes horizontales centrées sur la tape
+            for (let y = tapeCenter - 200; y < tapeCenter + 200; y += gridSpacing) {
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(w(), y);
+                ctx.stroke();
+            }
+            
+            for (let lineIdx = 0; lineIdx < 2; lineIdx++) {
+                const centerY = cassetteY() + 22 + lineIdx * 20;
+                const offset = lineIdx * Math.PI * 0.5;
+                const stereoDelay = lineIdx * 0.15;
+                
+                // Bande magnétique (premiers centimètres)
+                ctx.shadowBlur = 3;
+                ctx.shadowColor = 'rgba(45, 35, 24, 0.5)';
+                
+                for (let pass = 0; pass < 2; pass++) {
+                    ctx.beginPath();
+                    for (let x = tapeStartX; x < tapeStartX + tapeLength; x += 1) {
+                        const dist = x - tapeStartX;
+                        const fadeStart = tapeLength - transitionZone;
+                        
+                        const jitterX = Math.sin((time - stereoDelay) * 0.5 + x * 0.1) * analogDrift;
+                        const jitterY = Math.cos((time - stereoDelay) * 0.3 + x * 0.07) * analogDrift * 0.5;
+                        
+                        const baseAmp = 1.5;
+                        const transitionAmp = dist > fadeStart ? baseAmp + ((dist - fadeStart) / transitionZone) * 15 : baseAmp;
+                        const freq = 0.05;
+                        
+                        const wave1 = Math.sin((x + jitterX) * freq - (time - stereoDelay) * 4 + offset) * transitionAmp;
+                        const wave2 = Math.sin((x + jitterX) * freq * 1.7 + (time - stereoDelay) * 2 + offset) * transitionAmp * 0.3;
+                        const y = centerY + wave1 + wave2 + jitterY;
+                        
+                        if (x === tapeStartX) {
+                            ctx.moveTo(x, y);
+                        } else {
+                            ctx.lineTo(x, y);
+                        }
+                    }
+                    
+                    if (pass === 0) {
+                        const grad = ctx.createLinearGradient(tapeStartX, 0, tapeStartX + tapeLength, 0);
+                        grad.addColorStop(0, '#2d2318');
+                        grad.addColorStop(0.5, '#2d2318');
+                        grad.addColorStop(1, 'rgba(45, 35, 24, 0)');
+                        ctx.strokeStyle = grad;
+                        ctx.lineWidth = 14;
+                    } else {
+                        const grad = ctx.createLinearGradient(tapeStartX, 0, tapeStartX + tapeLength, 0);
+                        grad.addColorStop(0, 'rgba(139, 90, 43, 0.4)');
+                        grad.addColorStop(0.5, 'rgba(139, 90, 43, 0.4)');
+                        grad.addColorStop(1, 'rgba(139, 90, 43, 0)');
+                        ctx.strokeStyle = grad;
+                        ctx.lineWidth = 5;
+                    }
+                    
+                    ctx.lineCap = 'round';
+                    ctx.lineJoin = 'round';
+                    ctx.stroke();
+                }
+                
+                ctx.shadowBlur = 0;
+                
+                // Ondes sonores (après la bande)
+                ctx.shadowBlur = 4;
+                ctx.shadowColor = 'rgba(0, 191, 255, 0.3)';
+                
+                for (let pass = 0; pass < 2; pass++) {
+                    ctx.beginPath();
+                    const maxX = Math.min(w(), tapeStartX + tapeLength - transitionZone + 1500);
+                    for (let x = tapeStartX + tapeLength - transitionZone; x < maxX; x += (x > tapeStartX + 500 ? 2 : 1)) {
+                        const dist = x - (tapeStartX + tapeLength - transitionZone);
+                        const fadeIn = dist < transitionZone ? dist / transitionZone : 1;
+                        
+                        const amp = 50 * organicAmp;
+                        const freq = 0.25 * organicFreq;
+                        
+                        const wave1 = Math.sin(x * freq - (time - stereoDelay) * 4 + offset) * amp * fadeIn;
+                        const wave2 = Math.sin(x * freq * 2.3 + (time - stereoDelay) * 3 + offset) * amp * 0.3 * fadeIn;
+                        const wave3 = Math.sin(x * freq * 0.7 - (time - stereoDelay) * 2 + offset) * amp * 0.5 * fadeIn;
+                        
+                        const y = centerY + wave1 + wave2 + wave3;
+                        
+                        if (x === tapeStartX + tapeLength - transitionZone) {
+                            ctx.moveTo(x, y);
+                        } else {
+                            ctx.lineTo(x, y);
+                        }
+                    }
+                    
+                    if (pass === 0) {
+                        const blueShift = Math.floor(70 + colorShift);
+                        const grad = ctx.createLinearGradient(tapeStartX + tapeLength - transitionZone, 0, tapeStartX + tapeLength + 100, 0);
+                        grad.addColorStop(0, `rgba(${blueShift}, 130, 180, 0)`);
+                        grad.addColorStop(0.3, `rgb(${blueShift}, 130, 180)`);
+                        grad.addColorStop(0.6, `rgb(${Math.floor(30 + colorShift * 0.5)}, 144, 255)`);
+                        grad.addColorStop(1, `rgb(${Math.floor(colorShift * 0.3)}, 191, 255)`);
+                        ctx.strokeStyle = grad;
+                        ctx.lineWidth = 1;
+                        ctx.globalAlpha = 0.8 + lineIdx * 0.1;
+                    } else {
+                        const lightShift = Math.floor(173 + colorShift * 0.5);
+                        const grad = ctx.createLinearGradient(tapeStartX + tapeLength - transitionZone, 0, tapeStartX + tapeLength + 100, 0);
+                        grad.addColorStop(0, `rgba(${lightShift}, 216, 230, 0)`);
+                        grad.addColorStop(0.3, `rgba(${lightShift}, 216, 230, 0.3)`);
+                        grad.addColorStop(1, `rgba(${lightShift}, 216, 230, 0.6)`);
+                        ctx.strokeStyle = grad;
+                        ctx.lineWidth = 1;
+                        ctx.globalAlpha = 0.6 + lineIdx * 0.1;
+                    }
+                    
+                    ctx.lineCap = 'round';
+                    ctx.lineJoin = 'round';
+                    ctx.stroke();
+                    ctx.globalAlpha = 1;
+                }
+                
+                ctx.shadowBlur = 0;
+            }
+            
+            drawCassette(ctx, cassetteX, cassetteY(), time);
+            
+            requestAnimationFrame(animate);
+        };
+
+        animate();
+    </script>
+</body>
+</html>

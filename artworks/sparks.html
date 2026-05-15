@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sparks</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        canvas {
+            filter: contrast(1.15);
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        const w = canvas.width;
+        const h = canvas.height;
+        const centerX = w / 2;
+        const centerY = h / 2;
+        let t = 0;
+
+        // Vertices du cube avec subdivision 3x3x3 (Rubik's cube)
+        const size = 100;
+        const divisions = 3;
+        const baseVertices = [];
+        
+        for (let x = 0; x < divisions; x++) {
+            for (let y = 0; y < divisions; y++) {
+                for (let z = 0; z < divisions; z++) {
+                    const px = (x / (divisions - 1) * 2 - 1) * size;
+                    const py = (y / (divisions - 1) * 2 - 1) * size;
+                    const pz = (z / (divisions - 1) * 2 - 1) * size;
+                    baseVertices.push([px, py, pz]);
+                }
+            }
+        }
+
+        // Fonction de morphing
+        function morphVertices(base, t) {
+            const cycle = (t * 0.003) % 4;
+            const progress = cycle % 1;
+            
+            return base.map(([x, y, z]) => {
+                const nx = x / size;
+                const ny = y / size;
+                const nz = z / size;
+                
+                let cube = [x, y, z];
+                
+                const pyramidFactor = 1 - (ny * 0.5 + 0.5);
+                let pyramid = [x * pyramidFactor, y, z * pyramidFactor];
+                
+                const angle = Math.atan2(nz, nx);
+                let cylinder = [Math.cos(angle) * size, y, Math.sin(angle) * size];
+                
+                const r = Math.sqrt(nx * nx + ny * ny + nz * nz);
+                const theta = Math.acos(ny / (r + 0.001));
+                const phi = Math.atan2(nz, nx);
+                let sphere = [
+                    Math.sin(theta) * Math.cos(phi) * size,
+                    Math.cos(theta) * size,
+                    Math.sin(theta) * Math.sin(phi) * size
+                ];
+                
+                let result;
+                if (cycle < 1) {
+                    result = [
+                        cube[0] * (1 - progress) + pyramid[0] * progress,
+                        cube[1] * (1 - progress) + pyramid[1] * progress,
+                        cube[2] * (1 - progress) + pyramid[2] * progress
+                    ];
+                } else if (cycle < 2) {
+                    result = [
+                        pyramid[0] * (1 - progress) + cylinder[0] * progress,
+                        pyramid[1] * (1 - progress) + cylinder[1] * progress,
+                        pyramid[2] * (1 - progress) + cylinder[2] * progress
+                    ];
+                } else if (cycle < 3) {
+                    result = [
+                        cylinder[0] * (1 - progress) + sphere[0] * progress,
+                        cylinder[1] * (1 - progress) + sphere[1] * progress,
+                        cylinder[2] * (1 - progress) + sphere[2] * progress
+                    ];
+                } else {
+                    result = [
+                        sphere[0] * (1 - progress) + cube[0] * progress,
+                        sphere[1] * (1 - progress) + cube[1] * progress,
+                        sphere[2] * (1 - progress) + cube[2] * progress
+                    ];
+                }
+                
+                return result;
+            });
+        }
+
+        // Arêtes du cube avec grille 3x3 sur chaque face
+        const edges = [];
+        
+        function getIndex(x, y, z) {
+            return x * divisions * divisions + y * divisions + z;
+        }
+        
+        // Face avant (z=0)
+        for (let x = 0; x < divisions; x++) {
+            for (let y = 0; y < divisions - 1; y++) {
+                edges.push([getIndex(x, y, 0), getIndex(x, y + 1, 0)]);
+            }
+        }
+        for (let y = 0; y < divisions; y++) {
+            for (let x = 0; x < divisions - 1; x++) {
+                edges.push([getIndex(x, y, 0), getIndex(x + 1, y, 0)]);
+            }
+        }
+        
+        // Face arrière (z=divisions-1)
+        for (let x = 0; x < divisions; x++) {
+            for (let y = 0; y < divisions - 1; y++) {
+                edges.push([getIndex(x, y, divisions - 1), getIndex(x, y + 1, divisions - 1)]);
+            }
+        }
+        for (let y = 0; y < divisions; y++) {
+            for (let x = 0; x < divisions - 1; x++) {
+                edges.push([getIndex(x, y, divisions - 1), getIndex(x + 1, y, divisions - 1)]);
+            }
+        }
+        
+        // Face gauche (x=0)
+        for (let z = 0; z < divisions; z++) {
+            for (let y = 0; y < divisions - 1; y++) {
+                edges.push([getIndex(0, y, z), getIndex(0, y + 1, z)]);
+            }
+        }
+        for (let y = 0; y < divisions; y++) {
+            for (let z = 0; z < divisions - 1; z++) {
+                edges.push([getIndex(0, y, z), getIndex(0, y, z + 1)]);
+            }
+        }
+        
+        // Face droite (x=divisions-1)
+        for (let z = 0; z < divisions; z++) {
+            for (let y = 0; y < divisions - 1; y++) {
+                edges.push([getIndex(divisions - 1, y, z), getIndex(divisions - 1, y + 1, z)]);
+            }
+        }
+        for (let y = 0; y < divisions; y++) {
+            for (let z = 0; z < divisions - 1; z++) {
+                edges.push([getIndex(divisions - 1, y, z), getIndex(divisions - 1, y, z + 1)]);
+            }
+        }
+        
+        // Face haut (y=divisions-1)
+        for (let x = 0; x < divisions; x++) {
+            for (let z = 0; z < divisions - 1; z++) {
+                edges.push([getIndex(x, divisions - 1, z), getIndex(x, divisions - 1, z + 1)]);
+            }
+        }
+        for (let z = 0; z < divisions; z++) {
+            for (let x = 0; x < divisions - 1; x++) {
+                edges.push([getIndex(x, divisions - 1, z), getIndex(x + 1, divisions - 1, z)]);
+            }
+        }
+        
+        // Face bas (y=0)
+        for (let x = 0; x < divisions; x++) {
+            for (let z = 0; z < divisions - 1; z++) {
+                edges.push([getIndex(x, 0, z), getIndex(x, 0, z + 1)]);
+            }
+        }
+        for (let z = 0; z < divisions; z++) {
+            for (let x = 0; x < divisions - 1; x++) {
+                edges.push([getIndex(x, 0, z), getIndex(x + 1, 0, z)]);
+            }
+        }
+
+        function rotateX(point, angle) {
+            const [x, y, z] = point;
+            return [
+                x,
+                y * Math.cos(angle) - z * Math.sin(angle),
+                y * Math.sin(angle) + z * Math.cos(angle)
+            ];
+        }
+
+        function rotateY(point, angle) {
+            const [x, y, z] = point;
+            return [
+                x * Math.cos(angle) + z * Math.sin(angle),
+                y,
+                -x * Math.sin(angle) + z * Math.cos(angle)
+            ];
+        }
+
+        function rotateZ(point, angle) {
+            const [x, y, z] = point;
+            return [
+                x * Math.cos(angle) - y * Math.sin(angle),
+                x * Math.sin(angle) + y * Math.cos(angle),
+                z
+            ];
+        }
+
+        function project(point) {
+            const perspective = 600;
+            const z = point[2] + perspective;
+            return [
+                centerX + (point[0] * perspective) / z,
+                centerY + (point[1] * perspective) / z
+            ];
+        }
+
+        // Gestion des courants électriques - décalage initial différent
+        const numSparks = 3;
+        const sparks = [];
+        
+        for (let i = 0; i < numSparks; i++) {
+            sparks.push({
+                currentEdge: Math.floor(Math.random() * edges.length),
+                edgeProgress: i / numSparks,
+                currentVertex: edges[Math.floor(Math.random() * edges.length)][0]
+            });
+        }
+        
+        function getConnectedEdges(vertexIndex) {
+            return edges.map((edge, idx) => ({edge, idx}))
+                       .filter(({edge}) => edge[0] === vertexIndex || edge[1] === vertexIndex);
+        }
+        
+        function getNextEdge(currentEdge, currentVertex) {
+            const current = edges[currentEdge];
+            const nextVertex = (current[0] === currentVertex) ? current[1] : current[0];
+            
+            const connected = getConnectedEdges(nextVertex);
+            const nextOptions = connected.filter(({idx}) => idx !== currentEdge);
+            
+            if (nextOptions.length > 0) {
+                const next = nextOptions[Math.floor(Math.random() * nextOptions.length)];
+                const nextEdge = edges[next.idx];
+                const startVertex = (nextEdge[0] === nextVertex) ? nextEdge[0] : nextEdge[1];
+                return {edge: next.idx, vertex: startVertex};
+            }
+            
+            const randomEdge = Math.floor(Math.random() * edges.length);
+            return {edge: randomEdge, vertex: edges[randomEdge][0]};
+        }
+
+        function drawWaveEdge(p1, p2, color, segments = 120, edgeIndex = 0) {
+            ctx.beginPath();
+            const points = [];
+            
+            for (let i = 0; i <= segments; i++) {
+                const progress = i / segments;
+                
+                const x = p1[0] + (p2[0] - p1[0]) * progress;
+                const y = p1[1] + (p2[1] - p1[1]) * progress;
+                const z = p1[2] + (p2[2] - p1[2]) * progress;
+                
+                const wave1 = Math.sin(progress * Math.PI * 6 + t * 0.05) * 4;
+                const wave2 = Math.cos(progress * Math.PI * 8 - t * 0.08) * 3;
+                const wave3 = Math.sin(progress * Math.PI * 12 + t * 0.06) * 2;
+                
+                const dx = p2[0] - p1[0];
+                const dy = p2[1] - p1[1];
+                const dz = p2[2] - p1[2];
+                const len = Math.sqrt(dx*dx + dy*dy + dz*dz);
+                
+                const perpX = -dy / len;
+                const perpY = dx / len;
+                
+                const waveTotal = wave1 + wave2 + wave3;
+                const finalPoint = [
+                    x + perpX * waveTotal,
+                    y + perpY * waveTotal,
+                    z + Math.sin(progress * Math.PI * 4 + t * 0.04) * 3
+                ];
+                
+                const projected = project(finalPoint);
+                points.push(projected);
+                
+                if (i === 0) ctx.moveTo(projected[0], projected[1]);
+                else ctx.lineTo(projected[0], projected[1]);
+            }
+            
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 3;
+            ctx.stroke();
+            
+            // Étincelles
+            sparks.forEach(spark => {
+                if (edgeIndex === spark.currentEdge && points.length > 0) {
+                    const edge = edges[spark.currentEdge];
+                    const isForward = (edge[0] === spark.currentVertex);
+                    const adjustedProgress = isForward ? spark.edgeProgress : (1 - spark.edgeProgress);
+                    
+                    const electricIndex = Math.floor(adjustedProgress * segments);
+                    
+                    if (electricIndex >= 0 && electricIndex < points.length) {
+                        const px = points[electricIndex][0];
+                        const py = points[electricIndex][1];
+                        
+                        if (isFinite(px) && isFinite(py)) {
+                            const rgbMatch = color.match(/\d+/g);
+                            const r = parseInt(rgbMatch[0]);
+                            const g = parseInt(rgbMatch[1]);
+                            const b = parseInt(rgbMatch[2]);
+                            
+                            const numRays = 8;
+                            for (let i = 0; i < numRays; i++) {
+                                const angle = (i / numRays) * Math.PI * 2 + t * 0.1;
+                                const length = 12 + Math.random() * 6;
+                                
+                                const gradient = ctx.createLinearGradient(
+                                    px, py,
+                                    px + Math.cos(angle) * length,
+                                    py + Math.sin(angle) * length
+                                );
+                                gradient.addColorStop(0, `rgba(255, 255, 255, 0.9)`);
+                                gradient.addColorStop(0.5, `rgba(${Math.min(r + 100, 255)}, ${Math.min(g + 100, 255)}, ${Math.min(b + 100, 255)}, 0.6)`);
+                                gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+                                
+                                ctx.strokeStyle = gradient;
+                                ctx.lineWidth = 2.5;
+                                ctx.beginPath();
+                                ctx.moveTo(px, py);
+                                ctx.lineTo(px + Math.cos(angle) * length, py + Math.sin(angle) * length);
+                                ctx.stroke();
+                            }
+                            
+                            const coreGradient = ctx.createRadialGradient(px, py, 0, px, py, 5);
+                            coreGradient.addColorStop(0, `rgba(255, 255, 255, 1)`);
+                            coreGradient.addColorStop(0.7, `rgba(${Math.min(r + 150, 255)}, ${Math.min(g + 150, 255)}, ${Math.min(b + 150, 255)}, 0.8)`);
+                            coreGradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+                            
+                            ctx.fillStyle = coreGradient;
+                            ctx.beginPath();
+                            ctx.arc(px, py, 5, 0, Math.PI * 2);
+                            ctx.fill();
+                        }
+                    }
+                }
+            });
+        }
+
+        function draw() {
+            // Grille hexagonale rétro
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, w, h);
+            
+            const hexSize = 40;
+            const hexHeight = hexSize * Math.sqrt(3);
+            const radius = Math.min(w, h) * 0.45;
+            
+            for (let row = -1; row < h / hexHeight + 1; row++) {
+                for (let col = -1; col < w / (hexSize * 1.5) + 1; col++) {
+                    const x = col * hexSize * 1.5;
+                    const y = row * hexHeight + (col % 2) * hexHeight / 2;
+                    
+                    const dx = x - centerX;
+                    const dy = y - centerY;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    
+                    // Ne dessiner que si dans le cercle
+                    if (dist > radius) continue;
+                    
+                    const pulse = Math.sin(dist * 0.02 - t * 0.05) * 0.5 + 0.5;
+                    const wave = Math.sin(x * 0.01 + y * 0.01 + t * 0.03);
+                    
+                    // Remplissage avec teintes bleu/violet uniquement
+                    const hue = 240 + wave * 30; // Entre 210 et 270 (bleu à violet)
+                    const sat = 60 + pulse * 40;
+                    const light = 8 + pulse * 12;
+                    ctx.fillStyle = `hsla(${hue}, ${sat}%, ${light}%, ${0.4 + pulse * 0.3})`;
+                    
+                    ctx.beginPath();
+                    for (let i = 0; i < 6; i++) {
+                        const angle = (Math.PI / 3) * i;
+                        const px = x + Math.cos(angle) * hexSize;
+                        const py = y + Math.sin(angle) * hexSize;
+                        if (i === 0) ctx.moveTo(px, py);
+                        else ctx.lineTo(px, py);
+                    }
+                    ctx.closePath();
+                    ctx.fill();
+                    
+                    // Contour
+                    ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${30 + pulse * 20}%, ${0.6 + pulse * 0.4})`;
+                    ctx.lineWidth = 2.5;
+                    ctx.stroke();
+                }
+            }
+
+            const angleX = t * 0.008;
+            const angleY = t * 0.012;
+            const angleZ = t * 0.006;
+
+            const vertices = morphVertices(baseVertices, t);
+
+            const rotated = vertices.map(v => {
+                let p = rotateX(v, angleX);
+                p = rotateY(p, angleY);
+                p = rotateZ(p, angleZ);
+                return p;
+            });
+
+            edges.forEach((edge, i) => {
+                const p1 = rotated[edge[0]];
+                const p2 = rotated[edge[1]];
+                
+                let color;
+                if (i < 4) {
+                    const r = Math.floor(200 + Math.sin(t * 0.02 + i) * 55);
+                    color = `rgba(${r}, 0, 30, 0.8)`;
+                } else if (i < 8) {
+                    const b = Math.floor(200 + Math.cos(t * 0.025 + i) * 55);
+                    color = `rgba(0, 40, ${b}, 0.8)`;
+                } else {
+                    const oscillate = Math.sin(t * 0.03 + i);
+                    if (oscillate > 0) {
+                        color = `rgba(0, ${Math.floor(180 + oscillate * 75)}, ${Math.floor(200 + oscillate * 55)}, 0.8)`;
+                    } else {
+                        color = `rgba(${Math.floor(200 - oscillate * 55)}, 0, ${Math.floor(180 - oscillate * 75)}, 0.8)`;
+                    }
+                }
+                
+                drawWaveEdge(p1, p2, color, 120, i);
+            });
+            
+            
+            // Mise à jour des étincelles avec vitesses différentes
+            sparks.forEach((spark, i) => {
+                spark.edgeProgress += 0.01 + i * 0.003;
+                if (spark.edgeProgress >= 1) {
+                    spark.edgeProgress = 0;
+                    const next = getNextEdge(spark.currentEdge, spark.currentVertex);
+                    spark.currentEdge = next.edge;
+                    spark.currentVertex = next.vertex;
+                }
+            });
+
+            t++;
+            requestAnimationFrame(draw);
+        }
+
+        draw();
+
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+    </script>
+</body>
+</html>

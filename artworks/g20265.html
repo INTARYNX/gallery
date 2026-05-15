@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Genuary 2016 #5</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        canvas {
+            border: none;
+            border-radius: 20px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Taille carrée qui s'adapte au viewport
+        function resizeCanvas() {
+            const size = Math.min(window.innerWidth, window.innerHeight) - 20;
+            canvas.width = size;
+            canvas.height = size;
+        }
+        
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        const letters = {
+            'G': [
+                [[63.74, -65.54], [47.04, -67.14], [26.96, -69.62], [22.68, -53.28], [14.7, -33.02], [15.76, -15.24], [16.1, 0.58], [28.74, 0.0], [37.16, -0.38], [46.2, -4.88], [54.36, -7.7]],
+                [[41.34, -31.24], [57.88, -32.66], [53.28, 0.0]]
+            ],
+            'E': [
+                [[62.24, -65.96], [35.36, -66.72], [27.34, -66.94], [23.96, -58.06], [14.36, -8.84], [12.36, -0.26], [18.88, 0.0], [50.68, -0.12]],
+                [[19.4, -34.04], [51.68, -34.04]]
+            ],
+            'N': [
+                [[12.3, 0.0], [25.02, -67.0], [28.04, -67.0], [55.94, 0.0], [58.58, 0.0], [71.4, -67.0]]
+            ],
+            'U': [
+                [[25.56, -67.74], [16.28, -15.08], [15.9, -12.18], [16.28, -2.38], [24.06, 0.0], [44.42, 0.0], [47.38, -0.3], [58.14, -3.96], [60.46, -15.24], [71.14, -67.74]]
+            ],
+            'A': [
+                [[11.0, 0.0], [47.06, -67.52], [51.0, -67.52], [60.62, 0.0]],
+                [[22.68, -21.24], [57.44, -21.42]]
+            ],
+            'R': [
+                [[23.74, -66.12], [10.46, 0.0]],
+                [[23.74, -66.12], [49.5, -66.3], [61.28, -64.4], [60.5, -55.64], [55.44, -35.18], [44.84, -29.9], [16.86, -30.52]],
+                [[41.94, -30.16], [51.5, 0.0]]
+            ],
+            'Y': [
+                [[23.88, -68.96], [36.94, -25.28]],
+                [[69.02, -68.96], [37.28, -25.44]],
+                [[37.18, -25.72], [32.32, 0.0]]
+            ]
+        };
+
+        let time = 0;
+        let cameraZ = 0;
+        let cameraX = 0;
+        let cameraRotation = 0;
+
+        // Code morse pour GENUARY
+        const morseCode = {
+            'G': '--.',
+            'E': '.',
+            'N': '-.',
+            'U': '..-',
+            'A': '.-',
+            'R': '.-.',
+            'Y': '-.--'
+        };
+        
+        const morseSequence = 'GENUARY'.split('').map(letter => morseCode[letter]).join(' ');
+        let morseIndex = 0;
+        let morseTimer = 0;
+        const dotDuration = 15; // frames pour un point
+        const dashDuration = 45; // frames pour un trait
+        const gapDuration = 15; // frames entre symboles
+        const letterGapDuration = 45; // frames entre lettres
+        let morseEnabled = true; // Toggle pour le clignotement morse
+        
+        // Toggle morse avec touch/click
+        canvas.addEventListener('click', () => {
+            morseEnabled = !morseEnabled;
+        });
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            morseEnabled = !morseEnabled;
+        });
+
+        // Collecter tous les segments des lettres
+        function getAllSegments() {
+            const segments = [];
+            const text = 'GENUARY';
+            let offsetX = -180;
+
+            for (let i = 0; i < text.length; i++) {
+                const letter = letters[text[i]];
+                if (!letter) continue;
+
+                for (let pathIdx = 0; pathIdx < letter.length; pathIdx++) {
+                    const path = letter[pathIdx];
+                    
+                    for (let j = 0; j < path.length - 1; j++) {
+                        const [x1, y1] = path[j];
+                        const [x2, y2] = path[j + 1];
+                        
+                        segments.push({
+                            x1: canvas.width / 2 + offsetX + x1 * 0.5,
+                            y1: canvas.height / 2 + y1 * 0.5 + 20,
+                            x2: canvas.width / 2 + offsetX + x2 * 0.5,
+                            y2: canvas.height / 2 + y2 * 0.5 + 20
+                        });
+                    }
+                }
+
+                offsetX += 52;
+            }
+            
+            return segments;
+        }
+
+        const textSegments = getAllSegments();
+
+        // Prolonger une ligne jusqu'aux bords
+        function extendLine(x1, y1, x2, y2) {
+            const dx = x2 - x1;
+            const dy = y2 - y1;
+            
+            if (Math.abs(dx) < 0.001) {
+                return { x1: x1, y1: 0, x2: x1, y2: canvas.height };
+            }
+            
+            const slope = dy / dx;
+            
+            let startX = 0, startY = y1 - slope * x1;
+            let endX = canvas.width, endY = y1 + slope * (canvas.width - x1);
+            
+            if (startY < 0) {
+                startY = 0;
+                startX = x1 - y1 / slope;
+            } else if (startY > canvas.height) {
+                startY = canvas.height;
+                startX = x1 + (canvas.height - y1) / slope;
+            }
+            
+            if (endY < 0) {
+                endY = 0;
+                endX = x1 - y1 / slope;
+            } else if (endY > canvas.height) {
+                endY = canvas.height;
+                endX = x1 + (canvas.height - y1) / slope;
+            }
+            
+            return { x1: startX, y1: startY, x2: endX, y2: endY };
+        }
+
+        function draw() {
+            // Flash morse en fond (si activé)
+            let morseFlash = 0;
+            
+            if (morseEnabled) {
+                const currentChar = morseSequence[morseIndex];
+                
+                if (currentChar === '.') {
+                    morseFlash = morseTimer < dotDuration ? 0.3 : 0;
+                    if (morseTimer >= dotDuration + gapDuration) {
+                        morseTimer = 0;
+                        morseIndex = (morseIndex + 1) % morseSequence.length;
+                    }
+                } else if (currentChar === '-') {
+                    morseFlash = morseTimer < dashDuration ? 0.3 : 0;
+                    if (morseTimer >= dashDuration + gapDuration) {
+                        morseTimer = 0;
+                        morseIndex = (morseIndex + 1) % morseSequence.length;
+                    }
+                } else if (currentChar === ' ') {
+                    morseFlash = 0;
+                    if (morseTimer >= letterGapDuration) {
+                        morseTimer = 0;
+                        morseIndex = (morseIndex + 1) % morseSequence.length;
+                    }
+                }
+                
+                morseTimer++;
+            }
+            
+            // Fond noir avec flash morse blanc
+            ctx.fillStyle = morseFlash > 0 ? `rgba(255, 255, 255, ${morseFlash})` : '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Effet radial subtil blanc du centre
+            const gradient = ctx.createRadialGradient(
+                canvas.width / 2, canvas.height / 2, 0,
+                canvas.width / 2, canvas.height / 2, canvas.width / 2
+            );
+            gradient.addColorStop(0, 'rgba(255, 255, 255, 0.15)');
+            gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.08)');
+            gradient.addColorStop(1, 'rgba(255, 255, 255, 0.02)');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Cycle complet : zoom + travelling vers droite + retour centre + dézoom
+            const cycleTime = time % 600; // Cycle de 10 secondes (600 frames à 60fps)
+            
+            if (cycleTime < 200) {
+                // Phase 1 (0-200) : Zoom et travelling vers la droite avec rotation
+                const progress = cycleTime / 200;
+                cameraZ = 1.0 + progress * 1.5; // Zoom de 1.0 à 2.5
+                cameraX = progress * 180; // Travelling de 0 à 180px (G au centre vers Y visible)
+                cameraRotation = progress * Math.PI / 12; // Rotation de 0 à +15 degrés
+            } else if (cycleTime < 400) {
+                // Phase 2 (200-400) : Retour au centre avec rotation inverse
+                const progress = (cycleTime - 200) / 200;
+                cameraZ = 2.5; // Reste zoomé
+                cameraX = 180 - progress * 180; // Retour de 180 à 0
+                cameraRotation = Math.PI / 12 - progress * Math.PI / 6; // De +15 à -15 degrés
+            } else {
+                // Phase 3 (400-600) : Dézoom
+                const progress = (cycleTime - 400) / 200;
+                cameraZ = 2.5 - progress * 1.5; // Dézoom de 2.5 à 1.0
+                cameraX = 0; // Centre
+                cameraRotation = -Math.PI / 12 + progress * Math.PI / 12; // De -15 à 0
+            }
+
+            ctx.save();
+            ctx.translate(canvas.width / 2 + cameraX, canvas.height / 2);
+            ctx.rotate(cameraRotation);
+            ctx.scale(cameraZ, cameraZ);
+            ctx.translate(-canvas.width / 2, -canvas.height / 2);
+
+            // Dessiner toutes les lignes prolongées avec effet de lumière
+            const textMinX = canvas.width / 2 - 200;
+            const textMaxX = canvas.width / 2 + 200;
+            const textMinY = canvas.height / 2 - 60;
+            const textMaxY = canvas.height / 2 + 60;
+            
+            textSegments.forEach((seg, idx) => {
+                const extended = extendLine(seg.x1, seg.y1, seg.x2, seg.y2);
+                
+                // Dessiner la ligne grise étendue
+                ctx.strokeStyle = '#333';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(extended.x1, extended.y1);
+                ctx.lineTo(extended.x2, extended.y2);
+                ctx.stroke();
+                
+                // Direction de la ligne étendue
+                const dx = extended.x2 - extended.x1;
+                const dy = extended.y2 - extended.y1;
+                
+                // Lumières principales sur la zone du texte
+                for (let k = 0; k < 3; k++) {
+                    const progress = (time * 0.05 + idx * 0.13 + k * 0.33) % 1;
+                    const lightX = extended.x1 + dx * progress;
+                    const lightY = extended.y1 + dy * progress;
+                    
+                    const inTextZone = lightX >= textMinX && lightX <= textMaxX && 
+                                       lightY >= textMinY && lightY <= textMaxY;
+                    
+                    if (!inTextZone) continue;
+                    
+                    const segDx = seg.x2 - seg.x1;
+                    const segDy = seg.y2 - seg.y1;
+                    const segLen = Math.sqrt(segDx * segDx + segDy * segDy);
+                    
+                    const distToStart = Math.sqrt((lightX - seg.x1)**2 + (lightY - seg.y1)**2);
+                    const distToEnd = Math.sqrt((lightX - seg.x2)**2 + (lightY - seg.y2)**2);
+                    const onTextSegment = distToStart <= segLen && distToEnd <= segLen && 
+                                         Math.abs(distToStart + distToEnd - segLen) < 5;
+                    
+                    const flicker = 0.7 + Math.sin(time * 0.5 + idx * 2.5 + k) * 0.15;
+                    const intensity = onTextSegment ? flicker : flicker * 0.15;
+                    
+                    // Variation de couleur pour le glow
+                    const hue = (time * 2 + idx * 30 + k * 50) % 360;
+                    const r = Math.floor(255 * (0.5 + 0.5 * Math.cos(hue * Math.PI / 180)));
+                    const g = Math.floor(255 * (0.5 + 0.5 * Math.cos((hue + 120) * Math.PI / 180)));
+                    const b = Math.floor(255 * (0.5 + 0.5 * Math.cos((hue + 240) * Math.PI / 180)));
+                    
+                    const gradient = ctx.createRadialGradient(lightX, lightY, 0, lightX, lightY, 30);
+                    gradient.addColorStop(0, `rgba(255, 255, 255, ${intensity})`);
+                    gradient.addColorStop(0.4, `rgba(${r}, ${g}, ${b}, ${intensity * 0.7})`);
+                    gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+                    
+                    ctx.strokeStyle = gradient;
+                    ctx.lineWidth = onTextSegment ? 5 : 2;
+                    ctx.beginPath();
+                    ctx.moveTo(extended.x1, extended.y1);
+                    ctx.lineTo(extended.x2, extended.y2);
+                    ctx.stroke();
+                }
+                
+                // Lumières subtiles sur le reste de la ligne
+                for (let k = 0; k < 5; k++) {
+                    const progress = (time * 0.03 + idx * 0.17 + k * 0.2) % 1;
+                    const lightX = extended.x1 + dx * progress;
+                    const lightY = extended.y1 + dy * progress;
+                    
+                    const inTextZone = lightX >= textMinX && lightX <= textMaxX && 
+                                       lightY >= textMinY && lightY <= textMaxY;
+                    
+                    // Uniquement hors de la zone du texte
+                    if (inTextZone) continue;
+                    
+                    const flicker = 0.3 + Math.sin(time * 0.3 + idx * 1.5 + k * 2) * 0.1;
+                    
+                    const hue = (time * 3 + idx * 40 + k * 60) % 360;
+                    const r = Math.floor(255 * (0.5 + 0.5 * Math.cos(hue * Math.PI / 180)));
+                    const g = Math.floor(255 * (0.5 + 0.5 * Math.cos((hue + 120) * Math.PI / 180)));
+                    const b = Math.floor(255 * (0.5 + 0.5 * Math.cos((hue + 240) * Math.PI / 180)));
+                    
+                    const gradient = ctx.createRadialGradient(lightX, lightY, 0, lightX, lightY, 20);
+                    gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${flicker * 0.4})`);
+                    gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+                    
+                    ctx.strokeStyle = gradient;
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    ctx.moveTo(extended.x1, extended.y1);
+                    ctx.lineTo(extended.x2, extended.y2);
+                    ctx.stroke();
+                }
+            });
+
+            // Dessiner le texte par-dessus en blanc transparent qui scintille
+            const textFlicker = 0.25 + Math.sin(time * 0.1) * 0.1;
+            ctx.strokeStyle = `rgba(255, 255, 255, ${textFlicker})`;
+            ctx.lineWidth = 2;
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = 'rgba(255, 255, 255, 0.9)';
+
+            const text = 'GENUARY';
+            let offsetX = -180;
+
+            for (let i = 0; i < text.length; i++) {
+                const letter = letters[text[i]];
+                if (!letter) continue;
+
+                for (let pathIdx = 0; pathIdx < letter.length; pathIdx++) {
+                    const path = letter[pathIdx];
+                    
+                    ctx.beginPath();
+                    for (let j = 0; j < path.length; j++) {
+                        const [x, y] = path[j];
+                        const screenX = canvas.width / 2 + offsetX + x * 0.5;
+                        const screenY = canvas.height / 2 + y * 0.5 + 20;
+                        
+                        if (j === 0) {
+                            ctx.moveTo(screenX, screenY);
+                        } else {
+                            ctx.lineTo(screenX, screenY);
+                        }
+                    }
+                    ctx.stroke();
+                }
+
+                offsetX += 52;
+            }
+
+            ctx.shadowBlur = 0;
+
+            ctx.restore();
+
+            time++;
+            requestAnimationFrame(draw);
+        }
+
+        draw();
+    </script>
+</body>
+</html>

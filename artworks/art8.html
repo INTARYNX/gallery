@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<base href="/upstride/">
+    <title>Muybridge Robotdog Study</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #1a1a1a;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: monospace;
+            overflow: hidden;
+        }
+        canvas {
+            background: #f5f5dc;
+            border: 20px solid #2a2a2a;
+            box-shadow: 0 0 50px rgba(0,0,0,0.5);
+            filter: blur(0.3px) contrast(1.1);
+            position: relative;
+        }
+        .title-plate {
+            position: absolute;
+            top: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(245, 245, 220, 0.9);
+            border: 3px solid #2a2a2a;
+            padding: 8px 20px;
+            font-family: 'Courier New', monospace;
+            font-size: 16px;
+            font-weight: bold;
+            color: #000;
+            letter-spacing: 2px;
+            text-align: center;
+            filter: blur(0.3px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        @keyframes breathe {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.002); }
+        }
+        .canvas-wrapper {
+            animation: breathe 4s ease-in-out infinite;
+        }
+        @keyframes filmShake {
+            0%, 100% { transform: translate(0, 0) rotate(0deg); }
+            10% { transform: translate(-1px, 1px) rotate(-0.1deg); }
+            20% { transform: translate(1px, -0.5px) rotate(0.1deg); }
+            30% { transform: translate(-0.5px, -1px) rotate(-0.05deg); }
+            40% { transform: translate(0.5px, 1px) rotate(0.05deg); }
+            50% { transform: translate(-1px, 0.5px) rotate(-0.1deg); }
+            60% { transform: translate(1px, -1px) rotate(0.1deg); }
+            70% { transform: translate(-0.5px, 0.5px) rotate(-0.05deg); }
+            80% { transform: translate(0.5px, -0.5px) rotate(0.05deg); }
+            90% { transform: translate(-1px, 1px) rotate(-0.1deg); }
+        }
+        .frame-display {
+            position: absolute;
+            top: 30px;
+            right: 30px;
+            background: #000;
+            border: 3px solid #2a2a2a;
+            padding: 12px 18px;
+            font-family: 'Courier New', monospace;
+            font-size: 42px;
+            font-weight: bold;
+            color: #f5f5dc;
+            letter-spacing: 2px;
+            animation: filmShake 0.15s infinite;
+        }
+    </style>
+</head>
+<body>
+    <div class="canvas-wrapper">
+        <canvas id="canvas"></canvas>
+        <div class="title-plate">PLATE No. 42 — MECHANICAL CANINE LOCOMOTION</div>
+    </div>
+    <div class="frame-display" id="frame">01</div>
+    
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 1200;
+        canvas.height = 400;
+
+        let frame = 0;
+        const frameCount = 12;
+        const spacing = 100;
+        const speed = 0.3;
+        
+        // Static film stains - positions fixes
+        const stains = [
+            {x: 250, y: 80, size: 40, opacity: 0.15},
+            {x: 680, y: 220, size: 60, opacity: 0.12},
+            {x: 950, y: 150, size: 35, opacity: 0.18},
+            {x: 420, y: 320, size: 45, opacity: 0.1},
+            {x: 1050, y: 280, size: 30, opacity: 0.14}
+        ];
+
+        function drawLeg(baseX, baseY, t, forwardAmp = 8, liftAmp = 18) {
+            // 1. Cuisse (oscillation avant/arrière)
+            const upperX = baseX + Math.cos(t) * forwardAmp;
+            const upperY = baseY;
+
+            // 2. Genou (fixe en dessous)
+            const kneeX = upperX;
+            const kneeY = upperY + 18;
+
+            // 3. Pied (soulèvement simple)
+            const footX = kneeX;
+            const footY = kneeY + 20 - Math.max(0, Math.sin(t) * liftAmp);
+
+            // Segment haut
+            ctx.beginPath();
+            ctx.moveTo(baseX, baseY);
+            ctx.lineTo(kneeX, kneeY);
+            ctx.stroke();
+
+            // Segment bas
+            ctx.beginPath();
+            ctx.moveTo(kneeX, kneeY);
+            ctx.lineTo(footX, footY);
+            ctx.stroke();
+
+            // Articulations
+            ctx.beginPath();
+            ctx.arc(baseX, baseY, 4, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.beginPath();
+            ctx.arc(kneeX, kneeY, 4, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Paw pad
+            ctx.fillRect(footX - 5, footY, 10, 5);
+        }
+
+        function drawRobotDog(x, y, phase) {
+            ctx.fillStyle = '#000';
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 6;
+            ctx.lineCap = 'round';
+            
+            const t = phase % (Math.PI * 2);
+            
+            // Body movement
+            const bodyY = y - 55 + Math.sin(t * 2) * 6;
+            const bodyTilt = Math.sin(t) * 0.1;
+            
+            // Body rectangle - more angular
+            ctx.save();
+            ctx.translate(x, bodyY);
+            ctx.rotate(bodyTilt);
+            // Main chassis
+            ctx.fillRect(-30, -15, 60, 20);
+            // Chest plate details
+            ctx.fillStyle = '#f5f5dc';
+            ctx.fillRect(-2, -10, 4, 15);
+            ctx.fillStyle = '#000';
+            // Segmented armor
+            ctx.fillRect(-25, -12, 10, 3);
+            ctx.fillRect(-25, -5, 10, 3);
+            ctx.fillRect(15, -12, 10, 3);
+            ctx.fillRect(15, -5, 10, 3);
+            ctx.restore();
+            
+            // Head (right side) - angular robot head
+            const headX = x + 30;
+            const headY = bodyY - 10;
+            // Head block
+            ctx.beginPath();
+            ctx.moveTo(headX, headY - 12);
+            ctx.lineTo(headX + 22, headY - 10);
+            ctx.lineTo(headX + 22, headY + 10);
+            ctx.lineTo(headX, headY + 8);
+            ctx.closePath();
+            ctx.fill();
+            // Visor
+            ctx.fillStyle = '#f5f5dc';
+            ctx.fillRect(headX + 15, headY - 5, 5, 8);
+            ctx.fillStyle = '#000';
+            // Antenna
+            ctx.fillRect(headX + 8, headY - 15, 2, 3);
+            ctx.fillRect(headX + 7, headY - 16, 4, 2);
+            
+            // Neck joint
+            ctx.beginPath();
+            ctx.arc(headX, headY, 4, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Tail (left side) - mechanical antenna
+            ctx.save();
+            ctx.translate(x - 30, bodyY - 5);
+            ctx.rotate(Math.PI + Math.sin(t * 2) * 0.3);
+            ctx.fillRect(-2, 0, 4, 16);
+            // Segments
+            ctx.fillRect(-3, 4, 6, 2);
+            ctx.fillRect(-3, 10, 6, 2);
+            // Tip
+            ctx.fillRect(-4, 16, 8, 3);
+            ctx.restore();
+            
+            // Rotary gallop: RH -> LH -> LF -> RF
+            // Pattes AVANT = x + 15 (près de la tête à droite)
+            // Pattes ARRIÈRE = x - 15 (près de la queue à gauche)
+            
+            // Patte avant DROITE
+            const fr = t;
+            const frForward = -Math.cos(fr) * 30;
+            const frLift = Math.max(0, Math.sin(fr) * 35);
+            const frKneeX = x + 15 + frForward * 0.5;
+            const frKneeY = bodyY + 22;
+            const frX = x + 15 + frForward;
+            const frY = y - frLift;
+            // Shoulder joint
+            ctx.beginPath();
+            ctx.arc(x + 15, bodyY + 5, 4, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(x + 15, bodyY + 5);
+            ctx.lineTo(frKneeX, frKneeY);
+            ctx.stroke();
+            // Knee joint
+            ctx.beginPath();
+            ctx.arc(frKneeX, frKneeY, 4, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(frKneeX, frKneeY);
+            ctx.lineTo(frX, frY);
+            ctx.stroke();
+            // Paw pad
+            ctx.fillRect(frX - 5, frY, 10, 5);
+            
+            // Patte avant GAUCHE
+            const fl = t + Math.PI;
+            const flForward = -Math.cos(fl) * 30;
+            const flLift = Math.max(0, Math.sin(fl) * 35);
+            const flKneeX = x + 15 + flForward * 0.5;
+            const flKneeY = bodyY + 22;
+            const flX = x + 15 + flForward;
+            const flY = y - flLift;
+            ctx.beginPath();
+            ctx.arc(x + 15, bodyY + 5, 4, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(x + 15, bodyY + 5);
+            ctx.lineTo(flKneeX, flKneeY);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(flKneeX, flKneeY, 4, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(flKneeX, flKneeY);
+            ctx.lineTo(flX, flY);
+            ctx.stroke();
+            ctx.fillRect(flX - 5, flY, 10, 5);
+            
+            // Patte arrière DROITE
+            const br = t + Math.PI * 0.5;
+            const brForward = -Math.cos(br) * 35;
+            const brLift = Math.max(0, Math.sin(br) * 38);
+            const brKneeX = x - 15 + brForward * 0.5;
+            const brKneeY = bodyY + 22;
+            const brX = x - 15 + brForward;
+            const brY = y - brLift;
+            ctx.beginPath();
+            ctx.arc(x - 15, bodyY + 5, 4, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(x - 15, bodyY + 5);
+            ctx.lineTo(brKneeX, brKneeY);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(brKneeX, brKneeY, 4, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(brKneeX, brKneeY);
+            ctx.lineTo(brX, brY);
+            ctx.stroke();
+            ctx.fillRect(brX - 5, brY, 10, 5);
+            
+            // Patte arrière GAUCHE
+            const bl = t + Math.PI * 1.5;
+            const blForward = -Math.cos(bl) * 35;
+            const blLift = Math.max(0, Math.sin(bl) * 38);
+            const blKneeX = x - 15 + blForward * 0.5;
+            const blKneeY = bodyY + 22;
+            const blX = x - 15 + blForward;
+            const blY = y - blLift;
+            ctx.beginPath();
+            ctx.arc(x - 15, bodyY + 5, 4, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(x - 15, bodyY + 5);
+            ctx.lineTo(blKneeX, blKneeY);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(blKneeX, blKneeY, 4, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(blKneeX, blKneeY);
+            ctx.lineTo(blX, blY);
+            ctx.stroke();
+            ctx.fillRect(blX - 5, blY, 10, 5);
+        }
+
+        function animate() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Film grain - reduced particles
+            for (let i = 0; i < 400; i++) {
+                ctx.fillStyle = `rgba(0,0,0,${Math.random() * 0.3})`;
+                ctx.fillRect(Math.random() * canvas.width, Math.random() * canvas.height, 1, 1);
+            }
+            
+            // Horizon line
+            ctx.strokeStyle = '#b8b090';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(0, canvas.height - 90);
+            ctx.lineTo(canvas.width, canvas.height - 90);
+            ctx.stroke();
+            
+            // Grid lines
+            ctx.strokeStyle = '#d0d0c0';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            for (let i = 0; i <= frameCount; i++) {
+                const x = spacing + i * spacing;
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, canvas.height);
+            }
+            ctx.stroke();
+            
+            // Frame numbers at bottom
+            ctx.fillStyle = '#000';
+            ctx.font = 'bold 12px Courier New';
+            ctx.textAlign = 'center';
+            for (let i = 0; i < frameCount; i++) {
+                const x = spacing + i * spacing;
+                ctx.fillText((i + 1).toString(), x, canvas.height - 10);
+            }
+            
+            // Scratches - less frequent
+            if (Math.random() > 0.98) {
+                ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+                ctx.lineWidth = 0.5;
+                ctx.beginPath();
+                const scratchX = Math.random() * canvas.width;
+                ctx.moveTo(scratchX, 0);
+                ctx.lineTo(scratchX, canvas.height);
+                ctx.stroke();
+            }
+            
+            // Film stains (fixed positions)
+            stains.forEach(stain => {
+                const gradient = ctx.createRadialGradient(stain.x, stain.y, 0, stain.x, stain.y, stain.size);
+                gradient.addColorStop(0, `rgba(80, 70, 50, ${stain.opacity})`);
+                gradient.addColorStop(0.5, `rgba(60, 50, 40, ${stain.opacity * 0.5})`);
+                gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+                ctx.fillStyle = gradient;
+                ctx.fillRect(stain.x - stain.size, stain.y - stain.size, stain.size * 2, stain.size * 2);
+            });
+            
+            // Draw dogs
+            const currentFrameIndex = Math.floor((frame * speed) / 5) % frameCount;
+            for (let i = 0; i < frameCount; i++) {
+                const x = spacing + i * spacing;
+                const phase = (frame * speed / 60 + i / frameCount) * Math.PI * 2;
+                const alpha = i === currentFrameIndex ? 1 : 0.25;
+                ctx.globalAlpha = alpha;
+                drawRobotDog(x, canvas.height - 90, phase);
+                
+                // Ghost - less frequent
+                if (i > 0 && alpha === 1 && Math.random() > 0.85) {
+                    ctx.globalAlpha = 0.15;
+                    drawRobotDog(x + 3, canvas.height - 90, phase - 0.1);
+                }
+            }
+            
+            ctx.globalAlpha = 1;
+            
+            // Dust - less frequent
+            if (Math.random() > 0.97) {
+                ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+                ctx.lineWidth = 0.5;
+                const dustX = Math.random() * canvas.width;
+                const dustY = Math.random() * canvas.height;
+                const dustAngle = Math.random() * Math.PI;
+                const dustLength = Math.random() * 30 + 10;
+                ctx.beginPath();
+                ctx.moveTo(dustX, dustY);
+                ctx.lineTo(dustX + Math.cos(dustAngle) * dustLength, dustY + Math.sin(dustAngle) * dustLength);
+                ctx.stroke();
+            }
+            
+            // Vignette - cached gradient
+            if (!this.vignetteGradient) {
+                this.vignetteGradient = ctx.createRadialGradient(
+                    canvas.width / 2, canvas.height / 2, canvas.width * 0.3,
+                    canvas.width / 2, canvas.height / 2, canvas.width * 0.7
+                );
+                this.vignetteGradient.addColorStop(0, 'rgba(0,0,0,0)');
+                this.vignetteGradient.addColorStop(1, 'rgba(0,0,0,0.4)');
+            }
+            ctx.fillStyle = this.vignetteGradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            frame++;
+            document.getElementById('frame').textContent = ((currentFrameIndex) + 1).toString().padStart(2, '0');
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+    </script>
+</body>
+</html>

@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ciliaform</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #000;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: monospace;
+  }
+  #wrap {
+    position: relative;
+    width: min(100vw, 100vh);
+    height: min(100vw, 100vh);
+    aspect-ratio: 1 / 1;
+  }
+  canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+    background: #000;
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c"></canvas>
+</div>
+<script>
+const cnv = document.getElementById('c');
+const ctx = cnv.getContext('2d');
+
+// offscreen buffer to draw the flower, then warp it
+const buf = document.createElement('canvas');
+const bctx = buf.getContext('2d');
+
+let W, H, cx, cy, R;
+let t = 0;
+
+function rand(a, b) { return a + Math.random() * (b - a); }
+
+function makeParams() {
+  return {
+    petals: Math.floor(rand(5, 13)),
+    layers: Math.floor(rand(40, 90)),
+    freq: rand(2, 8),
+    twist: rand(0.3, 2.2),
+    hueShift: rand(0, 360),
+    pulse: rand(0.5, 2)
+  };
+}
+
+let cur = makeParams();
+let nxt = makeParams();
+let morph = 0;
+const MORPH_SPEED = 0.004;
+
+function lerp(a, b, m) { return a + (b - a) * m; }
+function lerpAngle(a, b, m) {
+  let d = ((b - a + 540) % 360) - 180;
+  return (a + d * m + 360) % 360;
+}
+
+function getParams(m) {
+  return {
+    petals: lerp(cur.petals, nxt.petals, m),
+    layers: Math.floor(lerp(cur.layers, nxt.layers, m)),
+    freq: lerp(cur.freq, nxt.freq, m),
+    twist: lerp(cur.twist, nxt.twist, m),
+    hueShift: lerpAngle(cur.hueShift, nxt.hueShift, m),
+    pulse: lerp(cur.pulse, nxt.pulse, m)
+  };
+}
+
+function resize() {
+  const s = cnv.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = cnv.width = s.width * dpr;
+  H = cnv.height = s.height * dpr;
+  buf.width = W; buf.height = H;
+  cx = W / 2; cy = H / 2;
+  R = Math.min(W, H) * 0.48;
+}
+
+window.addEventListener('resize', resize);
+resize();
+
+function drawFlower(target) {
+  morph += MORPH_SPEED;
+  if (morph >= 1) {
+    cur = nxt;
+    nxt = makeParams();
+    morph = 0;
+  }
+  const m = morph * morph * (3 - 2 * morph);
+  const { petals, layers, freq, twist, hueShift, pulse } = getParams(m);
+
+  target.fillStyle = '#000';
+  target.fillRect(0, 0, W, H);
+
+  target.save();
+  target.translate(cx, cy);
+
+  const breath = 1 + Math.sin(t * pulse) * 0.08;
+
+  for (let i = layers; i > 0; i--) {
+    const k = i / layers;
+    const r = R * k * breath;
+    const rot = t * (1 - k) * twist + Math.sin(t * 0.5 + k * 6) * 0.4;
+    const hue = (hueShift + i * 6 + t * 30) % 360;
+    const sat = 90 + Math.sin(t + k * 4) * 10;
+    const lig = 45 + Math.sin(t * 2 + k * 8) * 20;
+    const alpha = 0.55 - k * 0.35;
+
+    target.beginPath();
+    const steps = 220;
+    for (let j = 0; j <= steps; j++) {
+      const a = (j / steps) * Math.PI * 2;
+      const wave = Math.cos(a * petals + rot) * 0.35
+                 + Math.sin(a * freq - t + k * 3) * 0.18
+                 + Math.cos(a * (petals * 2) + t * 0.7) * 0.1;
+      const rr = r * (0.55 + wave * 0.45);
+      const x = Math.cos(a + rot * 0.3) * rr;
+      const y = Math.sin(a + rot * 0.3) * rr;
+      if (j === 0) target.moveTo(x, y);
+      else target.lineTo(x, y);
+    }
+    target.closePath();
+
+    target.strokeStyle = `hsla(${hue}, ${sat}%, ${lig}%, ${alpha})`;
+    target.lineWidth = 1 + Math.sin(t + k * 5) * 0.8;
+    target.stroke();
+
+    if (i % 6 === 0) {
+      target.fillStyle = `hsla(${(hue + 180) % 360}, ${sat}%, ${lig}%, 0.04)`;
+      target.fill();
+    }
+  }
+
+  target.restore();
+
+  // skeleton structure — white branching armature
+  // crossfade between current and next rib count to avoid jumps
+  target.save();
+  target.translate(cx, cy);
+  target.lineCap = 'round';
+
+  function drawSkeleton(ribs, alphaMul) {
+    // shared organic motion with the flower, slightly delayed
+    const tLag = t - 0.04;
+    const skelTwist = twist;
+    const skelPulse = pulse;
+
+    // skeleton hue follows the flower's hueShift, with a slight offset for harmony
+    const skelHue = (hueShift + 30) % 360;
+
+    for (let i = 0; i < ribs; i++) {
+      // align rib base angles with petal phase (flower uses cos(a * petals + rot))
+      const baseAngle = (i / ribs) * Math.PI * 2 + tLag * skelTwist * 0.3;
+      // sway driven by same frequencies as flower's wave term
+      const sway = Math.sin(tLag * 0.5 + i * 0.7) * 0.2
+                 + Math.sin(tLag * freq * 0.15 + i) * 0.08;
+      const a = baseAngle + sway;
+      // length pulses with the flower's breath
+      const breath = 1 + Math.sin(tLag * skelPulse) * 0.08;
+      const len = R * 0.9 * breath * (1 + Math.sin(tLag * skelPulse + i * 0.5) * 0.04);
+
+      // per-rib hue varies slightly around the base skeleton hue
+      const ribHue = (skelHue + i * 8 + Math.sin(tLag + i) * 20) % 360;
+
+      // main rib — sinuous, organic curve linked to flower's wave params
+      target.beginPath();
+      const segs = 60;
+      for (let s = 0; s <= segs; s++) {
+        const k = s / segs;
+        const wobble = Math.sin(k * freq + tLag * 1.2 + i) * 0.18 * k
+                     + Math.sin(k * (freq * 2) - tLag * 0.7 + i * 2) * 0.06 * k
+                     + Math.cos(k * 3 + tLag + i) * 0.04;
+        const ang = a + wobble;
+        const r = len * k * (1 + Math.sin(k * 8 + tLag + i) * 0.03);
+        const x = Math.cos(ang) * r;
+        const y = Math.sin(ang) * r;
+        if (s === 0) target.moveTo(x, y);
+        else target.lineTo(x, y);
+      }
+      target.strokeStyle = `hsla(${ribHue}, 80%, 88%, ${0.85 * alphaMul})`;
+      target.lineWidth = 1.6;
+      target.stroke();
+      target.strokeStyle = `hsla(${ribHue}, 95%, 65%, ${0.3 * alphaMul})`;
+      target.lineWidth = 3.5;
+      target.stroke();
+
+      // cilia along the rib — small hairs perpendicular to the curve
+      const ciliaCount = 50;
+      target.lineWidth = 1.1;
+      for (let c = 1; c < ciliaCount; c++) {
+        const k = c / ciliaCount;
+        const wobble = Math.sin(k * freq + tLag * 1.2 + i) * 0.18 * k
+                     + Math.sin(k * (freq * 2) - tLag * 0.7 + i * 2) * 0.06 * k
+                     + Math.cos(k * 3 + tLag + i) * 0.04;
+        const ang = a + wobble;
+        const r = len * k;
+        const px = Math.cos(ang) * r;
+        const py = Math.sin(ang) * r;
+
+        const dk = 0.01;
+        const wobble2 = Math.sin((k + dk) * freq + tLag * 1.2 + i) * 0.18 * (k + dk)
+                      + Math.sin((k + dk) * (freq * 2) - tLag * 0.7 + i * 2) * 0.06 * (k + dk)
+                      + Math.cos((k + dk) * 3 + tLag + i) * 0.04;
+        const ang2 = a + wobble2;
+        const r2 = len * (k + dk);
+        const tx = Math.cos(ang2) * r2 - px;
+        const ty = Math.sin(ang2) * r2 - py;
+        const tlen = Math.hypot(tx, ty) || 1;
+        const nx = -ty / tlen;
+        const ny = tx / tlen;
+
+        const flowerWave = Math.cos(ang * ribs + tLag * skelTwist) * 0.35
+                         + Math.sin(ang * freq - tLag + k * 3) * 0.18;
+        const cLen = R * 0.13 * (0.4 + Math.sin(k * Math.PI) * 0.6)
+                   * (0.7 + flowerWave * 0.4 + Math.sin(tLag * 1.5 + c + i * 0.7) * 0.2);
+        const sway2 = Math.sin(tLag * 2 + c * 0.5 + i) * 0.4;
+
+        // cilia hue shifts along the rib for a gradient effect
+        const cHue = (ribHue + k * 40 + c * 2) % 360;
+
+        for (let side = -1; side <= 1; side += 2) {
+          const ex = px + (nx * side + tx / tlen * sway2) * cLen;
+          const ey = py + (ny * side + ty / tlen * sway2) * cLen;
+          target.beginPath();
+          target.moveTo(px, py);
+          target.lineTo(ex, ey);
+          target.strokeStyle = `hsla(${cHue}, 75%, 85%, ${0.9 * alphaMul})`;
+          target.lineWidth = 1.1;
+          target.stroke();
+          target.fillStyle = `hsla(${cHue}, 95%, 75%, ${0.95 * alphaMul})`;
+          target.beginPath();
+          target.arc(ex, ey, 0.9, 0, Math.PI * 2);
+          target.fill();
+        }
+      }
+
+      // recursive-feeling branches — multiple per rib at varying positions
+      const branchCount = 7;
+      for (let b = 1; b <= branchCount; b++) {
+        const k = b / (branchCount + 1);
+        const wobble = Math.sin(k * freq + tLag * 1.2 + i) * 0.18 * k
+                     + Math.sin(k * (freq * 2) - tLag * 0.7 + i * 2) * 0.06 * k
+                     + Math.cos(k * 3 + tLag + i) * 0.04;
+        const ang = a + wobble;
+        const r = len * k;
+        const px = Math.cos(ang) * r;
+        const py = Math.sin(ang) * r;
+
+        const side = (b % 2 === 0 ? 1 : -1);
+        const branchLen = R * (0.18 * (1 - k) + 0.04) * (0.7 + Math.sin(tLag * skelPulse + b + i) * 0.3);
+        const branchAng = ang + side * (Math.PI / 2 - 0.4) + Math.sin(tLag * 0.6 + b + i * 1.7) * 0.5;
+
+        const bHue = (ribHue + k * 30 + b * 5) % 360;
+
+        target.beginPath();
+        const bsegs = 12;
+        for (let s = 0; s <= bsegs; s++) {
+          const bk = s / bsegs;
+          const bw = Math.sin(bk * 4 + tLag + b + i) * 0.25;
+          const ba = branchAng + bw * bk;
+          const br = branchLen * bk;
+          const bx = px + Math.cos(ba) * br;
+          const by = py + Math.sin(ba) * br;
+          if (s === 0) target.moveTo(bx, by);
+          else target.lineTo(bx, by);
+        }
+        target.strokeStyle = `hsla(${bHue}, 80%, 80%, ${0.55 * alphaMul * (1 - k * 0.5)})`;
+        target.lineWidth = 0.9;
+        target.stroke();
+
+        if (b % 2 === 0 && k < 0.7) {
+          const twigEndX = px + Math.cos(branchAng) * branchLen;
+          const twigEndY = py + Math.sin(branchAng) * branchLen;
+          for (let tw = 0; tw < 2; tw++) {
+            const twAng = branchAng + (tw === 0 ? 0.6 : -0.6) + Math.sin(tLag + b + tw) * 0.3;
+            const twLen = branchLen * 0.4;
+            target.beginPath();
+            target.moveTo(twigEndX, twigEndY);
+            target.lineTo(twigEndX + Math.cos(twAng) * twLen, twigEndY + Math.sin(twAng) * twLen);
+            target.strokeStyle = `hsla(${bHue}, 70%, 80%, ${0.35 * alphaMul})`;
+            target.lineWidth = 0.6;
+            target.stroke();
+          }
+        }
+      }
+    }
+  }
+
+  const ribsA = cur.petals;
+  const ribsB = nxt.petals;
+  if (ribsA === ribsB) {
+    drawSkeleton(ribsA, 1);
+  } else {
+    drawSkeleton(ribsA, 1 - m);
+    drawSkeleton(ribsB, m);
+  }
+
+  target.restore();
+}
+
+function draw() {
+  t += 0.004;
+
+  // 1. draw flower into offscreen buffer
+  drawFlower(bctx);
+
+  // 2. deep ocean gradient background
+  const grd = ctx.createRadialGradient(cx, cy * 0.3, R * 0.05, cx, cy, R * 1.6);
+  grd.addColorStop(0, '#1a8fb8');
+  grd.addColorStop(0.4, '#0a5078');
+  grd.addColorStop(0.8, '#03253d');
+  grd.addColorStop(1, '#000812');
+  ctx.fillStyle = grd;
+  ctx.fillRect(0, 0, W, H);
+
+  // 3. god rays from above
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+  for (let i = 0; i < 8; i++) {
+    const phase = t * 0.3 + i * 0.9;
+    const xTop = cx + Math.sin(phase) * W * 0.4 + (i - 4) * 60;
+    const xBot = xTop + Math.sin(phase * 1.5) * 80;
+    const w = 40 + Math.sin(t + i) * 20;
+    const g = ctx.createLinearGradient(xTop, 0, xBot, H);
+    const a = 0.1 + Math.sin(t * 0.7 + i) * 0.05;
+    g.addColorStop(0, `rgba(160, 220, 255, ${a})`);
+    g.addColorStop(1, 'rgba(100, 180, 220, 0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(xTop - w, 0);
+    ctx.lineTo(xTop + w, 0);
+    ctx.lineTo(xBot + w * 1.8, H);
+    ctx.lineTo(xBot - w * 1.8, H);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // 4. warp flower onto a hemisphere (fish-eye / dome projection)
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+  const sliceH = 1;
+  for (let y = 0; y < H; y += sliceH) {
+    const v = (y - cy) / R;
+    if (Math.abs(v) > 1) continue;
+    const hw = Math.sqrt(1 - v * v) * R;
+    const ny = y / H;
+    const dx = Math.sin(ny * 18 + t * 1.6) * 8
+             + Math.sin(ny * 7 - t * 0.9) * 12;
+    const dy = Math.cos(ny * 12 + t * 1.1) * 3;
+    // overlap by 1px to avoid gaps
+    ctx.drawImage(
+      buf,
+      0, y, W, sliceH,
+      cx - hw + dx, y + dy, hw * 2, sliceH + 1
+    );
+  }
+  ctx.restore();
+
+  // 4b. spherical shading — darken edges, highlight top-left
+  ctx.save();
+  ctx.globalCompositeOperation = 'multiply';
+  const shade = ctx.createRadialGradient(cx - R * 0.25, cy - R * 0.25, R * 0.1, cx, cy, R);
+  shade.addColorStop(0, 'rgba(255,255,255,1)');
+  shade.addColorStop(0.7, 'rgba(120,140,170,1)');
+  shade.addColorStop(1, 'rgba(20,30,50,1)');
+  ctx.fillStyle = shade;
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  // 4c. specular highlight — glassy sphere look
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+  const spec = ctx.createRadialGradient(cx - R * 0.35, cy - R * 0.4, 0, cx - R * 0.35, cy - R * 0.4, R * 0.5);
+  spec.addColorStop(0, 'rgba(255,255,255,0.35)');
+  spec.addColorStop(0.5, 'rgba(200,230,255,0.08)');
+  spec.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = spec;
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  // 4d. sphere outline rim
+  ctx.save();
+  ctx.strokeStyle = 'rgba(180,220,255,0.15)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+
+  // 5. caustic light shimmer
+
+  // 6. floating particles drifting up
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+  for (let i = 0; i < 50; i++) {
+    const sx = (i * 97.3) % W;
+    const baseY = (i * 53.1) % H;
+    const x = sx + Math.sin(t * 0.3 + i) * 20;
+    const yRaw = baseY - (t * 12 + i * 7) % (H + 50);
+    const y = ((yRaw % H) + H) % H;
+    ctx.fillStyle = `rgba(220, 240, 255, ${0.25 + Math.sin(t + i) * 0.15})`;
+    ctx.beginPath();
+    ctx.arc(x, y, 0.8 + (i % 3) * 0.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // 7. blue depth tint
+  ctx.save();
+  ctx.globalCompositeOperation = 'overlay';
+  ctx.fillStyle = 'rgba(20, 80, 140, 0.18)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.restore();
+
+  // 8. vignette
+  const vg = ctx.createRadialGradient(cx, cy, R * 0.5, cx, cy, Math.max(W, H) * 0.75);
+  vg.addColorStop(0, 'rgba(0,0,0,0)');
+  vg.addColorStop(0.6, 'rgba(0,0,0,0.4)');
+  vg.addColorStop(1, 'rgba(0,0,0,0.95)');
+  ctx.fillStyle = vg;
+  ctx.fillRect(0, 0, W, H);
+
+  requestAnimationFrame(draw);
+}
+
+draw();
+</script>
+</body>
+</html>

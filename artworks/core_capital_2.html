@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+  body { margin: 0; display: flex; justify-content: center; align-items: center; height: 100vh; background: #0a0a0a; }
+  .box {
+    width: min(90vw, 90vh);
+    height: min(90vw, 90vh);
+    max-width: 640px;
+    max-height: 640px;
+    background: #111;
+    border-radius: 16px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+  canvas { width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<div class="box">
+  <canvas id="c"></canvas>
+</div>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const S = 640;
+const dpr = window.devicePixelRatio || 1;
+canvas.width = S * dpr;
+canvas.height = S * dpr;
+ctx.scale(dpr, dpr);
+
+const rand = (a, b) => a + Math.random() * (b - a);
+
+// Apple path
+const applePath = new Path2D();
+applePath.addPath(new Path2D("M494.782 340.02c-.803-81.025 66.084-119.907 69.072-121.832-37.595-54.993-96.167-62.552-117.037-63.402-49.843-5.032-97.242 29.362-122.565 29.362-25.253 0-64.277-28.607-105.604-27.85-54.32.803-104.4 31.594-132.403 80.245C29.81 334.457 71.81 479.58 126.816 558.976c26.87 38.882 58.914 82.56 100.997 81 40.512-1.594 55.843-26.244 104.848-26.244 48.993 0 62.753 26.245 105.64 25.406 43.606-.803 71.232-39.638 97.925-78.65 30.887-45.12 43.548-88.75 44.316-90.994-.969-.437-85.029-32.634-85.879-129.439l.118-.035z"));
+applePath.addPath(new Path2D("M414.23 102.178C436.553 75.095 451.636 37.5 447.514-.024c-32.162 1.311-71.163 21.437-94.253 48.485-20.729 24.012-38.836 62.28-33.993 99.036 35.918 2.8 72.591-18.248 94.926-45.272l.036-.047z"));
+
+// Dollar bill drawing
+function drawDollar(c) {
+  c.beginPath();
+  c.rect(0, 0, 122.88, 63.89);
+  c.moveTo(20.54, 9.73); c.lineTo(102.24, 9.73);
+  c.bezierCurveTo(102.24, 14.93, 106.48, 19.17, 111.68, 19.17);
+  c.lineTo(111.68, 44.42);
+  c.bezierCurveTo(106.48, 44.42, 102.24, 48.66, 102.24, 53.86);
+  c.lineTo(20.54, 53.86);
+  c.bezierCurveTo(20.54, 48.66, 16.3, 44.42, 11.1, 44.42);
+  c.lineTo(11.1, 19.17);
+  c.bezierCurveTo(16.3, 19.17, 20.54, 14.93, 20.54, 9.73); c.closePath();
+  c.moveTo(80.26, 31.96); c.arc(61.46, 31.96, 18.8, 0, Math.PI * 2);
+  c.moveTo(63.78, 36.83);
+  c.bezierCurveTo(63.78, 36.09, 63.6, 35.5, 63.23, 35.1);
+  c.bezierCurveTo(62.86, 34.69, 62.23, 34.29, 61.31, 33.92);
+  c.bezierCurveTo(60.39, 33.55, 59.54, 33.18, 58.77, 32.78);
+  c.bezierCurveTo(58, 32.41, 57.33, 31.93, 56.74, 31.45);
+  c.bezierCurveTo(56.19, 30.93, 55.74, 30.34, 55.45, 29.68);
+  c.bezierCurveTo(55.16, 29.02, 55.01, 28.21, 55.01, 27.25);
+  c.bezierCurveTo(55.01, 25.66, 55.53, 24.37, 56.6, 23.34);
+  c.bezierCurveTo(57.67, 22.31, 59.11, 21.72, 60.88, 21.53);
+  c.lineTo(60.88, 19.39); c.lineTo(63.13, 19.39); c.lineTo(63.13, 21.57);
+  c.bezierCurveTo(64.83, 21.83, 66.19, 22.53, 67.19, 23.67);
+  c.bezierCurveTo(68.19, 24.81, 68.66, 26.19, 68.66, 27.96);
+  c.lineTo(63.9, 27.96);
+  c.bezierCurveTo(63.9, 27, 63.72, 26.23, 63.35, 25.71);
+  c.bezierCurveTo(62.98, 25.19, 62.43, 24.94, 61.76, 24.94);
+  c.bezierCurveTo(61.13, 24.94, 60.65, 25.12, 60.32, 25.53);
+  c.bezierCurveTo(59.99, 25.94, 59.8, 26.45, 59.8, 27.15);
+  c.bezierCurveTo(59.8, 27.85, 59.98, 28.4, 60.39, 28.81);
+  c.bezierCurveTo(60.8, 29.22, 61.42, 29.62, 62.27, 29.99);
+  c.bezierCurveTo(63.15, 30.36, 63.97, 30.73, 64.74, 31.13);
+  c.bezierCurveTo(65.51, 31.54, 66.18, 31.98, 66.73, 32.49);
+  c.bezierCurveTo(67.28, 33, 67.73, 33.6, 68.06, 34.26);
+  c.bezierCurveTo(68.39, 34.92, 68.54, 35.73, 68.54, 36.69);
+  c.bezierCurveTo(68.54, 38.28, 68.02, 39.6, 67.03, 40.6);
+  c.bezierCurveTo(66, 41.6, 64.63, 42.19, 62.86, 42.37);
+  c.lineTo(62.86, 44.36); c.lineTo(60.61, 44.36); c.lineTo(60.61, 42.37);
+  c.bezierCurveTo(58.58, 42.15, 57, 41.45, 55.89, 40.27);
+  c.bezierCurveTo(54.78, 39.09, 54.23, 37.5, 54.23, 35.69);
+  c.lineTo(58.99, 35.69);
+  c.bezierCurveTo(58.99, 36.76, 59.21, 37.57, 59.69, 38.12);
+  c.bezierCurveTo(60.17, 38.67, 60.83, 38.97, 61.72, 38.97);
+  c.bezierCurveTo(62.35, 38.97, 62.86, 38.79, 63.23, 38.42);
+  c.bezierCurveTo(63.6, 38.05, 63.78, 37.54, 63.78, 36.87); c.closePath();
+  c.fill("evenodd");
+}
+
+// Pre-render bill variants to cache (no per-frame drawDollar)
+const VARIANTS = 8;
+const billCache = [];
+for (let v = 0; v < VARIANTS; v++) {
+  const oc = document.createElement('canvas');
+  oc.width = 124; oc.height = 65;
+  const oc2 = oc.getContext('2d');
+  const darkness = v / (VARIANTS - 1); // 0=darkest, 1=brightest
+  const bg = Math.floor(120 + darkness * 117);
+  const gr = Math.floor(15 + darkness * 27);
+  const gg = Math.floor(35 + darkness * 57);
+  const gb = Math.floor(20 + darkness * 38);
+  oc2.fillStyle = `rgb(${bg},${bg - 8},${bg - 25})`;
+  oc2.fillRect(0, 0, 122.88, 63.89);
+  oc2.fillStyle = `rgb(${gr},${gg},${gb})`;
+  drawDollar(oc2);
+  billCache.push(oc);
+}
+
+// Flag-wave bill renderer (using cached bill)
+function drawBillFlag(c, b, t) {
+  const src = billCache[b.variant];
+  const w = 122.88 * b.scale;
+  const h = 63.89 * b.scale;
+  const slices = 10;
+  const sliceW = w / slices;
+  const amp = 4 + b.scale * 6;
+  const phase = t * 0.003 + b.wobbleOff;
+
+  c.save();
+  c.translate(b.x, b.y);
+  c.rotate(b.rot);
+  c.globalAlpha = 1;
+  for (let i = 0; i < slices; i++) {
+    const sx = (i / slices) * 122.88;
+    const sw = 122.88 / slices + 1;
+    const dy = Math.sin(phase + i * 0.15) * amp;
+    c.drawImage(src, sx, 0, sw, 65,
+      -w / 2 + i * sliceW, -h / 2 + dy, sliceW + 1, h);
+  }
+  c.restore();
+}
+
+// Plasma via fast gradient blobs (no pixel loop)
+const blobCount = 6;
+const blobs = [];
+for (let i = 0; i < blobCount; i++) {
+  blobs.push({
+    cx: rand(100, 540), cy: rand(100, 540),
+    r: rand(120, 250),
+    sx: rand(0.5, 1.5), sy: rand(0.5, 1.5),
+    ox: rand(0, Math.PI * 2), oy: rand(0, Math.PI * 2),
+    color: i < 3
+      ? `rgba(${Math.floor(rand(180,255))},${Math.floor(rand(40,100))},0,0.35)`
+      : `rgba(0,${Math.floor(rand(80,180))},${Math.floor(rand(20,60))},0.3)`,
+  });
+}
+
+const pC = document.createElement('canvas');
+pC.width = S; pC.height = S;
+const pCtx = pC.getContext('2d');
+
+function drawPlasma(t) {
+  pCtx.fillStyle = '#0a0f00';
+  pCtx.fillRect(0, 0, S, S);
+  const T = t * 0.001;
+  for (const b of blobs) {
+    const x = b.cx + Math.sin(T * b.sx + b.ox) * 150;
+    const y = b.cy + Math.cos(T * b.sy + b.oy) * 120;
+    const g = pCtx.createRadialGradient(x, y, 0, x, y, b.r);
+    g.addColorStop(0, b.color);
+    g.addColorStop(1, 'transparent');
+    pCtx.fillStyle = g;
+    pCtx.fillRect(0, 0, S, S);
+  }
+  // Fire rise overlay
+  const fy = 300 + Math.sin(T * 2) * 80;
+  const fg = pCtx.createLinearGradient(0, S, 0, fy);
+  fg.addColorStop(0, 'rgba(255,80,0,0.4)');
+  fg.addColorStop(0.4, 'rgba(255,160,0,0.2)');
+  fg.addColorStop(1, 'transparent');
+  pCtx.fillStyle = fg;
+  pCtx.fillRect(0, 0, S, S);
+}
+
+// Bills
+const NUM = 100;
+const bills = [];
+for (let i = 0; i < NUM; i++) {
+  bills.push({
+    x: rand(40, 600), y: rand(-200, 700),
+    scale: rand(0.3, 0.7),
+    rot: rand(-Math.PI, Math.PI),
+    speed: rand(0.3, 1.2),
+    drift: rand(-0.4, 0.4),
+    wobble: rand(0.5, 2),
+    wobbleOff: rand(0, Math.PI * 2),
+    alpha: rand(0.4, 0.95),
+    variant: 0, flip: 0,
+  });
+}
+// Assign variant by scale (small=dark=background, big=bright=foreground)
+bills.sort((a, b) => a.scale - b.scale);
+for (let i = 0; i < bills.length; i++) {
+  bills[i].variant = Math.floor((i / bills.length) * VARIANTS);
+}
+
+// Scanline pattern (pre-rendered)
+const slC = document.createElement('canvas');
+slC.width = S; slC.height = S;
+const slCtx = slC.getContext('2d');
+slCtx.fillStyle = 'rgba(0,0,0,0.15)';
+for (let y = 0; y < S; y += 8) slCtx.fillRect(0, y, S, 4);
+
+// Classic Apple rainbow stripes (behind apple)
+const appleColors = ['#61BB46','#FDB827','#F5821F','#E03A3E','#963D97','#009DDC'];
+
+function drawRainbowBg() {
+  const stripeH = S / appleColors.length;
+  for (let i = 0; i < appleColors.length; i++) {
+    ctx.fillStyle = appleColors[i];
+    ctx.fillRect(0, i * stripeH, S, stripeH + 1);
+  }
+}
+
+// Main loop
+function draw(t) {
+  ctx.clearRect(0, 0, S, S);
+
+  // Rainbow bg behind apple
+  ctx.save();
+  ctx.globalAlpha = 0.25;
+  drawRainbowBg();
+  ctx.restore();
+
+  drawPlasma(t);
+  ctx.save();
+  ctx.clip(applePath);
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.drawImage(pC, 0, 0);
+  ctx.globalCompositeOperation = 'source-over';
+  // Glow pass
+  ctx.filter = 'blur(8px)';
+  ctx.globalAlpha = 0.2;
+  ctx.drawImage(pC, 0, 0);
+  ctx.filter = 'none';
+  ctx.globalAlpha = 1;
+
+  for (let b of bills) {
+    b.y -= b.speed * (0.5 + b.scale);
+    const wind = Math.sin(b.y * 0.01 + t * 0.001) * 0.6;
+    b.x += (b.drift + Math.sin(t * 0.0015 * b.wobble + b.wobbleOff) * 0.5) * (0.5 + b.scale) + wind;
+    if (Math.random() < 0.002) b.flip = Math.PI;
+    if (b.flip) { b.rot += 0.02; b.flip -= 0.02; if (b.flip <= 0) b.flip = 0; }
+    else b.rot += 0.001 * Math.sin(t * 0.001 + b.wobbleOff);
+    if (b.y < -80) { b.y = rand(680, 800); b.x = rand(60, 580); }
+    drawBillFlag(ctx, b, t);
+  }
+
+  ctx.drawImage(slC, 0, 0);
+
+  // Vignette
+  const vig = ctx.createRadialGradient(320, 320, 100, 320, 320, 380);
+  vig.addColorStop(0, 'rgba(0,0,0,0)');
+  vig.addColorStop(1, 'rgba(0,0,0,0.6)');
+  ctx.fillStyle = vig;
+  ctx.fillRect(0, 0, S, S);
+  ctx.restore();
+
+  // Chromatic aberration
+  ctx.save(); ctx.globalAlpha = 0.3;
+  ctx.strokeStyle = 'rgba(255,0,80,0.4)'; ctx.lineWidth = 1.5;
+  ctx.translate(-1.5, 0); ctx.stroke(applePath); ctx.restore();
+
+  ctx.save(); ctx.globalAlpha = 0.3;
+  ctx.strokeStyle = 'rgba(0,200,255,0.4)'; ctx.lineWidth = 1.5;
+  ctx.translate(1.5, 0); ctx.stroke(applePath); ctx.restore();
+
+  // Main outline
+  ctx.save();
+  ctx.strokeStyle = '#000'; ctx.lineWidth = 3;
+  ctx.stroke(applePath); ctx.restore();
+
+  requestAnimationFrame(draw);
+}
+
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>

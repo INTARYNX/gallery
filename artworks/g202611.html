@@ -1,0 +1,106 @@
+<!doctype html>
+<canvas id=c></canvas>
+
+<script>
+document.body.innerHTML='<canvas id=c></canvas><canvas id=b style="display:none"></canvas>';
+document.head.innerHTML='<style>*{margin:0;padding:0}body{display:flex;align-items:center;justify-content:center;min-height:100vh;background:#000}#c{border:2px solid #67b6bd}</style>';
+
+const g=c.getContext('2d');
+const bg=b.getContext('2d');
+
+const C64=['#000','#883932','#67b6bd','#8b3f96','#55a049',
+           '#40318d','#bfce72','#8b5429','#574200','#b86962',
+           '#505050','#787878','#94e089','#7869c4','#9f9f9f'];
+
+const s=`document.body.innerHTML='<canvas id=c></canvas><canvas id=b style="display:none"></canvas>';
+document.head.innerHTML='<style>*{margin:0;padding:0}body{display:flex;align-items:center;justify-content:center;min-height:100vh;background:#000}#c{border:2px solid #67b6bd}</style>';
+const g=c.getContext('2d');
+const bg=b.getContext('2d');
+const C64=['#000','#883932','#67b6bd','#8b3f96','#55a049',
+           '#40318d','#bfce72','#8b5429','#574200','#b86962',
+           '#505050','#787878','#94e089','#7869c4','#9f9f9f'];
+const s=%q;
+init(s.replace('%q',\`\\\`\${s}\\\`\`));
+`;
+
+function init(code){
+ const tok=code.match(/\/\*[\s\S]*?\*\/|\/\/.*|'(?:\\.|[^'])*'|"(?:\\.|[^"])*"|\`(?:\\.|[^\`])*\`|\b\d+\.?\d*\b|\b[a-zA-Z_$][a-zA-Z0-9_$]*\b|[{}()[\];,.]|[+\-*\/%=<>!&|^~?:]+|\s+|./g)||[];
+ const tokens=tok.map(tk=>{
+  let color='#fff';
+  if(/^['"`]/.test(tk))color=C64[12];
+  else if(/^\d/.test(tk))color=C64[6];
+  else if(/^(const|let|var|if|for|return|function|class|new|this|while|do|switch|case|break|continue|try|catch|throw|async|await|yield|import|export|default|from|as|of|in|instanceof|typeof|void|delete|with|debugger|finally|extends|super|static|get|set)$/.test(tk))color=C64[13];
+  else if(/^[+\-*\/%=<>!&|^~?:]+$/.test(tk))color=C64[7];
+  return{text:tk,color};
+ });
+ 
+ let time=0;
+ 
+ function resize(){
+  const size=Math.min(innerWidth,innerHeight)*0.9;
+  c.width=size;c.height=size;
+  
+  let totalWidth=0;
+  for(const tk of tokens){
+   totalWidth+=tk.text.length*30;
+  }
+  b.width=Math.min(totalWidth,32767);b.height=120;
+  
+  bg.clearRect(0,0,b.width,b.height);
+  bg.font='bold 48px "Courier New",monospace';
+  bg.textBaseline='middle';
+  let x=0;
+  for(const tk of tokens){
+   bg.fillStyle=tk.color;
+   for(const ch of tk.text){
+    if(x<b.width){
+     bg.fillText(ch,x,b.height/2);
+    }
+    x+=30;
+   }
+  }
+ }
+ 
+ function draw(){
+  const midY=c.height/2;
+  g.fillStyle=C64[0];
+  g.fillRect(0,0,c.width,c.height);
+  g.globalAlpha=0.85;
+  for(let i=0;i<8;i++){
+   const h=Math.sin(time*0.05+i)*30+40;
+   g.fillStyle=C64[(i+(time>>5))%6];
+   g.fillRect(0,i*60+20,c.width,h);
+  }
+  g.globalAlpha=1;
+  for(let x=0;x<c.width;x+=2){
+   const sinePhase=x*0.008+time*0.05;
+   const rotAngle=sinePhase*2;
+   const scale=Math.cos(rotAngle);
+   const sourceX=(x+time)%b.width;
+   const destHeight=b.height*Math.abs(scale);
+   const wave=Math.sin(sinePhase)*100;
+   const brightness=Math.abs(scale);
+   g.globalAlpha=0.7+brightness*0.3;
+   if(scale<0){
+    const destY=midY+wave-destHeight/2;
+    g.save();
+    g.translate(x,destY+destHeight/2);
+    g.scale(1,-1);
+    g.drawImage(b,sourceX,0,2,b.height,0,-destHeight/2,2,destHeight);
+    g.restore();
+   }else{
+    const destY=midY+wave-destHeight/2;
+    g.drawImage(b,sourceX,0,2,b.height,x,destY,2,destHeight);
+   }
+  }
+  g.globalAlpha=1;time++;
+  requestAnimationFrame(draw);
+ }
+ 
+ addEventListener('resize',resize);
+ resize();
+ requestAnimationFrame(draw);
+}
+
+init(s.replace('%q',`\`${s}\``));
+</script>

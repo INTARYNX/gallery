@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Genuary 2026 #3</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: #000;
+            padding: 20px;
+        }
+        canvas {
+            max-width: 100%;
+            max-height: 100vh;
+            width: auto;
+            height: auto;
+            aspect-ratio: 4 / 3;
+            border: 2px solid #333;
+            border-radius: 8px;
+            image-rendering: pixelated;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 1200;
+        canvas.height = 900;
+
+        const centerX = 600;
+        const centerY = 520;
+        const phi = (1 + Math.sqrt(5)) / 2; // Golden ratio: 1.618...
+        const goldenAngle = 2 * Math.PI / (phi * phi); // ~137.5° - Phyllotaxis angle
+        let time = 0;
+        let barOffset = 0;
+        let vSyncOffset = 0;
+        let noisePhase = 0;
+        
+        // Fibonacci sequence for visual rhythm
+        const fib = [1, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89];
+        
+        function drawTestPattern() {
+            // Fond vintage coloré
+            const bgGradient = ctx.createRadialGradient(600, 520, 0, 600, 520, 600);
+            bgGradient.addColorStop(0, '#2a1a1a');
+            bgGradient.addColorStop(0.5, '#1a1510');
+            bgGradient.addColorStop(1, '#0a0a08');
+            ctx.fillStyle = bgGradient;
+            ctx.fillRect(0, 0, 1200, 900);
+            
+            // Bandes de couleur TV (largeur selon Fibonacci)
+            const colors = ['#fff', '#ff0', '#0ff', '#0f0', '#f0f', '#f00', '#00f', '#000'];
+            const fibWidths = [1, 1, 2, 3, 5, 8, 13, 21]; // Fibonacci pour les largeurs
+            const totalFib = fibWidths.reduce((a, b) => a + b, 0);
+            const baseWidth = 1200 / totalFib;
+            
+            let xPos = 0;
+            colors.forEach((color, i) => {
+                const barWidth = fibWidths[i] * baseWidth;
+                ctx.fillStyle = color;
+                ctx.fillRect(xPos, 0, barWidth, 150);
+                xPos += barWidth;
+            });
+            
+            // Texte mire
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 24px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText('FIBONACCI PHYLLOTAXIS - φ = 1.618', 600, 100);
+            
+            // Grille
+            const gridFlicker = 0.2 + Math.random() * 0.1;
+            ctx.strokeStyle = `rgba(255, 255, 255, ${gridFlicker})`;
+            ctx.lineWidth = 1;
+            for (let i = 0; i < 1200; i += 50) {
+                ctx.beginPath();
+                ctx.moveTo(i, 150);
+                ctx.lineTo(i, 900);
+                ctx.stroke();
+            }
+            for (let i = 0; i < 900; i += 50) {
+                ctx.beginPath();
+                ctx.moveTo(0, i);
+                ctx.lineTo(1200, i);
+                ctx.stroke();
+            }
+            
+            // Cercle concentrique
+            const circleFlicker = 0.25 + Math.random() * 0.15;
+            ctx.strokeStyle = `rgba(255, 255, 255, ${circleFlicker})`;
+            for (let r = 50; r < 400; r += 50) {
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, r, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+        }
+        
+        function draw() {
+            drawTestPattern();
+            
+            // Légère instabilité verticale
+            vSyncOffset = Math.sin(time * 0.02) * 2;
+            ctx.save();
+            ctx.translate(0, vSyncOffset);
+            
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+            ctx.fillRect(0, 150, 1200, 750);
+            
+            // Draw spiral using golden angle phyllotaxis (sunflower pattern)
+            for (let i = 0; i < 1000; i++) {
+                const angle = i * goldenAngle; // Each point rotated by ~137.5°
+                const radius = Math.sqrt(i) * 10; // Fermat's spiral
+                const x = centerX + radius * Math.cos(angle);
+                const y = centerY + radius * Math.sin(angle);
+                
+                // Size modulated by Fibonacci sequence
+                const fibMod = fib[i % fib.length];
+                const size = 1.5 + (fibMod * 0.12) + i * 0.0025;
+                
+                const hue = (200 + i * 0.3 + time) % 360;
+                const brightness = 45 + Math.sin(i * 0.1 + time * 0.05) * 25;
+                
+                // Couleurs RGB basiques
+                const colorIndex = Math.floor((i + time * 2) / 200) % 3;
+                let r, g, b;
+                if (colorIndex === 0) { // Rouge
+                    r = 255; g = brightness * 0.5; b = brightness * 0.5;
+                } else if (colorIndex === 1) { // Vert
+                    r = brightness * 0.5; g = 255; b = brightness * 0.5;
+                } else { // Bleu
+                    r = brightness * 0.5; g = brightness * 0.5; b = 255;
+                }
+                
+                // Glow vertical (effet CRT)
+                const grd = ctx.createLinearGradient(x, y - size * 2.5, x, y + size * 2.5);
+                grd.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0)`);
+                grd.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, 0.6)`);
+                grd.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+                
+                ctx.fillStyle = grd;
+                ctx.fillRect(x - size, y - size * 2.5, size * 2, size * 5);
+                
+                // Point central carré arrondi (phosphore CRT)
+                ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+                ctx.beginPath();
+                ctx.roundRect(x - size/2, y - size/2, size, size, size * 0.3);
+                ctx.fill();
+            }
+            
+            ctx.restore();
+            
+            // Scanlines réalistes
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
+            for (let y = 0; y < 900; y += 3) {
+                ctx.fillRect(0, y, 1200, 1);
+            }
+            
+            // Rolling bar plus réaliste
+            barOffset = (barOffset + 1.5) % 900;
+            const barY = barOffset;
+            const barGradient = ctx.createLinearGradient(0, barY - 80, 0, barY + 80);
+            barGradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
+            barGradient.addColorStop(0.3, 'rgba(50, 50, 50, 0.4)');
+            barGradient.addColorStop(0.5, 'rgba(80, 80, 80, 0.5)');
+            barGradient.addColorStop(0.7, 'rgba(50, 50, 50, 0.4)');
+            barGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            ctx.fillStyle = barGradient;
+            ctx.fillRect(0, barY - 80, 1200, 160);
+            
+            // Perte de signal par bandes
+            if (Math.random() < 0.015) {
+                const glitchY = Math.random() * 700 + 150;
+                const glitchHeight = 5 + Math.random() * 15;
+                
+                // Décalage horizontal
+                const imageData = ctx.getImageData(0, glitchY, 1200, glitchHeight);
+                const shift = (Math.random() - 0.5) * 40;
+                ctx.putImageData(imageData, shift, glitchY);
+                
+                // Barre de couleur parasite
+                ctx.fillStyle = `rgba(${Math.random()*100}, ${Math.random()*100}, ${Math.random()*100}, 0.3)`;
+                ctx.fillRect(0, glitchY, 1200, glitchHeight);
+            }
+            
+            // Bruit statique subtil
+            noisePhase += 0.1;
+            for (let i = 0; i < 100; i++) {
+                const nx = Math.random() * 1200;
+                const ny = Math.random() * 900;
+                const brightness = Math.random() * 150;
+                ctx.fillStyle = `rgba(${brightness}, ${brightness}, ${brightness}, ${Math.random() * 0.15})`;
+                ctx.fillRect(nx, ny, 1, 1);
+            }
+            
+            // Ghost image (image fantôme)
+            if (Math.random() < 0.01) {
+                ctx.globalAlpha = 0.15;
+                ctx.drawImage(canvas, 5, 0);
+                ctx.globalAlpha = 1;
+            }
+            
+            // Vignettage CRT
+            const vignette = ctx.createRadialGradient(600, 450, 200, 600, 450, 800);
+            vignette.addColorStop(0, 'rgba(0, 0, 0, 0)');
+            vignette.addColorStop(1, 'rgba(0, 0, 0, 0.4)');
+            ctx.fillStyle = vignette;
+            ctx.fillRect(0, 0, 1200, 900);
+            
+            // Flicker subtil (scintillement CRT)
+            if (Math.random() < 0.1) {
+                ctx.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.03})`;
+                ctx.fillRect(0, 0, 1200, 900);
+            }
+            
+            // Numéro de chaîne pixelisé
+            const channel = [
+                [0,1,1,1,0,
+                 1,0,0,0,1,
+                 1,0,0,0,1,
+                 1,0,0,0,1,
+                 1,0,0,0,1,
+                 1,0,0,0,1,
+                 0,1,1,1,0],
+                [1,1,1,1,0,
+                 0,0,0,0,1,
+                 0,0,0,0,1,
+                 0,1,1,1,0,
+                 0,0,0,0,1,
+                 0,0,0,0,1,
+                 1,1,1,1,0]
+            ];
+            
+            const pixelSize = 8;
+            const startX = 1050;
+            const startY = 30;
+            
+            // Chiffre 0 avec bave
+            for(let i = 0; i < channel[0].length; i++) {
+                if(channel[0][i]) {
+                    const px = startX + (i % 5) * pixelSize;
+                    const py = startY + Math.floor(i / 5) * pixelSize;
+                    
+                    // Bave verticale
+                    const glow = ctx.createLinearGradient(px, py, px, py + pixelSize * 3);
+                    glow.addColorStop(0, '#0f0');
+                    glow.addColorStop(0.6, 'rgba(0, 255, 0, 0.3)');
+                    glow.addColorStop(1, 'rgba(0, 255, 0, 0)');
+                    ctx.fillStyle = glow;
+                    ctx.fillRect(px, py, pixelSize - 1, pixelSize * 3);
+                    
+                    // Pixel principal
+                    ctx.fillStyle = '#0f0';
+                    ctx.fillRect(px, py, pixelSize - 1, pixelSize - 1);
+                }
+            }
+            
+            // Chiffre 8 avec bave
+            for(let i = 0; i < channel[1].length; i++) {
+                if(channel[1][i]) {
+                    const px = startX + 60 + (i % 5) * pixelSize;
+                    const py = startY + Math.floor(i / 5) * pixelSize;
+                    
+                    // Bave verticale
+                    const glow = ctx.createLinearGradient(px, py, px, py + pixelSize * 3);
+                    glow.addColorStop(0, '#0f0');
+                    glow.addColorStop(0.6, 'rgba(0, 255, 0, 0.3)');
+                    glow.addColorStop(1, 'rgba(0, 255, 0, 0)');
+                    ctx.fillStyle = glow;
+                    ctx.fillRect(px, py, pixelSize - 1, pixelSize * 3);
+                    
+                    // Pixel principal
+                    ctx.fillStyle = '#0f0';
+                    ctx.fillRect(px, py, pixelSize - 1, pixelSize - 1);
+                }
+            }
+            
+            time += 0.5;
+            requestAnimationFrame(draw);
+        }
+        
+        draw();
+
+    </script>
+</body>
+</html>

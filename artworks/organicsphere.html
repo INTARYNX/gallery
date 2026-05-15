@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Organic Sphere</title>
+    <style>
+        *{margin:0;padding:0}
+        body{background:#000;display:flex;justify-content:center;align-items:center;min-height:100vh;overflow:hidden}
+        canvas{display:block}
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+const canvas = document.getElementById('canvas');
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(55, window.innerWidth/window.innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setClearColor(0x000000);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+camera.position.z = 2.5;
+
+// Post-process targets
+const mainRT = new THREE.WebGLRenderTarget(1, 1, {type:THREE.HalfFloatType});
+const bloomRT1 = new THREE.WebGLRenderTarget(1, 1, {type:THREE.HalfFloatType});
+const bloomRT2 = new THREE.WebGLRenderTarget(1, 1, {type:THREE.HalfFloatType});
+const fsQuadGeo = new THREE.PlaneGeometry(2,2);
+const fsVert = `varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position,1.0);}`;
+
+const blurMat = (dir) => new THREE.ShaderMaterial({
+    uniforms:{tDiffuse:{value:null},dir:{value:dir},res:{value:new THREE.Vector2(256,256)}},
+    vertexShader:fsVert,
+    fragmentShader:`
+        uniform sampler2D tDiffuse;uniform vec2 dir,res;varying vec2 vUv;
+        void main(){
+            vec4 c=vec4(0.0);vec2 o=dir/res;
+            float w[5];w[0]=.227027;w[1]=.1945946;w[2]=.1216216;w[3]=.054054;w[4]=.016216;
+            c+=texture2D(tDiffuse,vUv)*w[0];
+            for(int i=1;i<5;i++){float f=float(i);c+=texture2D(tDiffuse,vUv+o*f)*w[i];c+=texture2D(tDiffuse,vUv-o*f)*w[i];}
+            gl_FragColor=c;
+        }`
+});
+const blurH=blurMat(new THREE.Vector2(1,0)), blurV=blurMat(new THREE.Vector2(0,1));
+
+const compositeMat = new THREE.ShaderMaterial({
+    uniforms:{tScene:{value:null},tBloom:{value:null},bloomStr:{value:0.55}},
+    vertexShader:fsVert,
+    fragmentShader:`
+        uniform sampler2D tScene,tBloom;uniform float bloomStr;varying vec2 vUv;
+        void main(){
+            vec3 b=texture2D(tScene,vUv).rgb;vec3 bl=texture2D(tBloom,vUv).rgb;
+            vec3 c=b+bl*bloomStr;
+            float ca=0.0018;
+            c.r=mix(c.r,texture2D(tScene,vUv+vec2(ca,0.)).r+texture2D(tBloom,vUv+vec2(ca,0.)).r*bloomStr,0.4);
+            c.b=mix(c.b,texture2D(tScene,vUv-vec2(ca,0.)).b+texture2D(tBloom,vUv-vec2(ca,0.)).b*bloomStr,0.4);
+            float vig=1.0-smoothstep(0.4,1.2,length(vUv-0.5)*1.7);
+            c*=vig;
+            gl_FragColor=vec4(c,1.0);
+        }`
+});
+const fsQuad = new THREE.Mesh(fsQuadGeo);
+const fsScene = new THREE.Scene(); fsScene.add(fsQuad);
+const fsCam = new THREE.OrthographicCamera(-1,1,1,-1,0,1);
+
+// Vertex shader with organic displacement
+const vertexShader = `
+    uniform float u_time;
+    varying vec2 vUv;varying vec3 vNormal,vViewDir,vPosition;
+    vec3 mod289(vec3 x){return x-floor(x/289.0)*289.0;}
+    vec4 mod289(vec4 x){return x-floor(x/289.0)*289.0;}
+    vec4 perm(vec4 x){return mod289(((x*34.0)+1.0)*x);}
+    float snoise(vec3 v){
+        const vec2 C=vec2(1./6.,1./3.);
+        vec3 i=floor(v+dot(v,C.yyy)),x0=v-i+dot(i,C.xxx);
+        vec3 g=step(x0.yzx,x0.xyz),l=1.0-g;
+        vec3 i1=min(g,l.zxy),i2=max(g,l.zxy);
+        vec3 x1=x0-i1+C.xxx,x2=x0-i2+C.yyy,x3=x0-0.5;
+        i=mod289(i);
+        vec4 p=perm(perm(perm(i.z+vec4(0,i1.z,i2.z,1))+i.y+vec4(0,i1.y,i2.y,1))+i.x+vec4(0,i1.x,i2.x,1));
+        vec4 j=p-49.0*floor(p/49.0);
+        vec4 x_=floor(j/7.0),y_=floor(j-7.0*x_);
+        vec4 x=x_/7.0-0.5+0.5/7.0,y=y_/7.0-0.5+0.5/7.0;
+        vec4 h=1.0-abs(x)-abs(y);
+        vec4 b0=vec4(x.xy,y.xy),b1=vec4(x.zw,y.zw);
+        vec4 s0=floor(b0)*2.0+1.0,s1=floor(b1)*2.0+1.0;
+        vec4 sh=-step(h,vec4(0));
+        vec4 a0=b0.xzyw+s0.xzyw*sh.xxyy,a1=b1.xzyw+s1.xzyw*sh.zzww;
+        vec3 p0=vec3(a0.xy,h.x),p1=vec3(a0.zw,h.y),p2=vec3(a1.xy,h.z),p3=vec3(a1.zw,h.w);
+        vec4 norm=1.79284291400159-0.85373472095314*vec4(dot(p0,p0),dot(p1,p1),dot(p2,p2),dot(p3,p3));
+        p0*=norm.x;p1*=norm.y;p2*=norm.z;p3*=norm.w;
+        vec4 m=max(0.6-vec4(dot(x0,x0),dot(x1,x1),dot(x2,x2),dot(x3,x3)),0.0);
+        m=m*m;
+        return 42.0*dot(m*m,vec4(dot(p0,x0),dot(p1,x1),dot(p2,x2),dot(p3,x3)));
+    }
+    void main(){
+        vUv=uv;vPosition=position;
+        float d=snoise(position*2.5+u_time*0.2)*0.06+snoise(position*5.0+10.0+u_time*0.15)*0.03+snoise(position*10.0+20.0)*0.015;
+        d+=sin(u_time*0.8)*0.015+sin(u_time*1.3)*0.008;
+        vec3 dp=position+normal*d;
+        vec4 wp=modelViewMatrix*vec4(dp,1.0);
+        vViewDir=normalize(-wp.xyz);
+        vNormal=normalize(normalMatrix*normal);
+        gl_Position=projectionMatrix*wp;
+    }
+`;
+
+const fragmentShader = `
+    uniform float u_time;
+    varying vec2 vUv;varying vec3 vNormal,vViewDir,vPosition;
+    const float PI=3.14159265;
+    float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+    float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x),f.y);}
+
+    void main(){
+        float u=fract(vUv.x*2.0),v=fract(vUv.y*2.0);
+        if(mod(floor(vUv.x*2.0),2.0)>0.5)u=1.0-u;
+        if(mod(floor(vUv.y*2.0),2.0)>0.5)v=1.0-v;
+        vec2 uv=(vec2(u,v)-0.5)*(1.0+sin(u_time*1.2)*0.03);
+
+        vec3 col=vec3(0.08+sin(u_time*0.3)*0.04,0.12+sin(u_time*0.3+2.09)*0.04,0.15+sin(u_time*0.3+4.18)*0.04);
+        col+=vec3(0.015)*sin(u_time*0.5+vUv.y*15.0);
+
+        float heightMap=0.0,totalPattern=0.0;
+        vec2 centers[18];float sizes[18];
+
+        for(int i=0;i<18;i++){
+            float fi=float(i),a=fi*2.399963,r=sqrt(fi/18.0)*0.6;
+            centers[i]=vec2(cos(a+u_time*0.15),sin(a+u_time*0.15))*r;
+            sizes[i]=0.04+hash(vec2(fi,0.0))*0.03;
+        }
+
+        for(int i=0;i<18;i++){
+            float fi=float(i);vec2 center=centers[i],p=uv-center;
+            float rot=u_time*0.3+fi*0.5+noise(center*3.0)*6.28;
+            p=mat2(cos(rot),-sin(rot),sin(rot),cos(rot))*p;
+            float sv=sizes[i],ar=1.0+hash(vec2(fi,1.0))*0.5;
+            vec2 sp=vec2(p.x/ar,p.y)/sv;
+            float dist=length(sp)+sin(atan(p.y,p.x)*5.0+u_time)*0.15;
+            float shape=smoothstep(1.2,0.8,dist);
+
+            float veins=0.0;
+            for(int j=0;j<5;j++){
+                float fj=float(j),va=fj*1.256+hash(vec2(fi,fj))*0.5;
+                vec2 vd=vec2(cos(va),sin(va));
+                float mv=abs(dot(p,vec2(-vd.y,vd.x))),vdist=length(p),vf=smoothstep(sv*1.5,0.0,vdist);
+                veins+=smoothstep(0.004,0.0,mv)*vf*0.3;
+                if(vdist>sv*0.3){float ba=va+0.6;vec2 bd=vec2(cos(ba),sin(ba));veins+=smoothstep(0.002,0.0,abs(dot(p,vec2(-bd.y,bd.x))))*vf*0.15;}
+            }
+            float rings=0.0;
+            for(int k=1;k<=4;k++){float rr=sv*float(k)*0.3;rings+=smoothstep(0.005,0.0,abs(dist*sv-rr+noise(p*15.0+u_time)*0.01))*0.15;}
+
+            float pattern=(shape*0.4+veins+rings)*(1.0-fi/25.0);
+            float hue=fi*0.15+u_time*0.4+noise(center)*0.3;
+            vec3 sc=vec3(0.3+sin(hue*6.28)*0.5,0.4+sin(hue*6.28+2.09)*0.4,0.5+sin(hue*6.28+4.18)*0.5);
+            sc+=vec3(0.3,0.1,0.05)*exp(-dist*3.0)*0.15;
+            heightMap+=pattern*0.1;totalPattern+=pattern;
+            col=mix(col,sc,pattern*0.6);
+        }
+
+        // Inter-scale veins with pulsing glow
+        for(int i=0;i<18;i++){for(int j=i+1;j<18;j++){
+            if(j>=18)break;
+            vec2 c1=centers[i],c2=centers[j];float db=length(c2-c1);
+            if(db<0.35){
+                vec2 d=normalize(c2-c1),pe=vec2(-d.y,d.x);
+                float av=dot(uv-c1,d),pd=abs(dot(uv-c1,pe));
+                if(av>0.0&&av<db){
+                    float vw=0.003+noise(c1+c2)*0.002,iv=smoothstep(vw,0.0,pd),vf=sin((av/db)*PI);
+                    float vp=0.6+0.4*sin(u_time*2.0+av*20.0);
+                    col=mix(col,vec3(0.4,0.65,0.85)*vp,iv*vf*0.7);
+                    heightMap+=iv*vf*0.08;
+                    for(int k=1;k<=2;k++){float o=float(k)*0.015;col=mix(col,vec3(0.35,0.5,0.7),(smoothstep(vw*0.5,0.0,abs(pd-o))+smoothstep(vw*0.5,0.0,abs(pd+o)))*vf*0.3);}
+                }
+            }
+        }}
+
+        // Global vein rays
+        for(int i=0;i<18;i++){vec2 c=centers[i];float s=sizes[i];
+            for(int a=0;a<8;a++){float an=float(a)*0.785398;vec2 rd=vec2(cos(an),sin(an));
+                float ar=dot(uv-c,rd),pr=abs(dot(uv-c,vec2(-rd.y,rd.x)));
+                if(ar>s&&ar<s*3.5){col=mix(col,vec3(0.4,0.5,0.6),smoothstep(0.0015,0.0,pr)*smoothstep(s*3.5,s,ar)*0.25);}
+            }
+        }
+
+        // 3-point lighting
+        vec3 fn=normalize(vNormal+heightMap*0.8);
+        vec3 kl=normalize(vec3(0.5,0.8,1)),fl=normalize(vec3(-0.6,0.3,0.8));
+        float kd=max(dot(fn,kl),0.0),fd=max(dot(fn,fl),0.0);
+        float rim=pow(max(1.0-dot(fn,vViewDir),0.0),3.0);
+        vec3 hv=normalize(kl+vViewDir);
+        float sp=pow(max(dot(fn,hv),0.0),64.0);
+        vec3 hv2=normalize(fl+vViewDir);
+        float sp2=pow(max(dot(fn,hv2),0.0),32.0);
+
+        vec3 lit=vec3(0.05)+kd*vec3(1,.95,.9)*0.6+fd*vec3(.4,.5,.7)*0.3+rim*vec3(.3,.5,.8)*0.8;
+        col*=lit;
+        col+=vec3(.8,.9,1)*sp*0.6+vec3(.5,.6,.8)*sp2*0.3;
+
+        // Iridescence
+        float ir=dot(vNormal,normalize(vViewDir)),ia=atan(vNormal.y,vNormal.x);
+        vec3 ic=vec3(0.5+0.5*sin(ir*10.+u_time*.8+ia*2.),0.5+0.5*sin(ir*10.+2.1+u_time*.8+ia*2.),0.5+0.5*sin(ir*10.+4.2+u_time*.8+ia*2.));
+        col=mix(col,ic,totalPattern*0.2);
+
+        // Fresnel
+        float fr=pow(1.0-dot(normalize(vNormal),normalize(vViewDir)),4.0);
+        col+=fr*vec3(0.15,0.25,0.45)*1.3;
+
+        // Emissive pulse
+        col+=totalPattern*vec3(0.02,0.04,0.08)*(0.5+0.5*sin(u_time*1.5));
+
+        gl_FragColor=vec4(col,1.0);
+    }
+`;
+
+// Floating particles
+const pN=300,pP=new Float32Array(pN*3),pS=new Float32Array(pN);
+for(let i=0;i<pN;i++){
+    const t=Math.random()*Math.PI*2,p=Math.acos(2*Math.random()-1),r=1.4+Math.random()*1.5;
+    pP[i*3]=r*Math.sin(p)*Math.cos(t);pP[i*3+1]=r*Math.sin(p)*Math.sin(t);pP[i*3+2]=r*Math.cos(p);
+    pS[i]=Math.random()*3+1;
+}
+const pGeo=new THREE.BufferGeometry();
+pGeo.setAttribute('position',new THREE.BufferAttribute(pP,3));
+pGeo.setAttribute('size',new THREE.BufferAttribute(pS,1));
+const pMat=new THREE.ShaderMaterial({
+    transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,
+    uniforms:{u_time:{value:0}},
+    vertexShader:`attribute float size;uniform float u_time;varying float vA;
+        void main(){vec3 p=position;float t=u_time*0.15;
+        p.x+=sin(t+position.y*2.0)*0.1;p.y+=cos(t+position.z*2.0)*0.1;p.z+=sin(t*0.7+position.x*2.0)*0.1;
+        vec4 mv=modelViewMatrix*vec4(p,1.0);gl_PointSize=size*(200.0/-mv.z);gl_Position=projectionMatrix*mv;
+        vA=0.4+0.3*sin(u_time+position.x*5.0);}`,
+    fragmentShader:`varying float vA;void main(){float d=length(gl_PointCoord-0.5);gl_FragColor=vec4(0.4,0.6,1.0,smoothstep(0.5,0.0,d)*vA*0.35);}`
+});
+scene.add(new THREE.Points(pGeo,pMat));
+
+// Main sphere
+const geo=new THREE.SphereGeometry(1,64,64);
+const mat=new THREE.ShaderMaterial({vertexShader,fragmentShader,uniforms:{u_time:{value:0}}});
+const sphere=new THREE.Mesh(geo,mat);
+scene.add(sphere);
+
+let mx=0,my=0;
+window.addEventListener('mousemove',e=>{mx=(e.clientX/innerWidth)*2-1;my=-(e.clientY/innerHeight)*2+1;});
+
+function resize(){
+    const s=Math.min(innerWidth,innerHeight)*0.9,pr=Math.min(devicePixelRatio,2);
+    renderer.setSize(s,s);renderer.setPixelRatio(pr);
+    camera.aspect=1;camera.updateProjectionMatrix();
+    mainRT.setSize(s*pr,s*pr);
+    const bs=Math.max(256,Math.min(512,Math.floor(s/2)));
+    bloomRT1.setSize(bs,bs);bloomRT2.setSize(bs,bs);
+    blurH.uniforms.res.value.set(bs,bs);blurV.uniforms.res.value.set(bs,bs);
+}
+addEventListener('resize',resize);resize();
+
+function animate(time){
+    requestAnimationFrame(animate);
+    time*=0.001;
+    mat.uniforms.u_time.value=time;
+    pMat.uniforms.u_time.value=time;
+
+    // Smooth camera orbit on mouse
+    camera.position.x+=(mx*0.3-camera.position.x)*0.02;
+    camera.position.y+=(my*0.2-camera.position.y)*0.02;
+    camera.lookAt(0,0,0);
+
+    sphere.rotation.y+=Math.sin(time*0.3)*0.0008;
+    sphere.rotation.x+=Math.cos(time*0.25)*0.0006;
+    sphere.rotation.z+=Math.sin(time*0.2)*0.0004;
+
+    // Render main scene to RT
+    renderer.setRenderTarget(mainRT);
+    renderer.render(scene,camera);
+
+    // Bloom: blur pass (2-pass gaussian)
+    fsQuad.material=blurH;blurH.uniforms.tDiffuse.value=mainRT.texture;
+    renderer.setRenderTarget(bloomRT1);renderer.render(fsScene,fsCam);
+
+    fsQuad.material=blurV;blurV.uniforms.tDiffuse.value=bloomRT1.texture;
+    renderer.setRenderTarget(bloomRT2);renderer.render(fsScene,fsCam);
+
+    // Second blur pass for wider bloom
+    blurH.uniforms.tDiffuse.value=bloomRT2.texture;
+    renderer.setRenderTarget(bloomRT1);renderer.render(fsScene,fsCam);
+    blurV.uniforms.tDiffuse.value=bloomRT1.texture;
+    renderer.setRenderTarget(bloomRT2);renderer.render(fsScene,fsCam);
+
+    // Composite
+    fsQuad.material=compositeMat;
+    compositeMat.uniforms.tScene.value=mainRT.texture;
+    compositeMat.uniforms.tBloom.value=bloomRT2.texture;
+    renderer.setRenderTarget(null);
+    renderer.render(fsScene,fsCam);
+}
+animate(0);
+    </script>
+</body>
+</html>

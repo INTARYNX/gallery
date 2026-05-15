@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wandering Lights</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #000; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="c"></canvas>
+    <script>
+        const c = document.getElementById('c');
+        const ctx = c.getContext('2d');
+        const off = document.createElement('canvas');
+        const ox = off.getContext('2d');
+        const noiseCanvas = document.createElement('canvas');
+        const nctx = noiseCanvas.getContext('2d');
+        let W, H;
+
+        const SEG = 40;
+        const segCos = new Float64Array(SEG + 1);
+        const segSin = new Float64Array(SEG + 1);
+        const segAngles = new Float64Array(SEG + 1);
+        for (let i = 0; i <= SEG; i++) {
+            const a = (i / SEG) * Math.PI * 2;
+            segCos[i] = Math.cos(a); segSin[i] = Math.sin(a); segAngles[i] = a;
+        }
+
+        function generateNoise(w, h) {
+            w = Math.max(1, w); h = Math.max(1, h);
+            noiseCanvas.width = w; noiseCanvas.height = h;
+            const id = nctx.createImageData(w, h);
+            const d = id.data;
+            for (let i = 0; i < d.length; i += 16) {
+                const n = (Math.random() - 0.5) * 6 | 0;
+                d[i] = d[i+1] = d[i+2] = 128 + n; d[i+3] = 255;
+            }
+            nctx.putImageData(id, 0, 0);
+        }
+
+        function resize() {
+            const s = Math.max(1, Math.min(innerWidth, innerHeight));
+            W = c.width = off.width = s; H = c.height = off.height = s;
+            generateNoise(Math.max(1, s >> 1), Math.max(1, s >> 1));
+        }
+
+        const NUM = 60;
+        const TRAIL_LEN = 40;
+
+        class Circle {
+            constructor(index, total) {
+                this.index = index; this.total = total;
+                this.r = Math.random() * 15 + 20;
+                this.baseOpacity = Math.random() * 0.4 + 0.1;
+                this.phase = Math.random() * Math.PI * 2;
+                this.x = 0; this.y = 0; this.opacity = 0;
+                const colors = [[70,130,255],[255,215,0],[255,50,50]];
+                this.color = colors[Math.floor(Math.random() * colors.length)];
+                this.cStr = `${this.color[0]},${this.color[1]},${this.color[2]}`;
+                this.wobbleOffsets = [];
+                for (let i = 0; i < 8; i++) this.wobbleOffsets.push(Math.random() * Math.PI * 2);
+                this.overlaps = [];
+                this.trail = [];
+            }
+
+            update(t) {
+                const norm = this.index / this.total;
+                const idx = this.index;
+                const angle = norm * Math.PI * 12 + t * 0.01;
+                const cosA = Math.cos(angle), sinA = Math.sin(angle);
+                const r = Math.exp(cosA) - 2 * Math.cos(4 * angle);
+                const lx = Math.sin(norm * Math.PI * 5 + t * 0.003);
+                const ly = Math.sin(norm * Math.PI * 8 + t * 0.005);
+                const scale = 120 + 50 * Math.sin(t * 0.002) + 15 * Math.sin(t * 0.0053 + idx * 0.2);
+                const rot = t * 0.0007 + 0.05 * Math.sin(t * 0.0013 + idx * 0.1);
+                const cr = Math.cos(rot), sr = Math.sin(rot);
+                let x = cosA * r * scale + lx * 40 + Math.sin(t * 0.007 + idx * 0.6) * 12;
+                let y = sinA * r * scale + ly * 40 + Math.cos(t * 0.009 + idx * 0.4) * 12;
+                this.x = W / 2 + x * cr - y * sr;
+                this.y = H / 2 + x * sr + y * cr + Math.sin(t * 0.002) * 30 + Math.sin(t * 0.0047 + idx) * 15;
+                const flicker = (Math.random() > 0.95 ? 0.75 + Math.random() * 0.15 : 1.0)
+                    * (0.93 + 0.07 * Math.sin(t * 0.07 + idx * 2.3))
+                    * (0.95 + 0.05 * Math.sin(t * 0.19 + idx * 1.7));
+                this.opacity = this.baseOpacity * (0.6 + 0.4 * Math.sin(t * 0.005 + this.phase))
+                    * (0.85 + 0.15 * Math.sin(t * 0.013 + idx * 0.8)) * flicker;
+                this.r = 20 + 8 * Math.sin(norm * Math.PI * 3 + t * 0.005)
+                    + 4 * Math.sin(t * 0.011 + idx * 0.5);
+
+                this.trail.push({ x: this.x, y: this.y });
+                if (this.trail.length > TRAIL_LEN) this.trail.shift();
+            }
+
+            getWobbleRadius(segIdx, t) {
+                const angle = segAngles[segIdx], w = this.wobbleOffsets;
+                let wobble = 1
+                    + Math.sin(angle * 3 + w[0] + t * 0.005) * 0.025
+                    + Math.sin(angle * 7 + w[1] + t * 0.003) * 0.015
+                    + Math.sin(angle * 13 + w[2] + t * 0.007) * 0.01;
+                const ov = this.overlaps;
+                for (let k = 0; k < ov.length; k++) {
+                    const o = ov[k], ad = angle - o.dirAngle, cosAD = Math.cos(ad);
+                    if (cosAD > 0) wobble += cosAD * o.strength * (1 + 0.3 * Math.sin(angle * 5 + t * 0.01));
+                    wobble -= Math.abs(Math.sin(ad)) * o.strength * 0.1;
+                }
+                return this.r * wobble;
+            }
+
+            drawTrail(dc, t) {
+                const cs = this.cStr, len = this.trail.length, idx = this.index;
+                dc.lineWidth = 2.5 + Math.sin(t * 0.04 + idx) * 1.2;
+                for (let i = 0; i < len - 1; i++) {
+                    const age = i / len;
+                    const alphaPulse = 0.7 + 0.3 * Math.sin(t * 0.06 + i * 0.5 + idx * 0.3);
+                    dc.globalAlpha = 0.6 * age * this.opacity * alphaPulse;
+
+                    const s1 = 6 * Math.sin(t * 0.1 + i * 1.2 + idx * 0.7);
+                    const s2 = 4 * Math.sin(t * 0.17 + i * 0.8 + idx * 1.1);
+                    const s3 = 3 * Math.sin(t * 0.31 + i * 2.1);
+                    const shk1 = (s1 + s2) * Math.random() + s3;
+                    const shk2 = (5 * Math.cos(t * 0.15 + i * 1.3 + idx * 0.5) + s3) * Math.random();
+
+                    const hueShift = Math.sin(t * 0.02 + i * 0.15 + idx * 0.4);
+                    const rc = Math.min(255, this.color[0] + hueShift * 30) | 0;
+                    const gc = Math.min(255, this.color[1] + hueShift * 20) | 0;
+                    const bc = Math.min(255, this.color[2] - hueShift * 25) | 0;
+                    dc.strokeStyle = `rgb(${rc},${gc},${bc})`;
+
+                    dc.beginPath();
+                    dc.moveTo(this.trail[i].x + shk1, this.trail[i].y + shk2);
+                    dc.lineTo(this.trail[i+1].x + shk1 * 0.7, this.trail[i+1].y + shk2 * 0.7);
+                    dc.stroke();
+                }
+                dc.globalAlpha = 1;
+            }
+
+            draw(t, dc) {
+                const o = this.opacity, cs = this.cStr;
+                const grad = dc.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.r * 1.15);
+                grad.addColorStop(0, `rgba(${cs},${o})`);
+                grad.addColorStop(0.85, `rgba(${cs},${o})`);
+                grad.addColorStop(1, `rgba(${cs},0)`);
+                dc.beginPath();
+                const r0 = this.getWobbleRadius(0, t);
+                dc.moveTo(this.x + segCos[0] * r0, this.y + segSin[0] * r0);
+                for (let i = 1; i <= SEG; i++) {
+                    const rd = this.getWobbleRadius(i, t);
+                    dc.lineTo(this.x + segCos[i] * rd, this.y + segSin[i] * rd);
+                }
+                dc.closePath();
+                dc.fillStyle = grad;
+                dc.fill();
+
+                // Inner figment flicker
+                const idx = this.index;
+                const numSparks = 3;
+                for (let s = 0; s < numSparks; s++) {
+                    const angle = Math.sin(t * 0.13 + idx * 1.7 + s * 2.1) * Math.PI * 2;
+                    const dist = this.r * (0.15 + 0.35 * (0.5 + 0.5 * Math.sin(t * 0.19 + s * 3.3 + idx)));
+                    const sx = this.x + Math.cos(angle) * dist;
+                    const sy = this.y + Math.sin(angle) * dist;
+                    const sr = this.r * (0.15 + 0.12 * Math.sin(t * 0.23 + s * 1.9 + idx * 0.8));
+                    const sparkAlpha = o * (0.3 + 0.7 * Math.pow(0.5 + 0.5 * Math.sin(t * 0.31 + s * 2.7 + idx * 1.3), 3))
+                        * (Math.random() > 0.85 ? 0.4 + Math.random() * 0.4 : 1.0);
+                    const ig = dc.createRadialGradient(sx, sy, 0, sx, sy, sr);
+                    ig.addColorStop(0, `rgba(255,255,255,${sparkAlpha * 0.6})`);
+                    ig.addColorStop(0.4, `rgba(${cs},${sparkAlpha * 0.4})`);
+                    ig.addColorStop(1, `rgba(${cs},0)`);
+                    dc.beginPath();
+                    dc.arc(sx, sy, sr, 0, Math.PI * 2);
+                    dc.fillStyle = ig;
+                    dc.fill();
+                }
+            }
+        }
+
+        const overlapPairs = [];
+        function computeOverlaps(cls) {
+            for (let i = 0; i < cls.length; i++) cls[i].overlaps.length = 0;
+            overlapPairs.length = 0;
+            for (let i = 0; i < cls.length; i++) {
+                const a = cls[i];
+                for (let j = i + 1; j < cls.length; j++) {
+                    const b = cls[j];
+                    const dx = b.x - a.x, dy = b.y - a.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    const overlap = (a.r + b.r) - dist;
+                    if (overlap > 0 && dist > 1) {
+                        const str = (overlap / (a.r + b.r)) * 0.12;
+                        const da = Math.atan2(dy, dx);
+                        a.overlaps.push({ strength: str, dirAngle: da });
+                        b.overlaps.push({ strength: str, dirAngle: da + Math.PI });
+                        overlapPairs.push({ a, b, dx, dy, strength: overlap / (a.r + b.r) });
+                    }
+                }
+            }
+        }
+
+        function drawChromaticAberration(dc) {
+            for (let k = 0; k < overlapPairs.length; k++) {
+                const { a, b, dx, dy, strength } = overlapPairs[k];
+                const mx = (a.x + b.x) * 0.5, my = (a.y + b.y) * 0.5;
+                const sz = Math.min(a.r, b.r) * strength * 1.5;
+                dc.globalAlpha = strength * 0.15 * (a.opacity + b.opacity);
+                dc.beginPath();
+                dc.arc(mx - dx * 0.05, my - dy * 0.05, sz, 0, Math.PI * 2);
+                dc.fillStyle = 'rgba(255,80,60,0.5)'; dc.fill();
+                dc.beginPath();
+                dc.arc(mx + dx * 0.05, my + dy * 0.05, sz, 0, Math.PI * 2);
+                dc.fillStyle = 'rgba(60,200,255,0.4)'; dc.fill();
+            }
+            dc.globalAlpha = 1;
+        }
+
+        const circles = Array.from({ length: NUM }, (_, i) => new Circle(i, NUM));
+        let noiseTimer = 0, t = 0;
+
+        function animate() {
+            circles.forEach(ci => ci.update(t));
+            computeOverlaps(circles);
+
+            ox.clearRect(0, 0, W, H);
+            ox.globalCompositeOperation = 'screen';
+            circles.forEach(ci => ci.drawTrail(ox, t));
+            circles.forEach(ci => ci.draw(t, ox));
+            drawChromaticAberration(ox);
+            ox.globalCompositeOperation = 'source-over';
+
+            ctx.fillStyle = '#030208';
+            ctx.fillRect(0, 0, W, H);
+
+            ctx.save();
+            ctx.filter = 'blur(80px)';
+            ctx.globalCompositeOperation = 'screen';
+            const amb = ctx.createRadialGradient(W * 0.3, H * 0.15, 0, W * 0.3, H * 0.15, W * 0.4);
+            amb.addColorStop(0, 'rgba(180,100,20,0.06)');
+            amb.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = amb;
+            ctx.fillRect(0, 0, W, H);
+            ctx.restore();
+
+            ctx.save();
+            ctx.filter = 'blur(4px)';
+            ctx.globalCompositeOperation = 'screen';
+            if (off.width > 0) ctx.drawImage(off, 0, 0);
+            ctx.restore();
+
+            if (++noiseTimer % 4 === 0) generateNoise(Math.max(1, W >> 1), Math.max(1, H >> 1));
+            if (noiseCanvas.width > 0) {
+                ctx.save();
+                ctx.globalCompositeOperation = 'overlay';
+                ctx.globalAlpha = 0.04;
+                ctx.drawImage(noiseCanvas, 0, 0, W, H);
+                ctx.restore();
+            }
+
+            t += 0.06;
+            requestAnimationFrame(animate);
+        }
+
+        resize();
+        addEventListener('resize', resize);
+        animate();
+    </script>
+</body>
+</html>

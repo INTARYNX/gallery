@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Landscape</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: radial-gradient(ellipse at center, #0a0a15 0%, #000000 100%);
+            overflow: hidden;
+            font-family: 'Courier New', monospace;
+            padding: 20px;
+        }
+        #container {
+            width: 100%;
+            max-width: min(90vh, 90vw);
+            aspect-ratio: 1;
+            position: relative;
+        }
+        canvas {
+            width: 100%;
+            height: 100%;
+        }
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #0ff;
+            text-shadow: 
+                0 0 10px rgba(0, 255, 255, 0.8),
+                0 0 20px rgba(0, 255, 255, 0.5),
+                0 0 30px rgba(0, 255, 255, 0.3);
+            font-size: 14px;
+            pointer-events: none;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px 15px;
+            border-radius: 5px;
+            border: 1px solid rgba(0, 255, 255, 0.3);
+            backdrop-filter: blur(5px);
+        }
+        @keyframes glow {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <canvas id="canvas"></canvas>
+    </div>
+    
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d', { alpha: false });
+        
+        canvas.width = 1000;
+        canvas.height = 1000;
+        
+        const gridSize = 24;
+        const tileW = 50;
+        const tileH = 25;
+        const offsetX = canvas.width / 2;
+        const offsetY = canvas.height / 2 - 150;
+        
+        const noise = (x, y, t, seed) => {
+            const n1 = Math.sin(x * 0.3 + seed) * Math.cos(y * 0.3 + seed);
+            const n2 = Math.sin((x + y) * 0.15 + seed * 0.7) * 0.5;
+            const n3 = Math.sin(x * 0.05 + seed * 1.3) * Math.cos(y * 0.05 + seed * 1.7) * 2;
+            return n1 + n2 + n3;
+        };
+        
+        let time = 0;
+        let dayTime = 0;
+        let rotation = Math.PI / 4;
+        let seed = Math.random() * 1000;
+        let nextSeed = Math.random() * 1000;
+        let morphProgress = 0;
+        
+        const vertices = new Float32Array((gridSize + 1) * (gridSize + 1));
+        for (let y = 0, i = 0; y <= gridSize; y++) {
+            for (let x = 0; x <= gridSize; x++, i++) {
+                vertices[i] = noise(x, y, 0, seed) * 4 + 5;
+            }
+        }
+        
+        const getH = (x, y) => {
+            if (x < 0 || y < 0 || x > gridSize || y > gridSize) return 5;
+            const idx = y * (gridSize + 1) + x;
+            const currentH = noise(x, y, 0, seed) * 4 + 5;
+            const nextH = noise(x, y, 0, nextSeed) * 4 + 5;
+            return currentH + (nextH - currentH) * morphProgress;
+        };
+        
+        const stars = Array.from({ length: 300 }, () => {
+            const brightness = Math.random();
+            return {
+                x: Math.random() * canvas.width,
+                y: Math.random() * 400,
+                size: brightness > 0.9 ? Math.random() * 1.5 + 1 : Math.random() * 0.8 + 0.3,
+                t: Math.random() * Math.PI * 2,
+                speed: brightness > 0.9 ? 0.02 + Math.random() * 0.03 : 0.005 + Math.random() * 0.01,
+                brightness: brightness,
+                twinkle: brightness > 0.7
+            };
+        });
+        
+        const shootingStars = [];
+        
+        const trees = Array.from({ length: gridSize * gridSize * 2 }, () => ({
+            x: Math.random() * gridSize,
+            y: Math.random() * gridSize,
+            type: Math.random() > 0.5 ? 1 : 0,
+            scale: 0.8 + Math.random() * 0.4
+        }));
+        
+        const sinR = Math.sin(rotation);
+        const cosR = Math.cos(rotation);
+        const cx = gridSize / 2;
+        const cy = gridSize / 2;
+        
+        const iso = (x, y, z) => {
+            const dx = x - cx;
+            const dy = y - cy;
+            const rx = dx * cosR - dy * sinR + cx;
+            const ry = dx * sinR + dy * cosR + cy;
+            
+            return {
+                x: (rx - ry) * tileW + offsetX,
+                y: (rx + ry) * tileH + offsetY - z * tileH
+            };
+        };
+        
+        const interpolateColor = (c1, c2, f) => {
+            const r1 = parseInt(c1.slice(1, 3), 16);
+            const g1 = parseInt(c1.slice(3, 5), 16);
+            const b1 = parseInt(c1.slice(5, 7), 16);
+            const r2 = parseInt(c2.slice(1, 3), 16);
+            const g2 = parseInt(c2.slice(3, 5), 16);
+            const b2 = parseInt(c2.slice(5, 7), 16);
+            const r = (r1 + (r2 - r1) * f) | 0;
+            const g = (g1 + (g2 - g1) * f) | 0;
+            const b = (b1 + (b2 - b1) * f) | 0;
+            return `rgb(${r},${g},${b})`;
+        };
+        
+        const skyGradient = ctx.createRadialGradient(canvas.width / 2, canvas.height / 3, 0, canvas.width / 2, canvas.height / 3, canvas.height);
+        
+        function draw() {
+            const t = dayTime;
+            let skyColors, terrainMult, starAlpha;
+            
+            if (t < 0.25) {
+                const p = t / 0.25;
+                skyColors = {
+                    top: interpolateColor('#0d1b2a', '#1b263b', p),
+                    mid: interpolateColor('#1b263b', '#415a77', p),
+                    bot: interpolateColor('#415a77', '#778da9', p)
+                };
+                terrainMult = 0.25 + p * 0.3;
+                starAlpha = 1 - p * 0.5;
+            } else if (t < 0.5) {
+                const p = (t - 0.25) / 0.25;
+                skyColors = {
+                    top: interpolateColor('#1b263b', '#ffb4a2', p),
+                    mid: interpolateColor('#415a77', '#ffcdb2', p),
+                    bot: interpolateColor('#778da9', '#ffd6a5', p)
+                };
+                terrainMult = 0.55 + p * 0.45;
+                starAlpha = 0;
+            } else if (t < 0.75) {
+                const p = (t - 0.5) / 0.25;
+                skyColors = {
+                    top: interpolateColor('#ffb4a2', '#ef476f', p),
+                    mid: interpolateColor('#ffcdb2', '#f78c6b', p),
+                    bot: interpolateColor('#ffd6a5', '#ffd166', p)
+                };
+                terrainMult = 1 - p * 0.15;
+                starAlpha = 0;
+            } else {
+                const p = (t - 0.75) / 0.25;
+                skyColors = {
+                    top: interpolateColor('#ef476f', '#0d1b2a', p),
+                    mid: interpolateColor('#f78c6b', '#1b263b', p),
+                    bot: interpolateColor('#ffd166', '#415a77', p)
+                };
+                terrainMult = 0.85 - p * 0.6;
+                starAlpha = p;
+            }
+            
+            skyGradient.addColorStop(0, skyColors.top);
+            skyGradient.addColorStop(0.5, skyColors.mid);
+            skyGradient.addColorStop(1, skyColors.bot);
+            ctx.fillStyle = skyGradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            if (starAlpha > 0) {
+                for (let i = 0; i < stars.length; i++) {
+                    const s = stars[i];
+                    if (s.twinkle) s.t += s.speed;
+                    const twinkleValue = s.twinkle ? (Math.sin(s.t) * 0.3 + 0.7) : 1;
+                    const alpha = s.brightness * twinkleValue * starAlpha;
+                    
+                    ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+                    ctx.beginPath();
+                    ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+            
+            if (Math.random() > 0.99 && starAlpha > 0.5) {
+                shootingStars.push({
+                    x: Math.random() * canvas.width,
+                    y: Math.random() * 200,
+                    vx: 3 + Math.random() * 2,
+                    vy: 2 + Math.random(),
+                    life: 1
+                });
+            }
+            
+            for (let i = shootingStars.length - 1; i >= 0; i--) {
+                const s = shootingStars[i];
+                s.x += s.vx;
+                s.y += s.vy;
+                s.life -= 0.02;
+                
+                if (s.life <= 0) {
+                    shootingStars.splice(i, 1);
+                    continue;
+                }
+                
+                ctx.strokeStyle = `rgba(255,255,255,${s.life})`;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(s.x, s.y);
+                ctx.lineTo(s.x - s.vx * 10, s.y - s.vy * 10);
+                ctx.stroke();
+            }
+            
+            ctx.lineWidth = 0;
+            const sinTime = Math.sin(time * 0.3);
+            
+            for (let y = gridSize - 1; y >= 0; y--) {
+                for (let x = 0; x < gridSize; x++) {
+                    const h1 = getH(x, y);
+                    const h2 = getH(x + 1, y);
+                    const h3 = getH(x + 1, y + 1);
+                    const h4 = getH(x, y + 1);
+                    
+                    const p1 = iso(x, y, h1);
+                    const p2 = iso(x + 1, y, h2);
+                    const p3 = iso(x + 1, y + 1, h3);
+                    const p4 = iso(x, y + 1, h4);
+                    
+                    const hf = (h1 + h2 + h3 + h4) * 0.025;
+                    
+                    const dx = x - gridSize / 2;
+                    const dy = y - gridSize / 2;
+                    const distFromCenter = Math.sqrt(dx * dx + dy * dy) / gridSize;
+                    const sunReflection = Math.max(0, 1 - distFromCenter * 1.5) * hf * 80;
+                    
+                    const grassNoise = (Math.sin(x * 5.3 + time) * Math.cos(y * 4.7 + time) + 
+                                       Math.sin(x * 3.1 - time * 0.5) * Math.cos(y * 2.9 - time * 0.5)) * 15;
+                    
+                    const baseR = 60 + hf * 40 + grassNoise * 0.3;
+                    const baseG = 100 + hf * 60 + grassNoise;
+                    const baseB = 40 + hf * 50 + grassNoise * 0.5;
+                    
+                    const r = Math.min(255, (baseR + sunReflection * 1.5) * terrainMult) | 0;
+                    const g = Math.min(255, (baseG + sunReflection * 1.2) * terrainMult) | 0;
+                    const b = Math.min(255, (baseB + sunReflection * 0.5) * terrainMult) | 0;
+                    
+                    ctx.fillStyle = `rgb(${r},${g},${b})`;
+                    ctx.beginPath();
+                    ctx.moveTo(p1.x, p1.y);
+                    ctx.lineTo(p2.x, p2.y);
+                    ctx.lineTo(p3.x, p3.y);
+                    ctx.lineTo(p4.x, p4.y);
+                    ctx.closePath();
+                    ctx.fill();
+                }
+            }
+            
+            const sway = Math.sin(time * 2);
+            const sunAngle = dayTime * Math.PI * 2;
+            const shadowOffsetX = Math.cos(sunAngle) * 30;
+            const shadowOffsetY = Math.sin(sunAngle) * 15;
+            const shadowIntensity = Math.abs(Math.sin(dayTime * Math.PI)) * 0.5;
+            
+            for (let y = 0; y < gridSize; y++) {
+                for (let x = 0; x < gridSize; x++) {
+                    for (let i = 0; i < trees.length; i++) {
+                        const tree = trees[i];
+                        if ((tree.x | 0) !== x || (tree.y | 0) !== y) continue;
+                        
+                        const h1 = getH(x, y);
+                        const h2 = getH(x + 1, y);
+                        const h3 = getH(x + 1, y + 1);
+                        const h4 = getH(x, y + 1);
+                        const avgH = (h1 + h2 + h3 + h4) * 0.25;
+                        
+                        const pos = iso(tree.x, tree.y, avgH);
+                        const treeSway = sway * 2;
+                        const scale = tree.scale;
+                        
+                        if (shadowIntensity > 0.1) {
+                            const shadowLength = 40 * scale;
+                            const shadowWidth = 6 * scale;
+                            
+                            ctx.fillStyle = `rgba(0, 0, 0, ${shadowIntensity * 0.4})`;
+                            ctx.beginPath();
+                            ctx.moveTo(pos.x, pos.y);
+                            ctx.lineTo(pos.x + shadowOffsetX * 0.3, pos.y + shadowOffsetY * 0.3);
+                            ctx.lineTo(pos.x + shadowOffsetX * 0.3 + shadowWidth, pos.y + shadowOffsetY * 0.3);
+                            ctx.lineTo(pos.x + shadowWidth, pos.y);
+                            ctx.closePath();
+                            ctx.fill();
+                            
+                            ctx.fillStyle = `rgba(0, 0, 0, ${shadowIntensity * 0.5})`;
+                            ctx.beginPath();
+                            ctx.ellipse(
+                                pos.x + shadowOffsetX * 0.8, 
+                                pos.y + shadowOffsetY * 0.8, 
+                                12 * scale, 
+                                6 * scale, 
+                                Math.atan2(shadowOffsetY, shadowOffsetX), 
+                                0, 
+                                Math.PI * 2
+                            );
+                            ctx.fill();
+                        }
+                        
+                        const trunkR = (80 * terrainMult) | 0;
+                        const trunkG = (60 * terrainMult) | 0;
+                        const trunkB = (40 * terrainMult) | 0;
+                        ctx.fillStyle = `rgba(${trunkR},${trunkG},${trunkB},0.9)`;
+                        ctx.fillRect(pos.x - 2 * scale + treeSway * 0.2, pos.y - 25 * scale, 4 * scale, 25 * scale);
+                        
+                        if (tree.type === 1) {
+                            const leafR = (60 * terrainMult) | 0;
+                            const leafG = (100 * terrainMult) | 0;
+                            const leafB = (70 * terrainMult) | 0;
+                            ctx.fillStyle = `rgba(${leafR},${leafG},${leafB},0.9)`;
+                            
+                            ctx.beginPath();
+                            ctx.moveTo(pos.x + treeSway, pos.y - 45 * scale);
+                            ctx.lineTo(pos.x - 10 * scale + treeSway * 0.8, pos.y - 20 * scale);
+                            ctx.lineTo(pos.x + 10 * scale + treeSway * 0.8, pos.y - 20 * scale);
+                            ctx.closePath();
+                            ctx.fill();
+                            
+                            ctx.beginPath();
+                            ctx.moveTo(pos.x + treeSway * 0.9, pos.y - 35 * scale);
+                            ctx.lineTo(pos.x - 8 * scale + treeSway * 0.7, pos.y - 15 * scale);
+                            ctx.lineTo(pos.x + 8 * scale + treeSway * 0.7, pos.y - 15 * scale);
+                            ctx.closePath();
+                            ctx.fill();
+                        } else {
+                            const leafR = (80 * terrainMult) | 0;
+                            const leafG = (130 * terrainMult) | 0;
+                            const leafB = (80 * terrainMult) | 0;
+                            
+                            ctx.fillStyle = `rgba(${leafR},${leafG},${leafB},0.85)`;
+                            ctx.beginPath();
+                            ctx.arc(pos.x + treeSway, pos.y - 30 * scale, 10 * scale, 0, Math.PI * 2);
+                            ctx.fill();
+                            
+                            const leafR2 = (90 * terrainMult) | 0;
+                            const leafG2 = (150 * terrainMult) | 0;
+                            const leafB2 = (90 * terrainMult) | 0;
+                            ctx.fillStyle = `rgba(${leafR2},${leafG2},${leafB2},0.75)`;
+                            ctx.beginPath();
+                            ctx.arc(pos.x - 6 * scale + treeSway * 0.8, pos.y - 32 * scale, 7 * scale, 0, Math.PI * 2);
+                            ctx.fill();
+                            
+                            ctx.beginPath();
+                            ctx.arc(pos.x + 6 * scale + treeSway * 0.8, pos.y - 32 * scale, 7 * scale, 0, Math.PI * 2);
+                            ctx.fill();
+                        }
+                    }
+                }
+            }
+        }
+        
+        function update() {
+            time += 0.01;
+            dayTime += 0.0005;
+            
+            if (dayTime > 1) {
+                dayTime = 0;
+                seed = nextSeed;
+                nextSeed = Math.random() * 1000;
+                morphProgress = 0;
+            }
+            
+            morphProgress = Math.min(1, morphProgress + 0.002);
+            rotation += 0.002;
+        }
+        
+        function loop() {
+            update();
+            draw();
+            requestAnimationFrame(loop);
+        }
+        
+        loop();
+    </script>
+</body>
+</html>

@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Genuary 2026 #31</title>
+<style>
+  body { margin:0; overflow:hidden; background:#000; }
+  canvas { display:block; width:100vw; height:100vh; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl');
+
+function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+}
+resize();
+window.addEventListener('resize', resize);
+
+const vs = `
+attribute vec2 aPosition;
+void main() {
+    gl_Position = vec4(aPosition, 0.0, 1.0);
+}
+`;
+
+const fs = `
+precision highp float;
+uniform vec2 uResolution;
+uniform float uTime;
+
+float noise(vec2 p) {
+    return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+}
+
+float gears(vec2 p, float time) {
+    float angle = atan(p.y, p.x);
+    float radius = length(p);
+    float teeth = sin(angle * 12.0 + time) * 0.05;
+    return smoothstep(0.02, 0.0, abs(radius - 0.15 - teeth));
+}
+
+void main() {
+    vec2 uv = gl_FragCoord.xy / uResolution;
+    vec2 p = uv*2.0 - 1.0;
+    p.x *= uResolution.x/uResolution.y;
+
+    float horizon = 0.5;
+
+    vec3 col;
+
+    if(uv.y > horizon){
+        // Steampunk sky - sepia tones
+        vec3 skyTop = vec3(0.15, 0.10, 0.08);
+        vec3 skyBot = vec3(0.35, 0.25, 0.15);
+        float skyMix = (uv.y - horizon) / (1.0 - horizon);
+        col = mix(skyBot, skyTop, skyMix);
+
+        // Incandescent bulb sun
+        vec2 sunPos = vec2(0.0, 0.4);
+        vec2 bulbPos = p - sunPos;
+        
+        // Flickering effect
+        float flicker = 0.85 + sin(uTime * 15.0) * 0.05 + sin(uTime * 37.0) * 0.03 + sin(uTime * 8.0) * 0.07;
+        flicker = clamp(flicker, 0.7, 1.0);
+        
+        // Bulb glass shape - proper rounded bulb
+        float bulbTop = length(bulbPos) - 0.15;
+        float bulbNeck = length(vec2(bulbPos.x * 3.0, bulbPos.y + 0.18)) - 0.15;
+        float bulbShape = min(bulbTop, bulbNeck);
+        
+        // Only show top rounded part
+        if(bulbPos.y > -0.12) {
+            bulbShape = bulbTop;
+        }
+        
+        // Glass edge
+        float glassEdge = smoothstep(0.008, 0.004, abs(bulbShape));
+        col += vec3(0.8, 0.7, 0.6) * glassEdge;
+        
+        // Inside the bulb
+        if(bulbShape < 0.0 && bulbPos.y > -0.15) {
+            // Filament glow with flicker
+            float filamentCore = smoothstep(0.10, 0.02, length(bulbPos));
+            col += vec3(1.0, 0.8, 0.4) * filamentCore * 5.0 * flicker;
+            
+            // Coiled filament
+            float coil = sin(bulbPos.y * 50.0) * 0.015;
+            if(abs(bulbPos.x - coil) < 0.008 && abs(bulbPos.y) < 0.08) {
+                col = vec3(1.0, 0.95, 0.6) * flicker;
+            }
+            
+            // Glass tint
+            col = mix(col, vec3(0.9, 0.85, 0.7), 0.05);
+        }
+        
+        // Metal screw base with realistic threads
+        if(bulbPos.y < -0.12 && bulbPos.y > -0.25 && abs(bulbPos.x) < 0.09) {
+            // Thread pitch (spacing)
+            float pitch = 0.035;
+            float threadPos = bulbPos.y / pitch;
+            float threadPhase = fract(threadPos);
+            
+            // Thread profile (triangular)
+            float threadHeight = abs(threadPhase - 0.5) * 2.0;
+            threadHeight = 1.0 - threadHeight;
+            
+            // Simulate depth with shading
+            vec3 metalDark = vec3(0.25, 0.20, 0.13);
+            vec3 metalLight = vec3(0.50, 0.42, 0.28);
+            
+            col = mix(metalDark, metalLight, threadHeight * 0.6 + 0.2);
+            
+            // Add highlights on thread peaks
+            if(threadHeight > 0.85) {
+                col += vec3(0.15, 0.12, 0.08);
+            }
+        }
+        
+        // Bottom contact
+        if(bulbPos.y < -0.25 && length(vec2(bulbPos.x, bulbPos.y + 0.26)) < 0.05) {
+            col = vec3(0.3, 0.25, 0.15);
+        }
+        
+        // Warm glow with flicker
+        float glow = exp(-length(bulbPos) * 3.0);
+        col += vec3(1.0, 0.7, 0.3) * glow * 0.5 * flicker;
+        
+        // Steam/smoke particles - more volumetric
+        for(float i = 0.0; i < 8.0; i++) {
+            vec2 smokePos = vec2(sin(i * 2.0 + uTime * 0.5) * 0.3, 
+                                 0.3 + (uTime * 0.1 + i * 0.1));
+            smokePos = mod(smokePos, vec2(2.0)) - 1.0;
+            float smoke = exp(-pow(length(p - smokePos) * 6.0, 2.0));
+            col += vec3(0.3, 0.25, 0.2) * smoke * 0.4;
+        }
+        
+    } else {
+        // Industrial road perspective
+        float y = (horizon - uv.y) / horizon;
+        float dist = 1.0 / (y*y*3.0 + 0.02);
+        float z = dist + uTime * 12.0;
+
+        float curve = sin(z*0.1)*3.0 + sin(z*0.05)*2.0;
+        float x = (uv.x - 0.5) * dist * 2.5 - curve * 0.2;
+
+        // Brass/copper road base
+        vec3 roadDark = vec3(0.25, 0.15, 0.08);
+        vec3 roadLight = vec3(0.35, 0.22, 0.12);
+        float metalPattern = sin(z*0.5)*0.5 + 0.5;
+        col = mix(roadDark, roadLight, metalPattern);
+        
+        // Riveted metal plates
+        float plateX = fract(x*0.8);
+        float plateZ = fract(z*0.4);
+        float plate = smoothstep(0.95, 1.0, plateX) + smoothstep(0.95, 1.0, plateZ);
+        col = mix(col, vec3(0.15, 0.1, 0.05), plate);
+        
+        // Steam vents with glow
+        float roadWidth = 2.2;
+        if(abs(x)>roadWidth && abs(x)<roadWidth+0.4){
+            float steamPulse = sin(z*3.0 + uTime*5.0)*0.5 + 0.5;
+            col = mix(vec3(0.5, 0.3, 0.1), vec3(0.9, 0.7, 0.3), steamPulse);
+        }
+
+        // Glowing tracks/rails
+        if(abs(x-0.6)<0.05 || abs(x+0.6)<0.05) {
+            col = vec3(0.8, 0.5, 0.2) * (sin(uTime*3.0)*0.3 + 0.7);
+        }
+
+        // Gear pattern on sides - animated rotating gears
+        if(abs(x)>roadWidth+0.4){
+            vec2 sideGearPos = vec2(x * 2.0, z * 0.5);
+            float sideGear = gears(sideGearPos * 2.5, uTime * 3.0);
+            sideGear += gears(sideGearPos * 1.8, -uTime * 2.0);
+            
+            float gearNoise = noise(vec2(floor(sideGearPos.x), floor(sideGearPos.y)));
+            col = mix(vec3(0.2, 0.15, 0.08), vec3(0.3, 0.2, 0.1), gearNoise);
+            col = mix(col, vec3(0.15, 0.1, 0.05), sideGear * 0.6);
+            
+            // Occasional gear teeth
+            if(fract(sideGearPos.y) > 0.9) col *= 0.5;
+        }
+
+        // Industrial fog
+        float fog = smoothstep(3.0, 30.0, dist);
+        col = mix(col, vec3(0.3, 0.22, 0.15), fog*0.8);
+        
+        // Metallic reflections on road
+        vec3 metalReflection = vec3(1.0, 0.8, 0.6) * pow(max(dot(normalize(vec3(x, dist, curve)), vec3(0.0, 1.0, 0.5)), 0.0), 2.0);
+        col += metalReflection * 0.12;
+        
+        // Atmospheric brass glow
+        col += vec3(0.4, 0.25, 0.1) * (1.0-y) * 0.15;
+    }
+
+    // Film grain/scratches
+    float grain = noise(uv * uTime) * 0.05;
+    col += grain;
+    
+    // Dynamic vignette with lantern flicker
+    float vignette = 1.0 - length(uv - 0.5) * 0.8 + 0.02 * sin(uTime * 0.5);
+    col *= vignette;
+
+    gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+function compile(src, type){
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, src);
+    gl.compileShader(shader);
+    if(!gl.getShaderParameter(shader, gl.COMPILE_STATUS)){
+        console.error(gl.getShaderInfoLog(shader));
+    }
+    return shader;
+}
+
+const prog = gl.createProgram();
+gl.attachShader(prog, compile(vs, gl.VERTEX_SHADER));
+gl.attachShader(prog, compile(fs, gl.FRAGMENT_SHADER));
+gl.linkProgram(prog);
+gl.useProgram(prog);
+
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+
+const posLoc = gl.getAttribLocation(prog,'aPosition');
+gl.enableVertexAttribArray(posLoc);
+gl.vertexAttribPointer(posLoc,2,gl.FLOAT,false,0,0);
+
+const resLoc = gl.getUniformLocation(prog,'uResolution');
+const timeLoc = gl.getUniformLocation(prog,'uTime');
+
+function render(time){
+    gl.uniform2f(resLoc, canvas.width, canvas.height);
+    gl.uniform1f(timeLoc, time*0.001);
+    gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
+    requestAnimationFrame(render);
+}
+render(0);
+</script>
+</body>
+</html>

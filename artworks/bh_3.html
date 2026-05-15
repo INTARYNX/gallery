@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BH/3</title>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: radial-gradient(ellipse at center, #0B0B1E 0%, #000 100%);
+            overflow: hidden;
+        }
+        canvas {
+            max-width: 100%;
+            max-height: 100vh;
+            border-radius: 24px;
+            box-shadow:
+                0 0 80px rgba(255, 61, 127, 0.15),
+                0 0 120px rgba(0, 245, 212, 0.1),
+                inset 0 0 40px rgba(0,0,0,0.4);
+        }
+    </style>
+</head>
+<body>
+    <canvas id="c"></canvas>
+    <script>
+        const c = document.getElementById('c');
+        const g = c.getContext('2d');
+        const VIEW = Math.min(window.innerWidth, window.innerHeight, 800);
+        // Canvas interne 2x plus grand : on ne voit que le centre via CSS
+        const S = VIEW * 2;
+        c.width = c.height = S;
+        c.style.width = VIEW + 'px';
+        c.style.height = VIEW + 'px';
+        c.style.objectFit = 'none';
+        c.style.objectPosition = 'center';
+        const H = S / 2;
+
+        // Palette Bauhaus moderne : teintes primaires désaturées + accents contemporains
+        const palette = [
+            '#E63946', // rouge terracotta
+            '#F4A261', // ocre chaud
+            '#E9C46A', // jaune moutarde
+            '#2A9D8F', // vert émeraude
+            '#264653', // bleu nuit
+            '#F1FAEE', // blanc cassé
+            '#1D1D1D'  // noir profond
+        ];
+
+        let squares = [];
+        let zoom = 1, tZoom = 1, fc = 0, t = 0;
+
+        function init() {
+            // Carré racine + premiers enfants avec birth très ancien -> visibles d'emblée
+            const root = {
+                cx: H, cy: H, s: S, gen: 0,
+                color: palette[Math.floor(Math.random() * palette.length)],
+                birth: -999
+            };
+            squares.push(root);
+            addChildren(root, true);
+            for (let i = 0; i < squares.length; i++) {
+                squares[i].birth = -999;
+            }
+        }
+
+        // Mélange un tableau (Fisher-Yates)
+        function shuffle(arr) {
+            const a = arr.slice();
+            for (let i = a.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [a[i], a[j]] = [a[j], a[i]];
+            }
+            return a;
+        }
+
+        // 5 sous-carrés : 4 coins + centre. Chacun reçoit sa propre couleur,
+        // attribuée de façon déterministe -> stable à vie.
+        function addChildren(p, instantBirth) {
+            if (p.childrenAdded) return;
+            p.childrenAdded = true;
+            const ns = p.s / 3;
+            const cg = p.gen + 1;
+
+            // Grille 3x3 complète : 9 sous-carrés couvrant entièrement le parent
+            const positions = [];
+            for (let row = -1; row <= 1; row++) {
+                for (let col = -1; col <= 1; col++) {
+                    positions.push([p.cx + col * ns, p.cy + row * ns]);
+                }
+            }
+
+            const birthTime = instantBirth ? -999 : t;
+
+            for (let i = 0; i < positions.length; i++) {
+                const [x, y] = positions[i];
+                squares.push({
+                    cx: x, cy: y, s: ns, gen: cg,
+                    color: palette[Math.floor(Math.random() * palette.length)],
+                    accent: Math.floor(Math.random() * 7), // 0=dot, 1=ring, 2-6=rien
+                    birth: birthTime
+                });
+            }
+        }
+
+        // Normalisation : zoom trop grand -> on l'applique aux coordonnées monde
+        // et on remet zoom=1, en gardant le centre (H,H) fixe.
+        // On décale aussi toutes les gen de -1 pour que les couleurs restent stables
+        // (le zoom x3 = descente d'un niveau dans la fractale = gen+1 visuellement,
+        //  donc on décrémente gen pour compenser).
+        function normalize() {
+            const k = zoom;
+            for (let i = 0, n = squares.length; i < n; i++) {
+                const sq = squares[i];
+                sq.cx = H + (sq.cx - H) * k;
+                sq.cy = H + (sq.cy - H) * k;
+                sq.s *= k;
+                sq.gen -= 1;
+            }
+            zoom = 1;
+            tZoom = 1;
+        }
+
+        // Retire les carrés hors écran ou invisibles pour éviter que la liste gonfle
+        function prune() {
+            const out = [];
+            for (let i = 0, n = squares.length; i < n; i++) {
+                const sq = squares[i];
+                const ss = sq.s * zoom;
+                // Trop petit pour être vu ET pas en phase de fade in -> on le jette
+                const age = t - sq.birth;
+                if (ss < 1 && age > 1) continue;
+                // Trop gros ET hors écran (ses bords ne traversent plus l'écran)
+                const sx = (sq.cx - H) * zoom + H;
+                const sy = (sq.cy - H) * zoom + H;
+                const half = ss / 2;
+                if (sx + half < 0 || sx - half > S || sy + half < 0 || sy - half > S) continue;
+                out.push(sq);
+            }
+            squares = out;
+        }
+
+        function draw() {
+            g.fillStyle = '#0B0B1E';
+            g.fillRect(0, 0, S, S);
+
+            g.save();
+            g.translate(H, H);
+            g.scale(zoom, zoom);
+            g.rotate(t * 0.15);
+            g.translate(-H, -H);
+
+            const lw = 1 / zoom;
+
+            // Pas de tri : les carrés sont déjà dans l'ordre de création,
+            // qui correspond à l'ordre de profondeur (parents ajoutés avant enfants)
+
+            for (let i = 0, n = squares.length; i < n; i++) {
+                const sq = squares[i];
+                const half = sq.s / 2;
+
+                // Cull visuel à l'écran
+                const sx = (sq.cx - H) * zoom + H;
+                const sy = (sq.cy - H) * zoom + H;
+                const ss = sq.s * zoom;
+                if (sx + ss / 2 < 0 || sx - ss / 2 > S ||
+                    sy + ss / 2 < 0 || sy - ss / 2 > S) continue;
+                if (ss < 0.5) continue;
+
+                const age = t - sq.birth;
+                const alpha = Math.min(1, age / 0.6);
+
+                g.globalAlpha = alpha;
+
+                // Remplissage plein
+                g.fillStyle = sq.color;
+                g.fillRect(sq.cx - half, sq.cy - half, sq.s, sq.s);
+
+                // Fin liseré sombre pour définir les formes sans être agressif
+                g.strokeStyle = 'rgba(11, 11, 30, 0.6)';
+                g.lineWidth = lw;
+                g.strokeRect(sq.cx - half, sq.cy - half, sq.s, sq.s);
+
+                // Accent : uniquement sur les carrés FEUILLES (sans enfants)
+                // Apparition en fade dès 8px, plein à 25px
+                if (ss > 8 && !sq.childrenAdded) {
+                    const accentAlpha = Math.min(1, (ss - 8) / 17) * alpha;
+                    if (sq.accent === 0) {
+                        g.globalAlpha = accentAlpha;
+                        g.fillStyle = 'rgba(255,255,255,0.85)';
+                        g.beginPath();
+                        g.arc(sq.cx, sq.cy, sq.s * 0.12, 0, Math.PI * 2);
+                        g.fill();
+                        g.globalAlpha = alpha;
+                    } else if (sq.accent === 1) {
+                        g.globalAlpha = accentAlpha;
+                        g.strokeStyle = 'rgba(255,255,255,0.7)';
+                        g.lineWidth = sq.s * 0.04;
+                        g.beginPath();
+                        g.arc(sq.cx, sq.cy, sq.s * 0.28, 0, Math.PI * 2);
+                        g.stroke();
+                        g.globalAlpha = alpha;
+                    }
+                }
+            }
+            g.globalAlpha = 1;
+
+            g.restore();
+        }
+
+        function loop() {
+            fc++;
+            t += 0.016;
+
+            // ZOOM AVANT continu : la cible augmente sans cesse
+            tZoom *= 1.015;
+            zoom += (tZoom - zoom) * 0.08;
+
+            // Subdivise UNIQUEMENT les carrés proches du centre de zoom (H, H)
+            // -> on ajoute du détail seulement là où on zoome, pas sur les bords
+            // qui vont bientôt sortir de l'écran.
+            const toSubdivide = [];
+            for (let i = 0, n = squares.length; i < n; i++) {
+                const sq = squares[i];
+                if (sq.childrenAdded) continue;
+                if (sq.s * zoom < S * 0.01) continue;
+
+                // Distance en coords écran entre le centre du carré et le centre de zoom
+                const sx = (sq.cx - H) * zoom + H;
+                const sy = (sq.cy - H) * zoom + H;
+                const dx = sx - H;
+                const dy = sy - H;
+                const ss = sq.s * zoom;
+                // Le carré doit CONTENIR le centre de l'écran (là où on zoome)
+                if (Math.abs(dx) < ss / 2 && Math.abs(dy) < ss / 2) {
+                    toSubdivide.push(sq);
+                }
+            }
+            // Pendant les 30 premières frames, les nouveaux carrés apparaissent
+            // instantanément (birth ancien) pour éviter un fade massif au démarrage
+            const instantBirth = fc < 30;
+            for (let i = 0; i < toSubdivide.length; i++) {
+                addChildren(toSubdivide[i], instantBirth);
+            }
+
+            // Normalise quand zoom atteint exactement 3 : on applique k=3 aux
+            // coordonnées monde et on décale gen de -1 -> transition mathématiquement
+            // invisible (auto-similarité x3 de la fractale).
+            if (zoom >= 3) {
+                // Force k=3 exact pour que la compensation gen -1 soit parfaite
+                const k = 3;
+                for (let i = 0, n = squares.length; i < n; i++) {
+                    const sq = squares[i];
+                    sq.cx = H + (sq.cx - H) * k;
+                    sq.cy = H + (sq.cy - H) * k;
+                    sq.s *= k;
+                    sq.gen -= 1;
+                }
+                zoom = zoom / k;
+                tZoom = tZoom / k;
+                // PAS de prune() ici : la normalisation ne doit rien supprimer
+                // visuellement. Les carrés hors écran seront retirés au prune périodique.
+            }
+
+            // Pruning périodique pour garder la liste petite en permanence
+            if (fc % 15 === 0) {
+                prune();
+            }
+
+            draw();
+            requestAnimationFrame(loop);
+        }
+
+        init();
+        loop();
+    </script>
+</body>
+</html>

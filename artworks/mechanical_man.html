@@ -1,0 +1,948 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The Incredible Mecanical Man</title>
+  <link href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&family=Rye&display=swap" rel="stylesheet">
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      background: #1a0f0a;
+    }
+    canvas {
+      border: 12px solid #6b3410;
+      box-shadow: 0 0 40px rgba(0, 0, 0, 0.8), inset 0 0 20px rgba(0, 0, 0, 0.3);
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    let time = 0;
+
+    function resizeCanvas() {
+      const size = Math.min(window.innerWidth - 40, window.innerHeight - 40, 800);
+      canvas.width = size;
+      canvas.height = size;
+    }
+
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+
+    function drawRobot() {
+      const w = canvas.width;
+      const h = canvas.height;
+      const s = w / 800;
+      
+      ctx.clearRect(0, 0, w, h);
+      
+      // Background
+      const bg = ctx.createRadialGradient(w * 0.3, h * 0.3, 0, w / 2, h / 2, w * 0.8);
+      bg.addColorStop(0, '#fbf6ec');
+      bg.addColorStop(0.3, '#f5ead3');
+      bg.addColorStop(0.6, '#ecdcc4');
+      bg.addColorStop(1, '#e0d0b8');
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, w, h);
+      
+      // Plasma effect
+      for (let i = 0; i < 3; i++) {
+        const plasmaGrad = ctx.createRadialGradient(
+          w * (0.2 + i * 0.3) + Math.sin(time * 0.3 + i) * 50 * s,
+          h * (0.3 + i * 0.2) + Math.cos(time * 0.4 + i) * 50 * s,
+          0,
+          w * (0.2 + i * 0.3),
+          h * (0.3 + i * 0.2),
+          w * 0.4
+        );
+        plasmaGrad.addColorStop(0, 'rgba(235, 220, 195, 0.15)');
+        plasmaGrad.addColorStop(0.5, 'rgba(230, 215, 190, 0.08)');
+        plasmaGrad.addColorStop(1, 'rgba(240, 230, 210, 0)');
+        ctx.fillStyle = plasmaGrad;
+        ctx.fillRect(0, 0, w, h);
+      }
+      
+      // Circus tent backdrop - close up, behind robot
+      ctx.save();
+      
+      // Large draped fabric panels
+      const numDrapes = 5;
+      for(let i = 0; i < numDrapes; i++) {
+        const xPos = (w / numDrapes) * i;
+        const color = i % 2 === 0 ? '#d4c4a8' : '#c4b498';
+        
+        // Vertical drape panel
+        const drapeGrad = ctx.createLinearGradient(xPos, 0, xPos + w/numDrapes, 0);
+        drapeGrad.addColorStop(0, color);
+        drapeGrad.addColorStop(0.5, i % 2 === 0 ? '#e0d0b8' : '#d4c4a8');
+        drapeGrad.addColorStop(1, color);
+        ctx.fillStyle = drapeGrad;
+        
+        ctx.beginPath();
+        ctx.moveTo(xPos, 0);
+        // Curved bottom edge suggesting fabric drape
+        ctx.lineTo(xPos, h * 0.80);
+        ctx.quadraticCurveTo(xPos + w/(numDrapes*2), h * 0.83, xPos + w/numDrapes, h * 0.80);
+        ctx.lineTo(xPos + w/numDrapes, 0);
+        ctx.closePath();
+        ctx.fill();
+        
+        // Fold shadow
+        ctx.fillStyle = 'rgba(100, 80, 60, 0.1)';
+        ctx.beginPath();
+        ctx.moveTo(xPos + w/(numDrapes*2) - 10*s, 0);
+        ctx.lineTo(xPos + w/(numDrapes*2) - 10*s, h * 0.80);
+        ctx.lineTo(xPos + w/(numDrapes*2) + 10*s, h * 0.80);
+        ctx.lineTo(xPos + w/(numDrapes*2) + 10*s, 0);
+        ctx.fill();
+      }
+      
+      // Top fabric swag (above rope) for relief
+      for(let i = 0; i < numDrapes; i++) {
+        const xPos = (w / numDrapes) * i;
+        const swagColor = i % 2 === 0 ? '#c4b49a' : '#b4a48a';
+        ctx.fillStyle = swagColor;
+        ctx.beginPath();
+        ctx.moveTo(xPos, 0);
+        ctx.lineTo(xPos, h * 0.22 - 15*s);
+        ctx.quadraticCurveTo(xPos + w/(numDrapes*2), h * 0.22, xPos + w/numDrapes, h * 0.22 - 15*s);
+        ctx.lineTo(xPos + w/numDrapes, 0);
+        ctx.closePath();
+        ctx.fill();
+        
+        // Shadow under swag
+        ctx.fillStyle = 'rgba(100, 80, 60, 0.15)';
+        ctx.beginPath();
+        ctx.moveTo(xPos, h * 0.22 - 15*s);
+        ctx.quadraticCurveTo(xPos + w/(numDrapes*2), h * 0.22, xPos + w/numDrapes, h * 0.22 - 15*s);
+        ctx.quadraticCurveTo(xPos + w/(numDrapes*2), h * 0.22 + 8*s, xPos, h * 0.22 - 15*s);
+        ctx.fill();
+      }
+      
+      ctx.restore();
+      
+      // Texture
+      ctx.fillStyle = 'rgba(101, 67, 33, 0.04)';
+      for (let i = 0; i < 500 * s; i++) {
+        ctx.fillRect(Math.random() * w, Math.random() * h, 2 * s, 2 * s);
+      }
+
+      // Borders
+      ctx.strokeStyle = '#8B1A1A';
+      ctx.lineWidth = 8 * s;
+      ctx.strokeRect(10 * s, 10 * s, w - 20 * s, h - 20 * s);
+      
+      ctx.strokeStyle = '#C9A227';
+      ctx.lineWidth = 4 * s;
+      ctx.strokeRect(20 * s, 20 * s, w - 40 * s, h - 40 * s);
+
+      // Corner ornaments
+      const corner = (x, y, fx, fy) => {
+        ctx.save();
+        ctx.translate(x, y);
+        if (fx) ctx.scale(-1, 1);
+        if (fy) ctx.scale(1, -1);
+        ctx.fillStyle = '#8B1A1A';
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(30 * s, 0);
+        ctx.lineTo(0, 30 * s);
+        ctx.fill();
+        ctx.fillStyle = '#C9A227';
+        ctx.beginPath();
+        ctx.arc(8 * s, 8 * s, 5 * s, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      };
+      
+      corner(30 * s, 30 * s, 0, 0);
+      corner(w - 30 * s, 30 * s, 1, 0);
+      corner(30 * s, h - 30 * s, 0, 1);
+      corner(w - 30 * s, h - 30 * s, 1, 1);
+
+      // Top banner
+      ctx.fillStyle = '#8B1A1A';
+      ctx.fillRect(50 * s, 50 * s, w - 100 * s, 80 * s);
+      
+      ctx.fillStyle = '#C9A227';
+      const triangleCount = Math.floor((w - 100 * s) / (20 * s));
+      for (let i = 0; i < triangleCount; i++) {
+        const x = 50 * s + i * 20 * s;
+        if (x + 20 * s > w - 50 * s) break;
+        ctx.beginPath();
+        ctx.moveTo(x, 50 * s);
+        ctx.lineTo(x + 10 * s, 40 * s);
+        ctx.lineTo(x + 20 * s, 50 * s);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(x, 130 * s);
+        ctx.lineTo(x + 10 * s, 140 * s);
+        ctx.lineTo(x + 20 * s, 130 * s);
+        ctx.fill();
+      }
+      
+      // Top text
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+      ctx.font = `bold ${42 * s}px "Alfa Slab One", serif`;
+      ctx.fillText('THE INCREDIBLE', w / 2 + 2 * s, 75 * s + 2 * s);
+      ctx.font = `${52 * s}px "Rye", serif`;
+      ctx.fillText('MECHANICAL MAN', w / 2 + 2 * s, 110 * s + 2 * s);
+      
+      ctx.fillStyle = '#E8C547';
+      ctx.font = `bold ${42 * s}px "Alfa Slab One", serif`;
+      ctx.fillText('THE INCREDIBLE', w / 2, 75 * s);
+      ctx.font = `${52 * s}px "Rye", serif`;
+      ctx.fillText('MECHANICAL MAN', w / 2, 110 * s);
+      
+      ctx.strokeStyle = '#8B1A1A';
+      ctx.lineWidth = 1.5 * s;
+      ctx.font = `bold ${42 * s}px "Alfa Slab One", serif`;
+      ctx.strokeText('THE INCREDIBLE', w / 2, 75 * s);
+      ctx.font = `${52 * s}px "Rye", serif`;
+      ctx.strokeText('MECHANICAL MAN', w / 2, 110 * s);
+
+      // Stars
+      ctx.fillStyle = '#E8C547';
+      [[80, 90], [w/s - 80, 90]].forEach(([x, y]) => {
+        ctx.save();
+        ctx.translate(x * s, y * s);
+        ctx.beginPath();
+        for (let i = 0; i < 5; i++) {
+          ctx.lineTo(Math.cos((i * 4 * Math.PI) / 5) * 15 * s, Math.sin((i * 4 * Math.PI) / 5) * 15 * s);
+        }
+        ctx.fill();
+        ctx.restore();
+      });
+
+      const cx = w / 2;
+      const cy = h / 2 + 50 * s + Math.sin(time * 0.4) * 12 * s;
+      const bounce = Math.sin(time * 2) * 3 * s;
+      const leftArmY = Math.sin(time * 0.5 + 0.7) * 18 * s;
+      const leftWristX = Math.sin(time * 0.7 + 1.2) * 12 * s;
+      const leftHandRotate = Math.sin(time * 0.8 + 2.5) * 0.4;
+      const rightArmX = Math.sin(time * 0.6 + 2.1) * 12 * s;
+      const rightElbowFlex = Math.abs(Math.sin(time * 0.55 + 3.5)) * 15 * s;
+      const barbellRotate = Math.sin(time * 0.4 + 1.5) * 0.25;
+      const leftKneeFlex = Math.abs(Math.sin(time * 0.4)) * 15 * s;
+      const rightKneeFlex = Math.abs(Math.sin(time * 0.4 + 1.5)) * 15 * s;
+      const py = h - 140 * s;
+
+      // Platform
+      ctx.fillStyle = '#654321';
+      ctx.fillRect(50 * s, py, w - 100 * s, 80 * s);
+      
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(50 * s, py, w - 100 * s, 80 * s);
+      ctx.clip();
+      
+      ctx.strokeStyle = '#4a2f1a';
+      ctx.lineWidth = 3 * s;
+      for (let i = 0; i < w - 100 * s; i += 40 * s) {
+        ctx.strokeRect(50 * s + i, py, 38 * s, 80 * s);
+      }
+      
+      ctx.restore();
+
+      // Shadow
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+      ctx.beginPath();
+      ctx.ellipse(cx, py + 10 * s, 100 * s, 20 * s, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Barbell
+      const by = cy - 200 * s + bounce;
+      const bw = 280 * s;
+      ctx.save();
+      ctx.translate(cx + 70 * s + rightArmX, by);
+      ctx.rotate(barbellRotate);
+      ctx.fillStyle = '#1a1a1a';
+      ctx.fillRect(-bw / 2, -8 * s, bw, 16 * s);
+      
+      for (let side of [-1, 1]) {
+        const x = side * (bw / 2 - 35 * s);
+        const wg = ctx.createRadialGradient(x - 10 * s, -15 * s, 5 * s, x, 0, 60 * s);
+        wg.addColorStop(0, '#333');
+        wg.addColorStop(0.7, '#111');
+        wg.addColorStop(1, '#000');
+        ctx.fillStyle = wg;
+        ctx.beginPath();
+        ctx.arc(x, 0, 60 * s, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+        ctx.beginPath();
+        ctx.arc(x - 18 * s, -18 * s, 22 * s, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+
+      // Legs
+      const legGrad = ctx.createLinearGradient(cx - 40 * s, cy + 50 * s, cx - 40 * s, py);
+      legGrad.addColorStop(0, '#5a5a5a');
+      legGrad.addColorStop(1, '#3a3a3a');
+      ctx.strokeStyle = legGrad;
+      ctx.lineWidth = 24 * s;
+      ctx.lineCap = 'round';
+      
+      const kneeY = cy + 50 * s + (py + 5 * s - (cy + 50 * s)) / 2;
+      const leftKneeX = cx - 32 * s - leftKneeFlex;
+      const rightKneeX = cx + 32 * s + rightKneeFlex;
+      
+      ctx.beginPath();
+      ctx.moveTo(cx - 25 * s, cy + 50 * s);
+      ctx.lineTo(leftKneeX, kneeY);
+      ctx.lineTo(cx - 40 * s, py + 5 * s);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(cx + 25 * s, cy + 50 * s);
+      ctx.lineTo(rightKneeX, kneeY);
+      ctx.lineTo(cx + 40 * s, py + 5 * s);
+      ctx.stroke();
+      
+      // Knee bolts
+      const drawKneeBolt = (x, y) => {
+        ctx.fillStyle = '#5a5a5a';
+        ctx.beginPath();
+        ctx.arc(x, y, 14 * s, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#2a2a2a';
+        ctx.lineWidth = 2 * s;
+        ctx.stroke();
+        
+        ctx.fillStyle = '#6a6a6a';
+        ctx.beginPath();
+        ctx.arc(x - 4 * s, y - 4 * s, 6 * s, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.fillStyle = '#3a3a3a';
+        ctx.beginPath();
+        ctx.arc(x, y, 5 * s, 0, Math.PI * 2);
+        ctx.fill();
+      };
+      
+      drawKneeBolt(leftKneeX, kneeY);
+      drawKneeBolt(rightKneeX, kneeY);
+      
+      // Feet
+      ctx.fillStyle = '#2a2a2a';
+      ctx.fillRect(cx - 65 * s, py, 50 * s, 25 * s);
+      ctx.fillRect(cx + 15 * s, py, 50 * s, 25 * s);
+      
+      // Rivets on feet
+      ctx.fillStyle = '#555';
+      for (let x = cx - 55 * s; x < cx - 20 * s; x += 15 * s) {
+        ctx.beginPath();
+        ctx.arc(x, py + 12 * s, 3 * s, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      for (let x = cx + 25 * s; x < cx + 60 * s; x += 15 * s) {
+        ctx.beginPath();
+        ctx.arc(x, py + 12 * s, 3 * s, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Torso
+      const sh = 90 * s / 8;
+      
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(cx - 60 * s, cy - 20 * s);
+      ctx.arcTo(cx - 60 * s, cy - 40 * s, cx - 40 * s, cy - 40 * s, 15 * s);
+      ctx.lineTo(cx + 40 * s, cy - 40 * s);
+      ctx.arcTo(cx + 60 * s, cy - 40 * s, cx + 60 * s, cy - 20 * s, 15 * s);
+      ctx.lineTo(cx + 60 * s, cy + 30 * s);
+      ctx.arcTo(cx + 60 * s, cy + 50 * s, cx + 40 * s, cy + 50 * s, 15 * s);
+      ctx.lineTo(cx - 40 * s, cy + 50 * s);
+      ctx.arcTo(cx - 60 * s, cy + 50 * s, cx - 60 * s, cy + 30 * s, 15 * s);
+      ctx.closePath();
+      ctx.clip();
+      
+      for (let i = 0; i < 8; i++) {
+        if (i % 2 === 0) {
+          const stripeGrad = ctx.createLinearGradient(cx - 60 * s, cy - 40 * s + i * sh, cx + 60 * s, cy - 40 * s + i * sh);
+          stripeGrad.addColorStop(0, '#0a0a0a');
+          stripeGrad.addColorStop(0.5, '#000');
+          stripeGrad.addColorStop(1, '#0a0a0a');
+          ctx.fillStyle = stripeGrad;
+        } else {
+          const stripeGrad = ctx.createLinearGradient(cx - 60 * s, cy - 40 * s + i * sh, cx + 60 * s, cy - 40 * s + i * sh);
+          stripeGrad.addColorStop(0, '#e8e8e8');
+          stripeGrad.addColorStop(0.5, '#fff');
+          stripeGrad.addColorStop(1, '#e8e8e8');
+          ctx.fillStyle = stripeGrad;
+        }
+        ctx.fillRect(cx - 60 * s, cy - 40 * s + i * sh, 120 * s, sh);
+      }
+      
+      ctx.restore();
+      
+      ctx.strokeStyle = '#1a1a1a';
+      ctx.lineWidth = 4 * s;
+      ctx.beginPath();
+      ctx.moveTo(cx - 60 * s, cy - 20 * s);
+      ctx.arcTo(cx - 60 * s, cy - 40 * s, cx - 40 * s, cy - 40 * s, 15 * s);
+      ctx.lineTo(cx + 40 * s, cy - 40 * s);
+      ctx.arcTo(cx + 60 * s, cy - 40 * s, cx + 60 * s, cy - 20 * s, 15 * s);
+      ctx.lineTo(cx + 60 * s, cy + 30 * s);
+      ctx.arcTo(cx + 60 * s, cy + 50 * s, cx + 40 * s, cy + 50 * s, 15 * s);
+      ctx.lineTo(cx - 40 * s, cy + 50 * s);
+      ctx.arcTo(cx - 60 * s, cy + 50 * s, cx - 60 * s, cy + 30 * s, 15 * s);
+      ctx.closePath();
+      ctx.stroke();
+      
+      // Rivets on torso
+      ctx.fillStyle = '#666';
+      for (let y = cy - 30 * s; y < cy + 40 * s; y += 20 * s) {
+        ctx.beginPath();
+        ctx.arc(cx - 55 * s, y, 3 * s, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(cx + 55 * s, y, 3 * s, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Arms
+      const armGrad = ctx.createLinearGradient(cx - 60 * s, cy, cx - 130 * s, cy - 70 * s);
+      armGrad.addColorStop(0, '#6a6a6a');
+      armGrad.addColorStop(1, '#4a4a4a');
+      ctx.strokeStyle = armGrad;
+      ctx.lineWidth = 45 * s;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(cx - 60 * s, cy);
+      ctx.lineTo(cx - 130 * s, cy + leftArmY - 40 * s);
+      ctx.stroke();
+      
+      ctx.lineWidth = 26 * s;
+      ctx.lineJoin = 'miter';
+      ctx.beginPath();
+      ctx.moveTo(cx - 130 * s, cy + leftArmY - 40 * s);
+      ctx.lineTo(cx - 130 * s + leftWristX, cy - 130 * s + leftArmY);
+      ctx.stroke();
+      
+      const rightArmGrad = ctx.createLinearGradient(cx + 60 * s, cy, cx + 70 * s + rightArmX, by);
+      rightArmGrad.addColorStop(0, '#6a6a6a');
+      rightArmGrad.addColorStop(1, '#4a4a4a');
+      ctx.strokeStyle = rightArmGrad;
+      ctx.lineWidth = 45 * s;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(cx + 60 * s, cy);
+      const rightElbowX = cx + 65 * s + rightArmX * 0.5 + rightElbowFlex;
+      const rightElbowY = (cy + by) / 2;
+      ctx.lineTo(rightElbowX, rightElbowY);
+      ctx.stroke();
+      
+      ctx.lineWidth = 26 * s;
+      ctx.beginPath();
+      ctx.moveTo(rightElbowX, rightElbowY);
+      ctx.lineTo(cx + 70 * s + rightArmX, by);
+      ctx.stroke();
+      
+      // Shoulder bolts
+      const drawShoulderBolt = (x, y) => {
+        ctx.fillStyle = '#5a5a5a';
+        ctx.strokeStyle = '#2a2a2a';
+        ctx.lineWidth = 2 * s;
+        ctx.beginPath();
+        for (let i = 0; i < 6; i++) {
+          const angle = (Math.PI / 3) * i;
+          const r = 12 * s;
+          const bx = x + Math.cos(angle) * r;
+          const by = y + Math.sin(angle) * r;
+          if (i === 0) ctx.moveTo(bx, by);
+          else ctx.lineTo(bx, by);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = '#3a3a3a';
+        ctx.beginPath();
+        ctx.arc(x, y, 6 * s, 0, Math.PI * 2);
+        ctx.fill();
+      };
+      
+      drawShoulderBolt(cx - 60 * s, cy);
+      drawShoulderBolt(cx + 60 * s, cy);
+      
+      // Elbow bolts
+      const drawRoundElbow = (x, y) => {
+        ctx.fillStyle = '#5a5a5a';
+        ctx.beginPath();
+        ctx.arc(x, y, 14 * s, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#2a2a2a';
+        ctx.lineWidth = 2 * s;
+        ctx.stroke();
+        
+        ctx.fillStyle = '#6a6a6a';
+        ctx.beginPath();
+        ctx.arc(x - 4 * s, y - 4 * s, 6 * s, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.fillStyle = '#3a3a3a';
+        ctx.beginPath();
+        ctx.arc(x, y, 5 * s, 0, Math.PI * 2);
+        ctx.fill();
+      };
+      
+      drawRoundElbow(cx - 130 * s, cy + leftArmY - 40 * s);
+      drawRoundElbow(rightElbowX, rightElbowY);
+      
+      // Hands
+      // Left hand (cyberpunk style with fingers)
+      ctx.save();
+      ctx.translate(cx - 130 * s + leftWristX, cy - 130 * s + leftArmY);
+      ctx.rotate(leftHandRotate);
+      
+      const leftHandGrad = ctx.createRadialGradient(-5 * s, -5 * s, 0, 0, 0, 18 * s);
+      leftHandGrad.addColorStop(0, '#5a5a5a');
+      leftHandGrad.addColorStop(0.6, '#3a3a3a');
+      leftHandGrad.addColorStop(1, '#1a1a1a');
+      ctx.fillStyle = leftHandGrad;
+      ctx.beginPath();
+      ctx.arc(0, 0, 18 * s, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // Knuckle lines
+      ctx.strokeStyle = '#2a2a2a';
+      ctx.lineWidth = 2 * s;
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.moveTo(-12 * s, -8 * s + i * 8 * s);
+        ctx.lineTo(12 * s, -8 * s + i * 8 * s);
+        ctx.stroke();
+      }
+      
+      // Metallic highlights
+      ctx.fillStyle = 'rgba(200, 200, 200, 0.3)';
+      ctx.beginPath();
+      ctx.arc(-6 * s, -8 * s, 4 * s, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // Fingers extending upward from palm edge
+      ctx.strokeStyle = '#3a3a3a';
+      ctx.lineWidth = 5 * s;
+      ctx.lineCap = 'round';
+      
+      // Thumb (side - right side now)
+      ctx.beginPath();
+      ctx.moveTo(16 * s, 0);
+      ctx.lineTo(26 * s, -10 * s);
+      ctx.stroke();
+      
+      // Finger 1 (index)
+      ctx.beginPath();
+      ctx.moveTo(-10 * s, -15 * s);
+      ctx.lineTo(-10 * s, -35 * s);
+      ctx.stroke();
+      
+      // Finger 2 (middle)
+      ctx.beginPath();
+      ctx.moveTo(-2 * s, -17 * s);
+      ctx.lineTo(-2 * s, -38 * s);
+      ctx.stroke();
+      
+      // Finger 3 (ring)
+      ctx.beginPath();
+      ctx.moveTo(6 * s, -15 * s);
+      ctx.lineTo(6 * s, -35 * s);
+      ctx.stroke();
+      
+      // Finger 4 (pinky)
+      ctx.beginPath();
+      ctx.moveTo(14 * s, -12 * s);
+      ctx.lineTo(14 * s, -30 * s);
+      ctx.stroke();
+      
+      // Finger joints (small circles)
+      ctx.fillStyle = '#2a2a2a';
+      [[26, -10], [-10, -25], [-2, -28], [6, -25], [14, -22]].forEach(([x, y]) => {
+        ctx.beginPath();
+        ctx.arc(x * s, y * s, 3 * s, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      
+      // Finger tips
+      ctx.fillStyle = '#4a4a4a';
+      [[26, -10], [-10, -35], [-2, -38], [6, -35], [14, -30]].forEach(([x, y]) => {
+        ctx.beginPath();
+        ctx.arc(x * s, y * s, 2.5 * s, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      
+      ctx.restore();
+      
+      // Right hand (cyberpunk style)
+      ctx.save();
+      ctx.translate(cx + 70 * s + rightArmX, by);
+      
+      const rightHandGrad = ctx.createRadialGradient(-5 * s, -5 * s, 0, 0, 0, 18 * s);
+      rightHandGrad.addColorStop(0, '#5a5a5a');
+      rightHandGrad.addColorStop(0.6, '#3a3a3a');
+      rightHandGrad.addColorStop(1, '#1a1a1a');
+      ctx.fillStyle = rightHandGrad;
+      ctx.beginPath();
+      ctx.arc(0, 0, 18 * s, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // Knuckle lines
+      ctx.strokeStyle = '#2a2a2a';
+      ctx.lineWidth = 2 * s;
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.moveTo(-12 * s, -8 * s + i * 8 * s);
+        ctx.lineTo(12 * s, -8 * s + i * 8 * s);
+        ctx.stroke();
+      }
+      
+      // Metallic highlights
+      ctx.fillStyle = 'rgba(200, 200, 200, 0.3)';
+      ctx.beginPath();
+      ctx.arc(-6 * s, -8 * s, 4 * s, 0, Math.PI * 2);
+      ctx.fill();
+      
+      ctx.restore();
+
+      // Neck
+      const neckGrad = ctx.createLinearGradient(cx - 25 * s, cy - 50 * s, cx + 25 * s, cy - 50 * s);
+      neckGrad.addColorStop(0, '#4a4a4a');
+      neckGrad.addColorStop(0.5, '#5a5a5a');
+      neckGrad.addColorStop(1, '#4a4a4a');
+      ctx.fillStyle = neckGrad;
+      ctx.fillRect(cx - 25 * s, cy - 50 * s, 50 * s, 20 * s);
+      ctx.strokeStyle = '#2a2a2a';
+      ctx.lineWidth = 2 * s;
+      ctx.strokeRect(cx - 25 * s, cy - 50 * s, 50 * s, 20 * s);
+      
+      // Neck rivets
+      ctx.fillStyle = '#666';
+      ctx.beginPath();
+      ctx.arc(cx - 20 * s, cy - 40 * s, 3 * s, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(cx + 20 * s, cy - 40 * s, 3 * s, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Head
+      const headGrad = ctx.createLinearGradient(cx - 50 * s, cy - 130 * s, cx + 50 * s, cy - 50 * s);
+      headGrad.addColorStop(0, '#6a6a6a');
+      headGrad.addColorStop(0.5, '#5a5a5a');
+      headGrad.addColorStop(1, '#4a4a4a');
+      ctx.fillStyle = headGrad;
+      ctx.beginPath();
+      ctx.moveTo(cx - 50 * s, cy - 110 * s);
+      ctx.lineTo(cx - 50 * s, cy - 50 * s);
+      ctx.lineTo(cx + 50 * s, cy - 50 * s);
+      ctx.lineTo(cx + 50 * s, cy - 110 * s);
+      ctx.arcTo(cx + 50 * s, cy - 130 * s, cx, cy - 130 * s, 20 * s);
+      ctx.lineTo(cx, cy - 130 * s);
+      ctx.arcTo(cx - 50 * s, cy - 130 * s, cx - 50 * s, cy - 110 * s, 20 * s);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = '#1a1a1a';
+      ctx.lineWidth = 3 * s;
+      ctx.stroke();
+      
+      // Metallic highlight on head
+      const highlightGrad = ctx.createLinearGradient(cx - 35 * s, cy - 120 * s, cx - 20 * s, cy - 100 * s);
+      highlightGrad.addColorStop(0, 'rgba(255, 255, 255, 0.4)');
+      highlightGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+      ctx.fillStyle = highlightGrad;
+      ctx.beginPath();
+      ctx.ellipse(cx - 25 * s, cy - 110 * s, 15 * s, 25 * s, -0.3, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // Head panel lines
+      ctx.strokeStyle = '#3a3a3a';
+      ctx.lineWidth = 2 * s;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - 128 * s);
+      ctx.lineTo(cx, cy - 50 * s);
+      ctx.stroke();
+      
+      // Rivets on head
+      ctx.fillStyle = '#777';
+      for (let y = cy - 110 * s; y < cy - 60 * s; y += 20 * s) {
+        ctx.beginPath();
+        ctx.arc(cx - 40 * s, y, 3 * s, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(cx + 40 * s, y, 3 * s, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      
+      // Antenna
+      ctx.strokeStyle = '#5a5a5a';
+      ctx.lineWidth = 6 * s;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - 128 * s);
+      ctx.lineTo(cx, cy - 165 * s);
+      ctx.stroke();
+      
+      // Antenna metallic highlight
+      ctx.strokeStyle = '#8a8a8a';
+      ctx.lineWidth = 3 * s;
+      ctx.beginPath();
+      ctx.moveTo(cx - 2 * s, cy - 128 * s);
+      ctx.lineTo(cx - 2 * s, cy - 165 * s);
+      ctx.stroke();
+      
+      // Bolt at the end
+      ctx.fillStyle = '#4a4a4a';
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const angle = (Math.PI / 3) * i;
+        const r = 8 * s;
+        const x = cx + Math.cos(angle) * r;
+        const y = cy - 170 * s + Math.sin(angle) * r;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = '#2a2a2a';
+      ctx.lineWidth = 2 * s;
+      ctx.stroke();
+      
+      // Bolt center
+      ctx.fillStyle = '#3a3a3a';
+      ctx.beginPath();
+      ctx.arc(cx, cy - 170 * s, 4 * s, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Eyes
+      const eg = Math.abs(Math.sin(time * 3)) * 100 + 155;
+      
+      // Left eye
+      const leftEyeGrad = ctx.createRadialGradient(cx - 25 * s, cy - 95 * s, 0, cx - 25 * s, cy - 95 * s, 12 * s);
+      leftEyeGrad.addColorStop(0, `rgb(${eg + 50}, 255, ${eg + 50})`);
+      leftEyeGrad.addColorStop(0.5, `rgb(${eg}, 255, ${eg})`);
+      leftEyeGrad.addColorStop(1, `rgb(${eg - 50}, 200, ${eg - 50})`);
+      ctx.fillStyle = leftEyeGrad;
+      ctx.beginPath();
+      ctx.arc(cx - 25 * s, cy - 95 * s, 12 * s, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // Glow effect left eye
+      ctx.shadowBlur = 15 * s;
+      ctx.shadowColor = `rgb(${eg}, 255, ${eg})`;
+      ctx.fillStyle = `rgba(${eg}, 255, ${eg}, 0.3)`;
+      ctx.beginPath();
+      ctx.arc(cx - 25 * s, cy - 95 * s, 15 * s, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      
+      // Right eye
+      const rightEyeGrad = ctx.createRadialGradient(cx + 25 * s, cy - 95 * s, 0, cx + 25 * s, cy - 95 * s, 12 * s);
+      rightEyeGrad.addColorStop(0, `rgb(${eg + 50}, 255, ${eg + 50})`);
+      rightEyeGrad.addColorStop(0.5, `rgb(${eg}, 255, ${eg})`);
+      rightEyeGrad.addColorStop(1, `rgb(${eg - 50}, 200, ${eg - 50})`);
+      ctx.fillStyle = rightEyeGrad;
+      ctx.beginPath();
+      ctx.arc(cx + 25 * s, cy - 95 * s, 12 * s, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // Glow effect right eye
+      ctx.shadowBlur = 15 * s;
+      ctx.shadowColor = `rgb(${eg}, 255, ${eg})`;
+      ctx.fillStyle = `rgba(${eg}, 255, ${eg}, 0.3)`;
+      ctx.beginPath();
+      ctx.arc(cx + 25 * s, cy - 95 * s, 15 * s, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      
+      // Pupil highlights
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+      ctx.beginPath();
+      ctx.arc(cx - 28 * s, cy - 98 * s, 4 * s, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(cx + 22 * s, cy - 98 * s, 4 * s, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // Scan lines in eyes
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
+      ctx.lineWidth = 1 * s;
+      for (let i = 0; i < 5; i++) {
+        ctx.beginPath();
+        ctx.moveTo(cx - 37 * s, cy - 95 * s + (i - 2) * 5 * s);
+        ctx.lineTo(cx - 13 * s, cy - 95 * s + (i - 2) * 5 * s);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(cx + 13 * s, cy - 95 * s + (i - 2) * 5 * s);
+        ctx.lineTo(cx + 37 * s, cy - 95 * s + (i - 2) * 5 * s);
+        ctx.stroke();
+      }
+
+      // Mouth
+      ctx.strokeStyle = '#1a1a1a';
+      ctx.lineWidth = 3 * s;
+      for (let i = 0; i < 6; i++) {
+        ctx.beginPath();
+        ctx.moveTo(cx - 30 * s + i * 12 * s, cy - 65 * s);
+        ctx.lineTo(cx - 30 * s + i * 12 * s, cy - 58 * s);
+        ctx.stroke();
+      }
+
+      // Moustache
+      ctx.strokeStyle = '#2a2a2a';
+      ctx.lineWidth = 10 * s;
+      ctx.lineCap = 'round';
+      
+      // Left side - angular cyberpunk style
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - 60 * s);
+      ctx.lineTo(cx - 30 * s, cy - 60 * s);
+      ctx.lineTo(cx - 50 * s, cy - 70 * s);
+      ctx.lineTo(cx - 65 * s, cy - 65 * s);
+      ctx.stroke();
+      
+      // Right side - angular cyberpunk style
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - 60 * s);
+      ctx.lineTo(cx + 30 * s, cy - 60 * s);
+      ctx.lineTo(cx + 50 * s, cy - 70 * s);
+      ctx.lineTo(cx + 65 * s, cy - 65 * s);
+      ctx.stroke();
+      
+      // Metallic segments
+      ctx.strokeStyle = '#4a4a4a';
+      ctx.lineWidth = 6 * s;
+      ctx.beginPath();
+      ctx.moveTo(cx - 15 * s, cy - 60 * s);
+      ctx.lineTo(cx - 30 * s, cy - 60 * s);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(cx + 15 * s, cy - 60 * s);
+      ctx.lineTo(cx + 30 * s, cy - 60 * s);
+      ctx.stroke();
+      
+      // Tips
+      ctx.fillStyle = '#3a3a3a';
+      ctx.beginPath();
+      ctx.arc(cx - 65 * s, cy - 65 * s, 6 * s, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(cx + 65 * s, cy - 65 * s, 6 * s, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Chest
+      const chestGrad = ctx.createLinearGradient(cx - 20 * s, cy - 40 * s + sh * 0, cx + 20 * s, cy - 40 * s + sh * 8);
+      chestGrad.addColorStop(0, '#0a0a0a');
+      chestGrad.addColorStop(0.5, '#000');
+      chestGrad.addColorStop(1, '#0a0a0a');
+      ctx.fillStyle = chestGrad;
+      ctx.fillRect(cx - 20 * s, cy - 10 * s, 40 * s, 35 * s);
+      ctx.strokeStyle = '#1a1a1a';
+      ctx.lineWidth = 3 * s;
+      ctx.strokeRect(cx - 20 * s, cy - 10 * s, 40 * s, 35 * s);
+      
+      // Black circle background
+      ctx.fillStyle = '#0a0a0a';
+      ctx.beginPath();
+      ctx.arc(cx, cy + 8 * s, 16 * s, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#2a2a2a';
+      ctx.lineWidth = 2 * s;
+      ctx.stroke();
+      
+      // Electric arc animation (sinusoidal curve)
+      ctx.save();
+      ctx.translate(cx, cy + 8 * s);
+      
+      const arcOffset = time * 8;
+      const arcOffset2 = time * 5.3;
+      ctx.strokeStyle = '#4db8ff';
+      ctx.lineWidth = 2 * s;
+      ctx.lineCap = 'round';
+      ctx.shadowBlur = 8 * s;
+      ctx.shadowColor = '#4db8ff';
+      
+      ctx.beginPath();
+      const startX = -12 * s;
+      const endX = 12 * s;
+      const steps = 20;
+      const stepSize = (endX - startX) / steps;
+      
+      for (let i = 0; i <= steps; i++) {
+        const x = startX + i * stepSize;
+        const y = Math.sin(x * 0.8 + arcOffset) * 8 * s + Math.sin(x * 1.3 + arcOffset2) * 3 * s;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      
+      ctx.shadowBlur = 0;
+      ctx.restore();
+
+      // Bolts
+      ctx.fillStyle = '#777';
+      [[cx - 55 * s, cy + 45 * s], [cx + 55 * s, cy + 45 * s]].forEach(([x, y]) => {
+        ctx.beginPath();
+        ctx.arc(x, y, 5 * s, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      // Bottom banner
+      const bny = h - 120 * s;
+      ctx.fillStyle = '#8B1A1A';
+      ctx.fillRect(50 * s, bny, w - 100 * s, 60 * s);
+      
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(50 * s, bny - 10 * s, w - 100 * s, 80 * s);
+      ctx.clip();
+      
+      ctx.fillStyle = '#C9A227';
+      const bottomTriangleCount = Math.floor((w - 100 * s) / (20 * s));
+      for (let i = 0; i < bottomTriangleCount; i++) {
+        const x = 50 * s + i * 20 * s;
+        if (x + 20 * s > w - 50 * s) break;
+        ctx.beginPath();
+        ctx.moveTo(x, bny);
+        ctx.lineTo(x + 10 * s, bny - 10 * s);
+        ctx.lineTo(x + 20 * s, bny);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(x, bny + 60 * s);
+        ctx.lineTo(x + 10 * s, bny + 70 * s);
+        ctx.lineTo(x + 20 * s, bny + 60 * s);
+        ctx.fill();
+      }
+      
+      ctx.restore();
+      
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+      ctx.font = `${52 * s}px "Rye", serif`;
+      ctx.fillText("PROFESSOR VOLTA'S", w / 2 + 3 * s, bny + 33 * s);
+      
+      ctx.fillStyle = '#E8C547';
+      ctx.font = `${52 * s}px "Rye", serif`;
+      ctx.fillText("PROFESSOR VOLTA'S", w / 2, bny + 30 * s);
+      ctx.strokeStyle = '#8B1A1A';
+      ctx.lineWidth = 2 * s;
+      ctx.strokeText("PROFESSOR VOLTA'S", w / 2, bny + 30 * s);
+
+      time += 0.02;
+      requestAnimationFrame(drawRobot);
+    }
+
+    drawRobot();
+  </script>
+</body>
+</html>

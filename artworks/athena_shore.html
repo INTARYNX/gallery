@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+  canvas { display: block; width: min(100vw, 100vh); height: min(100vw, 100vh); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const mid = document.createElement('canvas');
+const mctx = mid.getContext('2d');
+const off = document.createElement('canvas');
+const octx = off.getContext('2d');
+let S, t = 0;
+
+function resize() {
+  S = Math.min(window.innerWidth, window.innerHeight);
+  canvas.width = canvas.height = S;
+  mid.width = mid.height = S;
+  off.width = off.height = S;
+}
+
+function u(v) { return v * S; }
+
+function drawLeavesLeft(c, t) {
+  const sway = Math.sin(t * 0.7) * 0.08;
+  const leaves = [
+    { angle: 0.1,  len: 0.26, phase: 0 },
+    { angle: 0.3,  len: 0.22, phase: 0.8 },
+    { angle: 0.55, len: 0.28, phase: 1.5 },
+    { angle: 0.75, len: 0.20, phase: 2.2 },
+    { angle: 1.0,  len: 0.24, phase: 3.0 },
+  ];
+  c.save();
+  c.translate(-u(0.08), u(0.72));
+  for (const leaf of leaves) {
+    const angle = leaf.angle + sway + Math.sin(t * 1.1 + leaf.phase) * 0.05;
+    const leafL = u(leaf.len);
+    const droop = 0.15 + Math.sin(t * 0.9 + leaf.phase) * 0.04;
+    c.save();
+    c.rotate(-angle);
+    c.beginPath();
+    c.moveTo(0, 0);
+    c.quadraticCurveTo(leafL*0.5, -leafL*droop, leafL, -leafL*0.04);
+    c.strokeStyle = '#1a4a08';
+    c.lineWidth = u(0.003);
+    c.stroke();
+    for (let f = 2; f < 9; f++) {
+      const fx = leafL * f / 9;
+      const fy = -leafL * droop * Math.sin(f / 9 * Math.PI * 0.9);
+      const fl = u(0.055) * Math.sin(f / 9 * Math.PI);
+      const frot = 0.5 + Math.sin(t * 1.3 + leaf.phase + f) * 0.15;
+      c.save(); c.translate(fx, fy); c.rotate(-frot);
+      c.fillStyle = 'rgba(40,105,15,0.85)';
+      c.beginPath(); c.ellipse(fl*0.5, 0, fl, u(0.007), 0, 0, Math.PI*2); c.fill(); c.restore();
+      c.save(); c.translate(fx, fy); c.rotate(frot);
+      c.fillStyle = 'rgba(55,125,20,0.85)';
+      c.beginPath(); c.ellipse(fl*0.5, 0, fl, u(0.007), 0, 0, Math.PI*2); c.fill(); c.restore();
+    }
+    c.restore();
+  }
+  c.restore();
+}
+
+function drawLeavesRight(c, t) {
+  const sway = Math.sin(t * 0.6 + 1.2) * 0.08;
+  const leaves = [
+    { angle: 0.15, len: 0.24, phase: 0.5 },
+    { angle: 0.4,  len: 0.27, phase: 1.3 },
+    { angle: 0.6,  len: 0.21, phase: 2.1 },
+    { angle: 0.85, len: 0.25, phase: 2.8 },
+    { angle: 1.05, len: 0.19, phase: 3.5 },
+  ];
+  c.save();
+  c.translate(S + u(0.08), u(0.68));
+  for (const leaf of leaves) {
+    const angle = leaf.angle + sway + Math.sin(t * 1.0 + leaf.phase) * 0.05;
+    const leafL = u(leaf.len);
+    const droop = 0.15 + Math.sin(t * 0.8 + leaf.phase) * 0.04;
+    c.save();
+    c.rotate(Math.PI + angle);
+    c.beginPath();
+    c.moveTo(0, 0);
+    c.quadraticCurveTo(leafL*0.5, -leafL*droop, leafL, -leafL*0.04);
+    c.strokeStyle = '#1a4a08';
+    c.lineWidth = u(0.003);
+    c.stroke();
+    for (let f = 2; f < 9; f++) {
+      const fx = leafL * f / 9;
+      const fy = -leafL * droop * Math.sin(f / 9 * Math.PI * 0.9);
+      const fl = u(0.055) * Math.sin(f / 9 * Math.PI);
+      const frot = 0.5 + Math.sin(t * 1.2 + leaf.phase + f) * 0.15;
+      c.save(); c.translate(fx, fy); c.rotate(-frot);
+      c.fillStyle = 'rgba(40,105,15,0.85)';
+      c.beginPath(); c.ellipse(fl*0.5, 0, fl, u(0.007), 0, 0, Math.PI*2); c.fill(); c.restore();
+      c.save(); c.translate(fx, fy); c.rotate(frot);
+      c.fillStyle = 'rgba(55,125,20,0.85)';
+      c.beginPath(); c.ellipse(fl*0.5, 0, fl, u(0.007), 0, 0, Math.PI*2); c.fill(); c.restore();
+    }
+    c.restore();
+  }
+  c.restore();
+}
+
+function drawTemple(c, t) {
+  const waterY = u(0.62);
+  const tW = u(0.55), tX = u(0.225);
+  const stepH = u(0.018), stepInset = u(0.01);
+
+  const glow = 0.5 + 0.5 * Math.sin(t * 0.8);
+  const mLight = `rgb(255,${Math.round(235+15*glow)},${Math.round(195+30*glow)})`;
+  const mMid   = `rgb(${Math.round(220+15*glow)},${Math.round(190+20*glow)},${Math.round(145+30*glow)})`;
+  const mDark  = `rgb(${Math.round(170+15*glow)},${Math.round(140+18*glow)},${Math.round(100+22*glow)})`;
+  const mWall  = `rgb(${Math.round(190+15*glow)},${Math.round(162+18*glow)},${Math.round(120+25*glow)})`;
+
+  for (let i = 0; i < 2; i++) {
+    const sw = tW - i*stepInset*2, sx = tX + i*stepInset, sy = waterY - i*stepH;
+    let g = c.createLinearGradient(0, sy, 0, sy+stepH);
+    g.addColorStop(0, mLight); g.addColorStop(1, mDark);
+    c.fillStyle = g; c.fillRect(sx, sy, sw, stepH);
+    c.strokeStyle = mDark; c.lineWidth = u(0.001); c.strokeRect(sx, sy, sw, stepH);
+  }
+
+  const baseY = waterY - 2*stepH + u(0.03);
+  const baseW = tW - 2*stepInset*2, baseX = tX + 2*stepInset;
+  const nBays = 3, colW = u(0.03), colH = u(0.26), nCols = nBays+1;
+  const colSpacing = (baseW-colW)/(nCols-1), colY = baseY-colH;
+
+  c.fillStyle = mWall; c.fillRect(baseX, colY-u(0.01), baseW, baseY-colY+u(0.01));
+  let sh1 = c.createLinearGradient(baseX, 0, baseX+u(0.06), 0);
+  sh1.addColorStop(0, 'rgba(0,0,0,0.3)'); sh1.addColorStop(1, 'rgba(0,0,0,0)');
+  c.fillStyle = sh1; c.fillRect(baseX, colY-u(0.01), baseW, baseY-colY+u(0.01));
+  let sh2 = c.createLinearGradient(baseX+baseW-u(0.06), 0, baseX+baseW, 0);
+  sh2.addColorStop(0, 'rgba(0,0,0,0)'); sh2.addColorStop(1, 'rgba(0,0,0,0.25)');
+  c.fillStyle = sh2; c.fillRect(baseX, colY-u(0.01), baseW, baseY-colY+u(0.01));
+
+  for (let i = 0; i < nBays; i++) {
+    const ax = baseX+i*colSpacing+colW, aw = colSpacing-colW;
+    const archR = aw/2, archCX = ax+aw/2;
+    const archTopY = colY+u(0.04), archCY = archTopY+archR;
+
+    c.save();
+    c.beginPath();
+    c.moveTo(ax, colY-u(0.01)); c.lineTo(ax+aw, colY-u(0.01));
+    c.lineTo(ax+aw, archCY); c.arc(archCX, archCY, archR, 0, Math.PI, true);
+    c.lineTo(ax, archCY); c.closePath();
+    c.fillStyle = mWall; c.fill(); c.restore();
+
+    c.save();
+    c.beginPath(); c.arc(archCX, archCY, archR, Math.PI, 0, false);
+    c.lineTo(ax+aw, archCY+u(0.12)); c.lineTo(ax, archCY+u(0.12)); c.closePath(); c.clip();
+    let ig = c.createLinearGradient(ax, archTopY, ax, archCY+u(0.12));
+    ig.addColorStop(0, '#1a0e06'); ig.addColorStop(0.5, '#4a2e18'); ig.addColorStop(1, '#7a4a28');
+    c.fillStyle = ig; c.fillRect(ax, archTopY, aw, archCY+u(0.12)-archTopY);
+    let lg = c.createLinearGradient(ax, 0, ax+aw, 0);
+    lg.addColorStop(0, 'rgba(180,100,30,0.2)'); lg.addColorStop(0.5, 'rgba(0,0,0,0)'); lg.addColorStop(1, 'rgba(180,100,30,0.15)');
+    c.fillStyle = lg; c.fillRect(ax, archTopY, aw, archCY+u(0.12)-archTopY);
+    c.restore();
+
+    c.beginPath(); c.arc(archCX, archCY, archR+u(0.008), Math.PI, 0, false);
+    c.arc(archCX, archCY, archR, 0, Math.PI, true); c.closePath();
+    c.fillStyle = mMid; c.fill(); c.strokeStyle = mDark; c.lineWidth = u(0.001); c.stroke();
+    c.beginPath();
+    c.moveTo(archCX-u(0.012), archTopY-u(0.008)); c.lineTo(archCX+u(0.012), archTopY-u(0.008));
+    c.lineTo(archCX+u(0.008), archTopY+u(0.014)); c.lineTo(archCX-u(0.008), archTopY+u(0.014)); c.closePath();
+    c.fillStyle = mLight; c.fill();
+  }
+
+  for (let i = 0; i < nCols; i++) {
+    const cx = baseX+i*colSpacing;
+    const g = c.createLinearGradient(cx, 0, cx+colW, 0);
+    g.addColorStop(0, mDark); g.addColorStop(0.15, mMid); g.addColorStop(0.4, mLight);
+    g.addColorStop(0.6, mLight); g.addColorStop(0.85, mMid); g.addColorStop(1, mDark);
+    c.fillStyle = g;
+    c.beginPath(); c.moveTo(cx+colW*0.08, colY); c.lineTo(cx+colW*0.92, colY);
+    c.lineTo(cx+colW, baseY); c.lineTo(cx, baseY); c.closePath(); c.fill();
+    c.strokeStyle = mDark; c.lineWidth = u(0.001); c.stroke();
+    for (let f = 1; f < 6; f++) {
+      c.beginPath(); c.moveTo(cx+colW*(f/6), colY); c.lineTo(cx+colW*(f/6), baseY);
+      c.strokeStyle = 'rgba(0,0,0,0.12)'; c.lineWidth = u(0.0015); c.stroke();
+    }
+    let footG = c.createLinearGradient(cx, baseY-u(0.02), cx, baseY);
+    footG.addColorStop(0, 'rgba(0,0,0,0)'); footG.addColorStop(1, 'rgba(0,0,0,0.2)');
+    c.fillStyle = footG; c.fillRect(cx, baseY-u(0.02), colW, u(0.02));
+    c.fillStyle = mMid;
+    c.fillRect(cx-colW*0.15, colY-u(0.018), colW*1.3, u(0.01));
+    c.fillRect(cx-colW*0.08, colY-u(0.008), colW*1.16, u(0.008));
+    c.strokeStyle = mDark; c.lineWidth = u(0.001); c.strokeRect(cx-colW*0.15, colY-u(0.018), colW*1.3, u(0.01));
+    [-1,1].forEach(side => {
+      const vx = cx+colW/2+side*colW*0.52, vy = colY-u(0.013);
+      c.beginPath(); c.arc(vx, vy, u(0.007), 0, Math.PI*2);
+      c.strokeStyle = mDark; c.lineWidth = u(0.0025); c.stroke();
+      c.beginPath(); c.arc(vx, vy, u(0.003), 0, Math.PI*2);
+      c.fillStyle = mDark; c.fill();
+    });
+  }
+
+  const entY = colY-u(0.018);
+  let eg = c.createLinearGradient(0, entY, 0, entY+u(0.018));
+  eg.addColorStop(0, mLight); eg.addColorStop(0.5, mMid); eg.addColorStop(1, mDark);
+  c.fillStyle = eg; c.fillRect(baseX-u(0.005), entY, baseW+u(0.01), u(0.018));
+  c.strokeStyle = mDark; c.lineWidth = u(0.001); c.strokeRect(baseX-u(0.005), entY, baseW+u(0.01), u(0.018));
+  c.beginPath(); c.moveTo(baseX-u(0.005), entY+u(0.014)); c.lineTo(baseX+baseW+u(0.005), entY+u(0.014));
+  c.strokeStyle = mDark; c.lineWidth = u(0.002); c.stroke();
+
+  const friezeY = entY-u(0.022);
+  let fg = c.createLinearGradient(0, friezeY, 0, friezeY+u(0.022));
+  fg.addColorStop(0, mMid); fg.addColorStop(1, mLight);
+  c.fillStyle = fg; c.fillRect(baseX-u(0.005), friezeY, baseW+u(0.01), u(0.022));
+  c.strokeStyle = mDark; c.lineWidth = u(0.001); c.strokeRect(baseX-u(0.005), friezeY, baseW+u(0.01), u(0.022));
+  for (let m = 0; m < Math.floor(baseW/u(0.038)); m++) {
+    const mx = baseX+m*u(0.038)+u(0.004), my = friezeY+u(0.004);
+    c.strokeStyle = mDark; c.lineWidth = u(0.002);
+    c.strokeRect(mx, my, u(0.026), u(0.014));
+    c.strokeRect(mx+u(0.006), my+u(0.004), u(0.014), u(0.006));
+  }
+
+  const corniceY = friezeY-u(0.014);
+  let cg = c.createLinearGradient(0, corniceY, 0, corniceY+u(0.014));
+  cg.addColorStop(0, mLight); cg.addColorStop(1, mMid);
+  c.fillStyle = cg; c.fillRect(baseX-u(0.014), corniceY, baseW+u(0.028), u(0.014));
+  c.strokeStyle = mDark; c.lineWidth = u(0.001); c.strokeRect(baseX-u(0.014), corniceY, baseW+u(0.028), u(0.014));
+  c.fillStyle = 'rgba(0,0,0,0.15)'; c.fillRect(baseX-u(0.014), corniceY+u(0.011), baseW+u(0.028), u(0.003));
+
+  let tg = c.createLinearGradient(0, corniceY-u(0.01), 0, corniceY);
+  tg.addColorStop(0, mMid); tg.addColorStop(1, mDark);
+  c.fillStyle = tg; c.fillRect(baseX-u(0.016), corniceY-u(0.01), baseW+u(0.032), u(0.01));
+  c.strokeStyle = mDark; c.lineWidth = u(0.001); c.strokeRect(baseX-u(0.016), corniceY-u(0.01), baseW+u(0.032), u(0.01));
+
+  // Effet irisé — zone marbre uniquement (mur de fond + entablement + frise + corniche)
+  const irisPos = (Math.sin(t * 0.4) * 0.5 + 0.5);
+  const bW = u(0.05);
+  const shear = 0.35;
+
+  // Zones de marbre : colonnes + entablement + frise + corniche (pas le mur de fond)
+  const marbleZones = [
+    // Colonnes
+    ...Array.from({length: nCols}, (_, i) => {
+      const cx = baseX + i*colSpacing;
+      return { x: cx, y: colY, w: colW, h: baseY - colY };
+    }),
+    // Entablement
+    { x: baseX-u(0.005), y: entY, w: baseW+u(0.01), h: u(0.018) },
+    // Frise
+    { x: baseX-u(0.005), y: friezeY, w: baseW+u(0.01), h: u(0.022) },
+    // Corniche + toit
+    { x: baseX-u(0.014), y: corniceY-u(0.01), w: baseW+u(0.028), h: u(0.024) },
+  ];
+
+  const colors = [[255,150,200],[150,200,255],[255,255,150],[150,255,180],[220,150,255]];
+
+  marbleZones.forEach(zone => {
+    c.save();
+    c.beginPath();
+    c.rect(zone.x, zone.y, zone.w, zone.h);
+    c.clip();
+    c.transform(1, 0, -shear, 1, 0, 0);
+    const bX = zone.x + shear * zone.y + irisPos * (baseW + u(0.3));
+    colors.forEach((col, i) => {
+      const cx = bX + (i - 2) * bW * 0.9;
+      let g = c.createLinearGradient(cx - bW/2, 0, cx + bW/2, 0);
+      g.addColorStop(0,   `rgba(${col[0]},${col[1]},${col[2]},0)`);
+      g.addColorStop(0.5, `rgba(${col[0]},${col[1]},${col[2]},0.18)`);
+      g.addColorStop(1,   `rgba(${col[0]},${col[1]},${col[2]},0)`);
+      c.fillStyle = g;
+      c.fillRect(cx - bW/2, zone.y - u(0.01), bW, zone.h + u(0.02));
+    });
+    c.restore();
+  });
+}
+
+function drawScene() {
+  mctx.clearRect(0, 0, S, S);
+  const sunX = u(0.5), sunY = u(0.62), waterY = u(0.62);
+
+  let sky = mctx.createLinearGradient(0, 0, 0, u(0.62));
+  sky.addColorStop(0, 'hsl(260,40%,12%)'); sky.addColorStop(0.35, 'hsl(300,35%,22%)');
+  sky.addColorStop(0.7, 'hsl(25,70%,38%)'); sky.addColorStop(1, 'hsl(45,80%,65%)');
+  mctx.fillStyle = sky; mctx.fillRect(0, 0, S, u(0.62));
+
+  mctx.save(); mctx.globalCompositeOperation = 'screen';
+  for (let i = 0; i < 24; i++) {
+    const a = (i/24)*Math.PI*2+t*0.1, na = ((i+0.4)/24)*Math.PI*2+t*0.1;
+    mctx.beginPath(); mctx.moveTo(sunX, sunY);
+    mctx.lineTo(sunX+Math.cos(a)*S*1.5, sunY+Math.sin(a)*S*1.5);
+    mctx.lineTo(sunX+Math.cos(na)*S*1.5, sunY+Math.sin(na)*S*1.5);
+    mctx.closePath(); mctx.fillStyle = `rgba(255,200,80,${i%2===0?0.07:0.03})`; mctx.fill();
+  }
+  mctx.restore();
+
+  mctx.save();
+  mctx.beginPath(); mctx.arc(sunX, sunY, u(0.07), 0, Math.PI*2);
+  mctx.fillStyle = '#fff5a0'; mctx.shadowColor = '#ffcc00'; mctx.shadowBlur = u(0.1); mctx.fill();
+  mctx.restore();
+  mctx.save();
+  let halo = mctx.createRadialGradient(sunX, sunY, u(0.07), sunX, sunY, u(0.35));
+  halo.addColorStop(0, 'rgba(255,200,80,0.35)'); halo.addColorStop(1, 'rgba(255,100,20,0)');
+  mctx.fillStyle = halo; mctx.beginPath(); mctx.arc(sunX, sunY, u(0.35), 0, Math.PI*2); mctx.fill();
+  mctx.restore();
+
+  [[0,0.56,0.3,0.52,0.55,0.50,0.8,0.46,1,0.44,'#2a1a0a'],
+   [0,0.58,0.18,0.54,0.42,0.53,0.65,0.51,1,0.48,'#3a2010']
+  ].forEach(([x0,y0,x1,y1,x2,y2,x3,y3,x4,y4,col]) => {
+    mctx.beginPath(); mctx.moveTo(0, u(y0));
+    mctx.bezierCurveTo(u(x1),u(y1),u(x2),u(y2),u(x3),u(y3));
+    mctx.lineTo(u(x4),u(y4)); mctx.lineTo(S,u(0.62)); mctx.lineTo(0,u(0.62)); mctx.closePath();
+    mctx.fillStyle = col; mctx.fill();
+  });
+
+  off.width = off.height = S;
+  octx.clearRect(0, 0, S, S);
+  drawTemple(octx, t);
+
+  const baseX2 = u(0.225)+2*u(0.01), baseW2 = u(0.55)-4*u(0.01);
+  const baseY2 = waterY-2*u(0.018)+u(0.03), colW2 = u(0.03);
+  const colSpacing2 = (baseW2-colW2)/3;
+  const colY2 = baseY2-u(0.26);
+  const ax2 = baseX2+colSpacing2+colW2, aw2 = colSpacing2-colW2;
+  const archCX2 = ax2+aw2/2, archTopY2 = colY2+u(0.04), archCY2 = archTopY2+aw2/2;
+  const flicker = 0.5+0.5*Math.sin(t*7)*Math.sin(t*3.3);
+
+  mctx.save();
+  mctx.beginPath(); mctx.rect(baseX2, colY2, baseW2, baseY2-colY2); mctx.clip();
+  let wg2 = mctx.createRadialGradient(archCX2, archCY2+u(0.04), 0, archCX2, archCY2+u(0.04), u(0.18));
+  wg2.addColorStop(0, `rgba(255,200,80,${0.22+0.1*flicker})`);
+  wg2.addColorStop(0.5, `rgba(200,100,20,${0.1+0.05*flicker})`);
+  wg2.addColorStop(1, 'rgba(0,0,0,0)');
+  mctx.fillStyle = wg2; mctx.fillRect(baseX2, colY2, baseW2, baseY2-colY2);
+  mctx.restore();
+
+  mctx.drawImage(off, 0, 0);
+
+  mctx.save(); mctx.filter = `blur(${u(0.005)}px)`;
+  const sX = archCX2, sBase = archCY2+u(0.1), sH = u(0.18);
+  const salpha = 0.55+0.2*flicker;
+  mctx.fillStyle = `rgba(200,160,90,${salpha})`;
+  mctx.fillRect(sX-u(0.018), sBase-u(0.015), u(0.036), u(0.015));
+  mctx.beginPath(); mctx.moveTo(sX-u(0.022),sBase); mctx.lineTo(sX+u(0.022),sBase);
+  mctx.lineTo(sX+u(0.014),sBase-sH*0.55); mctx.lineTo(sX-u(0.014),sBase-sH*0.55); mctx.closePath();
+  mctx.fillStyle = `rgba(200,160,90,${salpha})`; mctx.fill();
+  mctx.beginPath(); mctx.moveTo(sX-u(0.014),sBase-sH*0.55); mctx.lineTo(sX+u(0.014),sBase-sH*0.55);
+  mctx.lineTo(sX+u(0.01),sBase-sH*0.75); mctx.lineTo(sX-u(0.01),sBase-sH*0.75); mctx.closePath();
+  mctx.fillStyle = `rgba(210,165,95,${salpha})`; mctx.fill();
+  mctx.beginPath(); mctx.moveTo(sX-u(0.01),sBase-sH*0.7); mctx.lineTo(sX-u(0.035),sBase-sH*0.5);
+  mctx.strokeStyle = `rgba(200,160,90,${salpha})`; mctx.lineWidth = u(0.006); mctx.stroke();
+  mctx.beginPath(); mctx.moveTo(sX-u(0.02),sBase-sH*0.3); mctx.lineTo(sX-u(0.015),sBase-sH*1.1);
+  mctx.strokeStyle = `rgba(220,180,100,${salpha})`; mctx.lineWidth = u(0.003); mctx.stroke();
+  mctx.beginPath(); mctx.moveTo(sX-u(0.015),sBase-sH*1.1); mctx.lineTo(sX-u(0.022),sBase-sH*1.0);
+  mctx.lineTo(sX-u(0.008),sBase-sH*1.0); mctx.closePath();
+  mctx.fillStyle = `rgba(220,180,100,${salpha})`; mctx.fill();
+  mctx.beginPath(); mctx.moveTo(sX+u(0.01),sBase-sH*0.7); mctx.lineTo(sX+u(0.03),sBase-sH*0.55);
+  mctx.strokeStyle = `rgba(200,160,90,${salpha})`; mctx.lineWidth = u(0.006); mctx.stroke();
+  mctx.beginPath(); mctx.ellipse(sX+u(0.038),sBase-sH*0.5,u(0.018),u(0.025),-0.3,0,Math.PI*2);
+  mctx.fillStyle = `rgba(180,130,60,${salpha*0.8})`; mctx.fill();
+  mctx.strokeStyle = `rgba(220,180,100,${salpha})`; mctx.lineWidth = u(0.003); mctx.stroke();
+  mctx.beginPath(); mctx.ellipse(sX,sBase-sH*0.82,u(0.012),u(0.015),0,0,Math.PI*2);
+  mctx.fillStyle = `rgba(210,165,95,${salpha})`; mctx.fill();
+  mctx.beginPath(); mctx.moveTo(sX-u(0.013),sBase-sH*0.9); mctx.lineTo(sX+u(0.013),sBase-sH*0.9);
+  mctx.lineTo(sX+u(0.008),sBase-sH*1.02); mctx.lineTo(sX-u(0.008),sBase-sH*1.02); mctx.closePath();
+  mctx.fillStyle = `rgba(200,155,80,${salpha})`; mctx.fill();
+  mctx.beginPath(); mctx.moveTo(sX-u(0.01),sBase-sH*1.02);
+  mctx.quadraticCurveTo(sX,sBase-sH*1.18,sX+u(0.005),sBase-sH*0.95);
+  mctx.strokeStyle = `rgba(220,180,100,${salpha})`; mctx.lineWidth = u(0.005); mctx.stroke();
+  mctx.filter = 'none'; mctx.restore();
+
+  mctx.save();
+  mctx.beginPath(); mctx.arc(archCX2,archCY2,aw2/2,Math.PI,0,false);
+  mctx.lineTo(ax2+aw2,archCY2+u(0.12)); mctx.lineTo(ax2,archCY2+u(0.12)); mctx.closePath(); mctx.clip();
+  let gl = mctx.createRadialGradient(archCX2,archCY2+u(0.06),0,archCX2,archCY2+u(0.06),u(0.09));
+  gl.addColorStop(0, `rgba(255,220,100,${0.55+0.25*flicker})`);
+  gl.addColorStop(0.4, `rgba(255,140,30,${0.25+0.15*flicker})`);
+  gl.addColorStop(1, 'rgba(180,60,0,0)');
+  mctx.fillStyle = gl; mctx.fillRect(ax2,archTopY2,aw2,archCY2+u(0.12)-archTopY2);
+  let gl2 = mctx.createRadialGradient(archCX2,archCY2+u(0.06),0,archCX2,archCY2+u(0.06),u(0.03));
+  gl2.addColorStop(0, `rgba(255,255,200,${0.8+0.2*flicker})`);
+  gl2.addColorStop(1, 'rgba(255,200,80,0)');
+  mctx.fillStyle = gl2; mctx.fillRect(ax2,archTopY2,aw2,archCY2+u(0.12)-archTopY2);
+  mctx.restore();
+
+  let wg = mctx.createLinearGradient(0, waterY, 0, S);
+  wg.addColorStop(0, '#c05018'); wg.addColorStop(0.5, '#8a3010'); wg.addColorStop(1, '#3a1a08');
+  mctx.fillStyle = wg; mctx.fillRect(0, waterY, S, S-waterY);
+
+  mctx.save(); mctx.beginPath(); mctx.rect(0, waterY, S, S-waterY); mctx.clip();
+  const stripeH = Math.max(2, Math.floor(u(0.005)));
+  for (let s = 0; s < Math.ceil((S-waterY)/stripeH); s++) {
+    const dy = s*stripeH, srcY = waterY-dy-stripeH;
+    const wave = Math.sin(s*0.3+t*1.5)*u(0.003);
+    mctx.drawImage(off, 0, srcY, S, stripeH, wave, waterY+dy, S, stripeH);
+  }
+  mctx.globalAlpha = 0.72; mctx.fillStyle = '#6a2808'; mctx.fillRect(0, waterY, S, S-waterY);
+  mctx.restore();
+
+  mctx.save();
+  for (let ry = 0; ry < u(0.38); ry += u(0.014)) {
+    const rw = u(0.02)+ry*0.5, wave = Math.sin(ry/u(0.04)*0.3+t*1.5)*u(0.003);
+    mctx.fillStyle = `rgba(255,200,60,${0.35*(1-ry/u(0.38))})`;
+    mctx.fillRect(sunX-rw/2+wave, waterY+ry, rw, u(0.01));
+  }
+  for (let ry = 0; ry < u(0.25); ry += u(0.012)) {
+    const prog = ry/u(0.25), rw = aw2*0.6*prog*(0.8+0.2*flicker);
+    const wave = Math.sin(ry/u(0.04)*0.3+t*1.5)*u(0.003);
+    mctx.fillStyle = `rgba(255,230,100,${(0.4+0.2*flicker)*(1-prog)})`;
+    mctx.fillRect(archCX2-rw/2+wave, waterY+ry, rw, u(0.01));
+  }
+  mctx.restore();
+
+  mctx.save();
+  for (let w = 0; w < 6; w++) {
+    const wy = waterY+u(0.02)+w*u(0.04), phase = t*0.8+w*0.7;
+    mctx.beginPath(); mctx.moveTo(0, wy);
+    for (let x = 0; x <= S; x += 4) mctx.lineTo(x, wy+Math.sin(x/u(0.2)+phase)*u(0.004)*0.6);
+    mctx.strokeStyle = `rgba(255,150,50,${0.12-w*0.015})`; mctx.lineWidth = u(0.002); mctx.stroke();
+  }
+  mctx.restore();
+
+  drawLeavesLeft(mctx, t);
+  drawLeavesRight(mctx, t);
+
+  mctx.save();
+  for (let i = 0; i < 60; i++) {
+    const seed = i*137.508;
+    const px = (Math.sin(seed)*0.5+0.5)*S;
+    const py = (Math.cos(seed*0.7)*0.5+0.5)*waterY;
+    const drift = Math.sin(t*0.5+seed)*u(0.015);
+    const tw = 0.06+0.08*Math.abs(Math.sin(t*1.2+seed*0.1));
+    mctx.fillStyle = `rgba(255,220,140,${tw})`;
+    mctx.fillRect(px+drift-1, py-1, 2, 2);
+  }
+  mctx.restore();
+
+  const corners = [[0,0],[S,0],[0,S],[S,S]];
+  corners.forEach(([cx,cy]) => {
+    let cf = mctx.createRadialGradient(cx,cy,0,cx,cy,S*0.45);
+    cf.addColorStop(0, 'rgba(10,0,20,0.6)'); cf.addColorStop(1, 'rgba(0,0,0,0)');
+    mctx.fillStyle = cf; mctx.fillRect(0,0,S,S);
+  });
+
+  mctx.save();
+  let vig = mctx.createRadialGradient(S/2,S/2,S*0.25,S/2,S/2,S*0.8);
+  vig.addColorStop(0, 'rgba(0,0,0,0)'); vig.addColorStop(1, 'rgba(20,5,30,0.55)');
+  mctx.fillStyle = vig; mctx.fillRect(0,0,S,S);
+  let mist = mctx.createLinearGradient(0,0,0,S);
+  mist.addColorStop(0, 'rgba(255,220,180,0.06)'); mist.addColorStop(1, 'rgba(120,80,60,0.18)');
+  mctx.fillStyle = mist; mctx.fillRect(0,0,S,S);
+  mctx.restore();
+
+  ctx.clearRect(0, 0, S, S);
+  ctx.drawImage(mid, 0, 0);
+
+  t += 0.008;
+  requestAnimationFrame(drawScene);
+}
+
+window.addEventListener('resize', resize);
+resize();
+drawScene();
+</script>
+</body>
+</html>

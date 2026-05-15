@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Squall Line</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        canvas {
+            display: block;
+            margin: 0 auto;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        function resizeCanvas() {
+            const size = Math.min(window.innerWidth, window.innerHeight);
+            canvas.width = size;
+            canvas.height = size;
+        }
+        
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        let WIDTH = canvas.width;
+        let HEIGHT = canvas.height;
+        const FOV = 256;
+
+        let angleY = 0, angleX = 0, angleZ = 0;
+        const floatOffset = { y: 0, dir: 1 };
+        let time = 0, storyPhase = 0, phaseTimer = 0;
+        let weatherIntensity = 0, skyDarkness = 0, windStrength = 0, fogIntensity = 0, altitude = 0;
+
+        function noise(x) {
+            const n = Math.sin(x) * 43758.5453123;
+            return n - Math.floor(n);
+        }
+
+        function smoothNoise(x) {
+            const intX = Math.floor(x);
+            const fracX = x - intX;
+            return noise(intX) * (1 - fracX) + noise(intX + 1) * fracX;
+        }
+
+        function turbulence(x, octaves = 4) {
+            let value = 0, amplitude = 1, frequency = 1;
+            for (let i = 0; i < octaves; i++) {
+                value += smoothNoise(x * frequency) * amplitude;
+                amplitude *= 0.5;
+                frequency *= 2;
+            }
+            return value;
+        }
+
+        const gridSize = 100, gridDepth = 30, gridWidth = 12;
+        let groundScroll = 0;
+        
+        function getFieldColor(x, z) {
+            const colorIndex = (x + z) % 3;
+            return colorIndex === 0 ? '#7A8B5D' : colorIndex === 1 ? '#9CAF70' : '#6B7C4E';
+        }
+
+        const balloonRadius = 70, balloonSegments = 32, balloonRings = 24;
+        const balloonVertices = [], balloonFaces = [];
+
+        for (let ring = 0; ring <= balloonRings; ring++) {
+            const theta = (ring * Math.PI) / balloonRings;
+            const sinTheta = Math.sin(theta), cosTheta = Math.cos(theta);
+            for (let seg = 0; seg <= balloonSegments; seg++) {
+                const phi = (seg * 2 * Math.PI) / balloonSegments;
+                balloonVertices.push([Math.cos(phi) * sinTheta * balloonRadius, cosTheta * balloonRadius - 50, Math.sin(phi) * sinTheta * balloonRadius]);
+            }
+        }
+
+        for (let ring = 0; ring < balloonRings; ring++) {
+            for (let seg = 0; seg < balloonSegments; seg++) {
+                const first = ring * (balloonSegments + 1) + seg;
+                balloonFaces.push([first, first + balloonSegments + 1, first + balloonSegments + 2, first + 1]);
+            }
+        }
+
+        const basketVertices = [[-12, 60, -12], [12, 60, -12], [12, 60, 12], [-12, 60, 12], [-15, 45, -15], [15, 45, -15], [15, 45, 15], [-15, 45, 15]];
+        const basketFaces = [[4, 5, 6, 7], [0, 3, 2, 1], [4, 5, 1, 0], [6, 7, 3, 2], [7, 4, 0, 3], [5, 6, 2, 1]];
+
+        const ropePoints = [
+            [[-15, 45, -15], [-35, -20, -35]],
+            [[15, 45, -15], [35, -20, -35]],
+            [[15, 45, 15], [35, -20, 35]],
+            [[-15, 45, 15], [-35, -20, 35]],
+            [[0, 45, -15], [0, -20, -40]],
+            [[15, 45, 0], [40, -20, 0]],
+            [[0, 45, 15], [0, -20, 40]],
+            [[-15, 45, 0], [-40, -20, 0]]
+        ];
+
+        const vintageColors = ['#9932CC', '#E6E6FA', '#8B008B', '#F5F5F5', '#BA55D3', '#FFFFFF', '#9370DB', '#DDA0DD'];
+        const balloonPanelColors = balloonFaces.map((_, i) => vintageColors[Math.floor((i % balloonSegments / balloonSegments) * 16) % vintageColors.length]);
+
+        function createPerson(x, z) {
+            return {
+                vertices: [[x - 1.5, 41, z - 1.5], [x + 1.5, 41, z - 1.5], [x + 1.5, 41, z + 1.5], [x - 1.5, 41, z + 1.5], [x - 1.5, 44, z - 1.5], [x + 1.5, 44, z - 1.5], [x + 1.5, 44, z + 1.5], [x - 1.5, 44, z + 1.5], [x - 2, 44, z - 1], [x + 2, 44, z - 1], [x + 2, 44, z + 1], [x - 2, 44, z + 1], [x - 2, 53, z - 1], [x + 2, 53, z - 1], [x + 2, 53, z + 1], [x - 2, 53, z + 1]],
+                faces: [{ indices: [4, 5, 6, 7], color: '#FFD7B5' }, { indices: [0, 3, 2, 1], color: '#FFD7B5' }, { indices: [4, 5, 1, 0], color: '#FFD7B5' }, { indices: [6, 7, 3, 2], color: '#FFD7B5' }, { indices: [7, 4, 0, 3], color: '#FFD7B5' }, { indices: [5, 6, 2, 1], color: '#FFD7B5' }, { indices: [12, 13, 14, 15], color: '#34495E' }, { indices: [8, 11, 10, 9], color: '#34495E' }, { indices: [12, 13, 9, 8], color: '#2C3E50' }, { indices: [14, 15, 11, 10], color: '#2C3E50' }, { indices: [15, 12, 8, 11], color: '#1A252F' }, { indices: [13, 14, 10, 9], color: '#1A252F' }]
+            };
+        }
+
+        const person1 = createPerson(-5, -3), person2 = createPerson(5, 3);
+        let birdProgress = 0, birdPassed = false;
+        const birdTrail = [];
+
+        const raindrops = Array.from({ length: 150 }, () => ({ x: Math.random() * WIDTH, y: Math.random() * HEIGHT, speed: 3 + Math.random() * 4, length: 10 + Math.random() * 10 }));
+
+        let lightningTimer = 0, lightningActive = false, lightningPoints = [], lightningCount = 0, dramaticEndFrame = 0, endSequenceActive = false;
+
+        function generateLightning() {
+            lightningPoints = [];
+            let x = Math.random() * WIDTH, y = 0;
+            lightningPoints.push({ x, y });
+            while (y < HEIGHT * 0.6) {
+                y += 20 + Math.random() * 40;
+                x += (Math.random() - 0.5) * 60;
+                lightningPoints.push({ x, y });
+            }
+        }
+
+        function rotateX(point, angle) {
+            const cos = Math.cos(angle), sin = Math.sin(angle);
+            return [point[0], point[1] * cos - point[2] * sin, point[1] * sin + point[2] * cos];
+        }
+
+        function rotateY(point, angle) {
+            const cos = Math.cos(angle), sin = Math.sin(angle);
+            return [point[0] * cos + point[2] * sin, point[1], -point[0] * sin + point[2] * cos];
+        }
+
+        function rotateZ(point, angle) {
+            const cos = Math.cos(angle), sin = Math.sin(angle);
+            return [point[0] * cos - point[1] * sin, point[0] * sin + point[1] * cos, point[2]];
+        }
+
+        function project(point) {
+            const z = point[2] + 300;
+            const scale = (HEIGHT * 0.5) / z;
+            return [point[0] * scale + WIDTH / 2, point[1] * scale + HEIGHT / 2, z];
+        }
+
+        function getNormal(pts) {
+            const v1 = [pts[1][0] - pts[0][0], pts[1][1] - pts[0][1], pts[1][2] - pts[0][2]];
+            const v2 = [pts[2][0] - pts[0][0], pts[2][1] - pts[0][1], pts[2][2] - pts[0][2]];
+            return [v1[1] * v2[2] - v1[2] * v2[1], v1[2] * v2[0] - v1[0] * v2[2], v1[0] * v2[1] - v1[1] * v2[0]];
+        }
+
+        function normalize(v) {
+            const len = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+            return len > 0 ? [v[0] / len, v[1] / len, v[2] / len] : [0, 0, 0];
+        }
+
+        function calculateLighting(normal) {
+            const light = normalize([1, -1, -1]), n = normalize(normal);
+            return 0.5 + Math.max(0, n[0] * light[0] + n[1] * light[1] + n[2] * light[2]) * 0.5;
+        }
+
+        function adjustBrightness(color, factor) {
+            const r = parseInt(color.slice(1, 3), 16);
+            const g = parseInt(color.slice(3, 5), 16);
+            const b = parseInt(color.slice(5, 7), 16);
+            return `rgb(${r * factor}, ${g * factor}, ${b * factor})`;
+        }
+
+        function drawFace(pts2D, pts3D, color) {
+            const brightness = calculateLighting(getNormal(pts3D)) * (1 - skyDarkness * 0.5);
+            ctx.fillStyle = adjustBrightness(color, brightness);
+            ctx.beginPath();
+            ctx.moveTo(pts2D[0][0], pts2D[0][1]);
+            for (let i = 1; i < pts2D.length; i++) ctx.lineTo(pts2D[i][0], pts2D[i][1]);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        function drawRope(p1, p2) {
+            ctx.strokeStyle = `rgb(${101 - skyDarkness * 40}, ${67 - skyDarkness * 30}, ${33 - skyDarkness * 20})`;
+            ctx.lineWidth = 1;
+            const midX = (p1[0] + p2[0]) / 2, midY = (p1[1] + p2[1]) / 2;
+            const gravity = 15 * (1 - windStrength * 0.7);
+            const windPush = windStrength * 20 * Math.sin(time * 2 + p1[0] * 0.1);
+            ctx.beginPath();
+            ctx.moveTo(p1[0], p1[1]);
+            ctx.quadraticCurveTo(midX + windPush, midY + gravity, p2[0], p2[1]);
+            ctx.stroke();
+        }
+
+        function updateStory() {
+            phaseTimer++;
+            if (storyPhase === 0) {
+                weatherIntensity = skyDarkness = windStrength = fogIntensity = 0;
+                altitude = Math.min(1, phaseTimer / 450);
+                if (phaseTimer > 450) { storyPhase = 1; phaseTimer = 0; }
+            } else if (storyPhase === 1) {
+                altitude = 1;
+                weatherIntensity = Math.min(0.25, weatherIntensity + 0.0005);
+                skyDarkness = Math.min(0.25, skyDarkness + 0.0005);
+                windStrength = Math.min(0.15, windStrength + 0.0004);
+                fogIntensity = Math.min(0.08, fogIntensity + 0.0002);
+                if (phaseTimer > 600) { storyPhase = 2; phaseTimer = 0; }
+            } else if (storyPhase === 2) {
+                altitude = 1;
+                weatherIntensity = Math.min(0.55, weatherIntensity + 0.0008);
+                skyDarkness = Math.min(0.55, skyDarkness + 0.0008);
+                windStrength = Math.min(0.45, windStrength + 0.0007);
+                fogIntensity = Math.min(0.25, fogIntensity + 0.0004);
+                if (phaseTimer > 600) { storyPhase = 3; phaseTimer = 0; }
+            } else if (storyPhase === 3) {
+                altitude = 1;
+                weatherIntensity = Math.min(1, weatherIntensity + 0.0012);
+                skyDarkness = Math.min(1, skyDarkness + 0.0012);
+                windStrength = Math.min(1, windStrength + 0.001);
+                fogIntensity = Math.min(1, fogIntensity + 0.0008);
+            }
+        }
+
+        function drawBird(x, y, wingFlap, scale) {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.scale(scale, scale);
+            ctx.lineCap = 'round';
+            
+            const grad = ctx.createLinearGradient(0, -15, 0, 5);
+            grad.addColorStop(0, '#1A1A1A');
+            grad.addColorStop(1, '#3A3A3A');
+            
+            ctx.strokeStyle = grad;
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.quadraticCurveTo(-15, -8 - wingFlap, -30, -3.5 - wingFlap);
+            ctx.stroke();
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(-30, -3.5 - wingFlap);
+            ctx.lineTo(-37, -4.5 - wingFlap * 1.05);
+            ctx.stroke();
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(-37, -4.5 - wingFlap * 1.05);
+            ctx.lineTo(-42, -5 - wingFlap * 1.1);
+            ctx.stroke();
+            
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.quadraticCurveTo(15, -8 - wingFlap, 30, -3.5 - wingFlap);
+            ctx.stroke();
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(30, -3.5 - wingFlap);
+            ctx.lineTo(37, -4.5 - wingFlap * 1.05);
+            ctx.stroke();
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(37, -4.5 - wingFlap * 1.05);
+            ctx.lineTo(42, -5 - wingFlap * 1.1);
+            ctx.stroke();
+            
+            ctx.restore();
+        }
+
+        function drawBirdTrail() {
+            birdTrail.forEach((trail, i) => {
+                const alpha = trail.life / 12;
+                ctx.save();
+                ctx.translate(trail.x, trail.y);
+                ctx.scale(trail.scale, trail.scale);
+                ctx.strokeStyle = '#000000';
+                ctx.globalAlpha = alpha * 0.06;
+                ctx.lineCap = 'round';
+                
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.quadraticCurveTo(-15, -8 - trail.wingFlap, -30, -3.5 - trail.wingFlap);
+                ctx.stroke();
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(-30, -3.5 - trail.wingFlap);
+                ctx.lineTo(-37, -4.5 - trail.wingFlap * 1.05);
+                ctx.stroke();
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(-37, -4.5 - trail.wingFlap * 1.05);
+                ctx.lineTo(-42, -5 - trail.wingFlap * 1.1);
+                ctx.stroke();
+                
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.quadraticCurveTo(15, -8 - trail.wingFlap, 30, -3.5 - trail.wingFlap);
+                ctx.stroke();
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(30, -3.5 - trail.wingFlap);
+                ctx.lineTo(37, -4.5 - trail.wingFlap * 1.05);
+                ctx.stroke();
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(37, -4.5 - trail.wingFlap * 1.05);
+                ctx.lineTo(42, -5 - trail.wingFlap * 1.1);
+                ctx.stroke();
+                
+                ctx.restore();
+                trail.life--;
+            });
+            
+            for (let i = birdTrail.length - 1; i >= 0; i--) {
+                if (birdTrail[i].life <= 0) birdTrail.splice(i, 1);
+            }
+        }
+
+        function render() {
+            WIDTH = canvas.width;
+            HEIGHT = canvas.height;
+            updateStory();
+
+            const gradient = ctx.createLinearGradient(0, 0, 0, HEIGHT);
+            const blueSky = { r: 74, g: 144, b: 226 }, darkSky = { r: 44, g: 62, b: 80 };
+            let sunriseIntensity = storyPhase === 0 ? Math.max(0, 1 - phaseTimer / 200) : 0;
+            const sunriseR = 255, sunriseG = 180, sunriseB = 120;
+            
+            const r1 = blueSky.r + (darkSky.r - blueSky.r) * skyDarkness + (sunriseR - blueSky.r) * sunriseIntensity;
+            const g1 = blueSky.g + (darkSky.g - blueSky.g) * skyDarkness + (sunriseG - blueSky.g) * sunriseIntensity;
+            const b1 = blueSky.b + (darkSky.b - blueSky.b) * skyDarkness + (sunriseB - blueSky.b) * sunriseIntensity;
+            
+            gradient.addColorStop(0, `rgb(${r1}, ${g1}, ${b1})`);
+            gradient.addColorStop(0.4, `rgb(${r1+20 + sunriseIntensity * 40}, ${g1+20 + sunriseIntensity * 20}, ${b1+20 - sunriseIntensity * 30})`);
+            gradient.addColorStop(0.65, `rgb(${r1+60 + sunriseIntensity * 60}, ${g1+60 + sunriseIntensity * 30}, ${b1+60 - sunriseIntensity * 50})`);
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+            if (weatherIntensity > 0.2) {
+                ctx.globalAlpha = (weatherIntensity - 0.2) * 0.5;
+                for (let i = 0; i < 12; i++) {
+                    const offsetX = Math.sin(time * 0.08 + i * 0.7) * 250;
+                    const offsetY = Math.sin(time * 0.12 + i * 1.3) * 80;
+                    const x = (time * 12 + i * 90 + offsetX) % (WIDTH + 250) - 125;
+                    const y = 50 + i * 45 + offsetY;
+                    const width = 180 + Math.sin(time * 0.5 + i) * 60;
+                    const height = 35 + Math.cos(time * 0.3 + i) * 15;
+                    
+                    const grad = ctx.createRadialGradient(x, y, 0, x + 30, y - 10, width);
+                    grad.addColorStop(0, `rgba(25, 35, 45, ${0.8 * weatherIntensity})`);
+                    grad.addColorStop(0.4, `rgba(35, 45, 55, ${0.5 * weatherIntensity})`);
+                    grad.addColorStop(0.7, `rgba(40, 50, 60, ${0.2 * weatherIntensity})`);
+                    grad.addColorStop(1, 'rgba(40, 50, 60, 0)');
+                    
+                    ctx.fillStyle = grad;
+                    ctx.beginPath();
+                    for (let j = 0; j < 16; j++) {
+                        const angle = (j / 16) * Math.PI * 2;
+                        const turb = Math.sin(angle * 3 + time + i) * 0.3 + Math.sin(angle * 5 + time * 2) * 0.15;
+                        const px = x + Math.cos(angle) * width * (1 + turb);
+                        const py = y + Math.sin(angle) * height * (1 + turb);
+                        if (j === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+                    }
+                    ctx.closePath();
+                    ctx.fill();
+                }
+                ctx.globalAlpha = 1;
+            }
+
+            time += 0.008;
+            groundScroll += windStrength * 3;
+            const gridOffset = Math.floor(groundScroll / gridSize);
+            const scrollRemainder = groundScroll % gridSize;
+            const baseHorizon = 0.35 + altitude * 0.20;
+            const horizon = HEIGHT * baseHorizon;
+            const vanishX = WIDTH / 2, vanishY = horizon;
+            
+            for (let z = -1; z < gridDepth; z++) {
+                for (let x = 0; x < gridWidth; x++) {
+                    const actualZ = z + gridOffset;
+                    const z1 = z * gridSize - scrollRemainder;
+                    const z2 = (z + 1) * gridSize - scrollRemainder;
+                    const x1 = (x - gridWidth / 2) * gridSize;
+                    const x2 = (x + 1 - gridWidth / 2) * gridSize;
+                    
+                    if (z1 < 0) continue;
+                    
+                    const scale1 = (HEIGHT * 2) / (z1 + 500);
+                    const scale2 = (HEIGHT * 2) / (z2 + 500);
+                    const y1 = vanishY + HEIGHT * 0.4 * scale1;
+                    const y2 = vanishY + HEIGHT * 0.4 * scale2;
+                    
+                    if (y1 < HEIGHT + 100) {
+                        const sx1 = vanishX + x1 * scale1;
+                        const sx2 = vanishX + x2 * scale1;
+                        const sx3 = vanishX + x2 * scale2;
+                        const sx4 = vanishX + x1 * scale2;
+                        
+                        const fadeStart = gridSize * 3;
+                        const fadeDistance = gridSize * 8;
+                        const distanceFade = z1 < fadeStart ? 1 : Math.max(0, 1 - (z1 - fadeStart) / fadeDistance);
+                        const brightness = (1 - skyDarkness * 0.5) * distanceFade;
+                        
+                        ctx.globalAlpha = distanceFade;
+                        ctx.fillStyle = adjustBrightness(getFieldColor(x, actualZ), brightness);
+                        ctx.beginPath();
+                        ctx.moveTo(sx1, Math.max(y1, vanishY));
+                        ctx.lineTo(sx2, Math.max(y1, vanishY));
+                        ctx.lineTo(sx3, Math.min(y2, HEIGHT));
+                        ctx.lineTo(sx4, Math.min(y2, HEIGHT));
+                        ctx.closePath();
+                        ctx.fill();
+                        
+                        if (y2 > vanishY) {
+                            ctx.strokeStyle = `rgba(0, 0, 0, ${(0.2 - skyDarkness * 0.1) * distanceFade})`;
+                            ctx.lineWidth = 1;
+                            ctx.stroke();
+                        }
+                        ctx.globalAlpha = 1;
+                    }
+                }
+            }
+            
+            const spiralX = Math.sin(time * 0.3 * windStrength) * 60 * windStrength;
+            const spiralY = Math.sin(time * 0.2 * windStrength) * 30 * windStrength;
+            const spiralZ = Math.cos(time * 0.3 * windStrength) * 60 * windStrength;
+
+            floatOffset.y += 0.02 * floatOffset.dir;
+            if (floatOffset.y > 10 || floatOffset.y < -10) floatOffset.dir *= -1;
+
+            angleY += 0.001 + windStrength * 0.015 + (turbulence(time * 3) - 0.5) * windStrength * 0.01;
+            angleX = Math.sin(time * 0.25) * 0.05 + (turbulence(time * 2.5 + 50) - 0.5) * windStrength * 0.3;
+            angleZ = Math.cos(time * 0.35) * 0.05 + (turbulence(time * 2.2 + 150) - 0.5) * windStrength * 0.25;
+
+            const balloonRotated = balloonVertices.map(v => {
+                let p = [v[0] + spiralX, v[1] + floatOffset.y + spiralY, v[2] + spiralZ];
+                p = rotateX(p, angleX);
+                p = rotateY(p, angleY);
+                p = rotateZ(p, angleZ);
+                return p;
+            });
+            const balloonProjected = balloonRotated.map(project);
+
+            const allFaces = [
+                ...balloonFaces.map((face, i) => {
+                    const pts3D = face.map(idx => balloonRotated[idx]);
+                    const pts2D = face.map(idx => balloonProjected[idx]);
+                    const maxZ = Math.max(...pts2D.map(p => p[2]));
+                    return { pts2D, pts3D, depth: maxZ, color: balloonPanelColors[i] };
+                }),
+                ...basketFaces.map(face => {
+                    const basketRotated = basketVertices.map(v => {
+                        let p = [v[0] + spiralX, v[1] + floatOffset.y + spiralY, v[2] + spiralZ];
+                        p = rotateX(p, angleX);
+                        p = rotateY(p, angleY);
+                        p = rotateZ(p, angleZ);
+                        return p;
+                    });
+                    const basketProjected = basketRotated.map(project);
+                    const pts3D = face.map(idx => basketRotated[idx]);
+                    const pts2D = face.map(idx => basketProjected[idx]);
+                    const maxZ = Math.max(...pts2D.map(p => p[2]));
+                    return { pts2D, pts3D, depth: maxZ, color: '#A0522D' };
+                }),
+                ...[person1, person2].flatMap(person => 
+                    person.faces.map(face => {
+                        const personRotated = person.vertices.map(v => {
+                            let p = [v[0] + spiralX, v[1] + floatOffset.y + spiralY, v[2] + spiralZ];
+                            p = rotateX(p, angleX);
+                            p = rotateY(p, angleY);
+                            p = rotateZ(p, angleZ);
+                            return p;
+                        });
+                        const personProjected = personRotated.map(project);
+                        const pts3D = face.indices.map(idx => personRotated[idx]);
+                        const pts2D = face.indices.map(idx => personProjected[idx]);
+                        const maxZ = Math.max(...pts2D.map(p => p[2]));
+                        return { pts2D, pts3D, depth: maxZ, color: face.color };
+                    })
+                )
+            ];
+
+            allFaces.sort((a, b) => b.depth - a.depth);
+
+            ropePoints.forEach(rope => {
+                const rotated = rope.map(v => {
+                    let p = [v[0] + spiralX, v[1] + floatOffset.y + spiralY, v[2] + spiralZ];
+                    p = rotateX(p, angleX);
+                    p = rotateY(p, angleY);
+                    p = rotateZ(p, angleZ);
+                    return project(p);
+                });
+                drawRope(rotated[0], rotated[1]);
+            });
+
+            allFaces.forEach(({ pts2D, pts3D, color }) => drawFace(pts2D, pts3D, color));
+
+            drawBirdTrail();
+
+            if (!birdPassed && storyPhase === 0 && phaseTimer > 180) {
+                birdProgress += 0.008;
+                const t = birdProgress;
+                const startY = HEIGHT * 0.3, endY = HEIGHT * 0.7;
+                const birdX = -100 + t * (WIDTH + 200);
+                const birdY = startY + (endY - startY) * t + Math.sin(t * Math.PI) * -80;
+                const wingFlap = Math.sin(time * 15) * 12;
+                const scale = 1.5 + Math.sin(t * Math.PI) * 0.8;
+                
+                if (Math.floor(time * 100) % 4 === 0) {
+                    birdTrail.push({ x: birdX, y: birdY, wingFlap, scale, life: 12 });
+                }
+                
+                drawBird(birdX, birdY, wingFlap, scale);
+                if (t >= 1) birdPassed = true;
+            }
+
+            if (weatherIntensity > 0.4) {
+                ctx.strokeStyle = `rgba(174, 214, 241, ${(weatherIntensity - 0.4) * 1.5})`;
+                ctx.lineWidth = 1 + weatherIntensity;
+                const activeRaindrops = Math.floor(150 * (weatherIntensity - 0.4) / 0.6);
+                for (let i = 0; i < activeRaindrops; i++) {
+                    const drop = raindrops[i];
+                    ctx.beginPath();
+                    ctx.moveTo(drop.x, drop.y);
+                    ctx.lineTo(drop.x - 2 - windStrength * 3, drop.y + drop.length * (1 + weatherIntensity * 0.5));
+                    ctx.stroke();
+                    drop.y += drop.speed * (1 + windStrength) * (1 + weatherIntensity * 0.5);
+                    drop.x -= 1 + windStrength * 2;
+                    if (drop.y > HEIGHT) {
+                        drop.y = -10;
+                        drop.x = Math.random() * WIDTH;
+                    }
+                }
+            }
+
+            if (fogIntensity > 0) {
+                for (let i = 0; i < 8; i++) {
+                    const fogX = (time * 5 * (i + 1) + i * 150) % (WIDTH + 400) - 200;
+                    const fogY = HEIGHT * 0.2 + i * HEIGHT * 0.12;
+                    const fogGrad = ctx.createRadialGradient(fogX, fogY, 0, fogX, fogY, 350);
+                    fogGrad.addColorStop(0, `rgba(50, 60, 70, ${fogIntensity * 0.6})`);
+                    fogGrad.addColorStop(0.5, `rgba(40, 50, 60, ${fogIntensity * 0.4})`);
+                    fogGrad.addColorStop(1, 'rgba(40, 50, 60, 0)');
+                    ctx.fillStyle = fogGrad;
+                    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+                }
+                ctx.fillStyle = `rgba(35, 45, 55, ${fogIntensity * 0.85})`;
+                ctx.fillRect(0, 0, WIDTH, HEIGHT);
+            }
+
+            const cornerGrad1 = ctx.createRadialGradient(0, 0, 0, 0, 0, WIDTH * 0.6);
+            cornerGrad1.addColorStop(0, 'rgba(0, 0, 0, 0.5)');
+            cornerGrad1.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            ctx.fillStyle = cornerGrad1;
+            ctx.fillRect(0, 0, WIDTH, HEIGHT);
+            
+            const cornerGrad2 = ctx.createRadialGradient(WIDTH, 0, 0, WIDTH, 0, WIDTH * 0.45);
+            cornerGrad2.addColorStop(0, 'rgba(0, 0, 0, 0.35)');
+            cornerGrad2.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            ctx.fillStyle = cornerGrad2;
+            ctx.fillRect(0, 0, WIDTH, HEIGHT);
+            
+            const cornerGrad3 = ctx.createRadialGradient(0, HEIGHT, 0, 0, HEIGHT, WIDTH * 0.55);
+            cornerGrad3.addColorStop(0, 'rgba(0, 0, 0, 0.4)');
+            cornerGrad3.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            ctx.fillStyle = cornerGrad3;
+            ctx.fillRect(0, 0, WIDTH, HEIGHT);
+            
+            const cornerGrad4 = ctx.createRadialGradient(WIDTH, HEIGHT, 0, WIDTH, HEIGHT, WIDTH * 0.5);
+            cornerGrad4.addColorStop(0, 'rgba(0, 0, 0, 0.45)');
+            cornerGrad4.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            ctx.fillStyle = cornerGrad4;
+            ctx.fillRect(0, 0, WIDTH, HEIGHT);
+            
+            const topGrad = ctx.createLinearGradient(0, 0, 0, HEIGHT * 0.25);
+            topGrad.addColorStop(0, 'rgba(0, 0, 0, 0.25)');
+            topGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            ctx.fillStyle = topGrad;
+            ctx.fillRect(0, 0, WIDTH, HEIGHT);
+            
+            const bottomGrad = ctx.createLinearGradient(0, HEIGHT, 0, HEIGHT * 0.75);
+            bottomGrad.addColorStop(0, 'rgba(0, 0, 0, 0.15)');
+            bottomGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            ctx.fillStyle = bottomGrad;
+            ctx.fillRect(0, 0, WIDTH, HEIGHT);
+            
+            const leftGrad = ctx.createLinearGradient(0, 0, WIDTH * 0.15, 0);
+            leftGrad.addColorStop(0, 'rgba(0, 0, 0, 0.2)');
+            leftGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            ctx.fillStyle = leftGrad;
+            ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+            if (weatherIntensity > 0.7) {
+                lightningTimer++;
+                const lightningFreq = 180 - (weatherIntensity - 0.7) * 400;
+                if (lightningTimer > lightningFreq + Math.random() * 240) {
+                    lightningActive = true;
+                    generateLightning();
+                    lightningTimer = 0;
+                    lightningCount++;
+                    if (lightningCount >= 10 && !endSequenceActive) {
+                        endSequenceActive = true;
+                        dramaticEndFrame = 0;
+                    }
+                }
+
+                if (lightningActive) {
+                    ctx.shadowBlur = 40;
+                    ctx.shadowColor = 'rgba(255, 255, 255, 0.8)';
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(lightningPoints[0].x, lightningPoints[0].y);
+                    for (let i = 1; i < lightningPoints.length; i++) {
+                        ctx.lineTo(lightningPoints[i].x, lightningPoints[i].y);
+                    }
+                    ctx.stroke();
+                    
+                    ctx.lineWidth = 1;
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+                    for (let i = 1; i < lightningPoints.length - 1; i++) {
+                        if (Math.random() > 0.6) {
+                            ctx.beginPath();
+                            ctx.moveTo(lightningPoints[i].x, lightningPoints[i].y);
+                            ctx.lineTo(lightningPoints[i].x + (Math.random() - 0.5) * 80, lightningPoints[i].y + 30);
+                            ctx.stroke();
+                        }
+                    }
+                    ctx.shadowBlur = 0;
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+                    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+                    setTimeout(() => { lightningActive = false; }, 150);
+                }
+            }
+
+            if (endSequenceActive) {
+                dramaticEndFrame++;
+                if (dramaticEndFrame <= 10) {
+                    ctx.fillStyle = 'rgba(255, 255, 255, 1)';
+                    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+                } else if (dramaticEndFrame <= 70) {
+                    ctx.fillStyle = 'rgba(0, 0, 0, 1)';
+                    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+                } else if (dramaticEndFrame <= 100) {
+                    const glowIntensity = 1 - (dramaticEndFrame - 70) / 30;
+                    ctx.fillStyle = 'rgba(0, 0, 0, 1)';
+                    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+                    const flickerTime = dramaticEndFrame * 0.8;
+                    for (let i = 0; i < 7; i++) {
+                        const offsetX = (turbulence(flickerTime * 1.5 + i * 50) - 0.5) * WIDTH * 0.4;
+                        const offsetY = (turbulence(flickerTime * 1.3 + i * 75 + 25) - 0.5) * HEIGHT * 0.4;
+                        const size = (0.25 + turbulence(flickerTime * 1.7 + i * 30) * 0.5) * WIDTH;
+                        const brightness = glowIntensity * (0.15 + turbulence(flickerTime * 2 + i * 60) * 0.25);
+                        const flicker1 = turbulence(flickerTime * 2 + i * 10);
+                        const flicker2 = turbulence(flickerTime * 2.3 + i * 15);
+                        const flicker3 = turbulence(flickerTime * 1.8 + i * 20);
+                        const glowGrad = ctx.createRadialGradient(WIDTH / 2 + offsetX, HEIGHT / 2 + offsetY, 0, WIDTH / 2 + offsetX, HEIGHT / 2 + offsetY, size);
+                        glowGrad.addColorStop(0, `rgba(${150 + flicker1 * 40}, ${30 + flicker1 * 20}, 0, ${brightness * 0.35})`);
+                        glowGrad.addColorStop(0.3, `rgba(${180 + flicker2 * 30}, ${50 + flicker2 * 25}, 5, ${brightness * 0.2})`);
+                        glowGrad.addColorStop(0.6, `rgba(${100 + flicker3 * 30}, ${40 + flicker3 * 20}, 0, ${brightness * 0.1})`);
+                        glowGrad.addColorStop(1, 'rgba(80, 20, 0, 0)');
+                        ctx.fillStyle = glowGrad;
+                        ctx.fillRect(0, 0, WIDTH, HEIGHT);
+                    }
+                } else {
+                    ctx.fillStyle = 'rgba(0, 0, 0, 1)';
+                    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+                    if (dramaticEndFrame > 110) {
+                        const fadeIn = Math.min(1, (dramaticEndFrame - 110) / 60);
+                        ctx.fillStyle = `rgba(200, 200, 200, ${fadeIn * 0.6})`;
+                        ctx.font = `${WIDTH * 0.06}px Georgia, serif`;
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText('SQUALL LINE', WIDTH / 2, HEIGHT / 2 - WIDTH * 0.03);
+                        ctx.font = `${WIDTH * 0.025}px Georgia, serif`;
+                        ctx.fillStyle = `rgba(150, 150, 150, ${fadeIn * 0.5})`;
+                        ctx.fillText('intarynx 2025', WIDTH / 2, HEIGHT / 2 + WIDTH * 0.04);
+                    }
+                    if (dramaticEndFrame < 200) {
+                        requestAnimationFrame(render);
+                    }
+                    return;
+                }
+            }
+
+            requestAnimationFrame(render);
+        }
+
+        render();
+    </script>
+</body>
+</html>

@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<base href="/upstride/">
+<title>You cannot OutRun it</title>
+<style>
+  :root{color-scheme:light dark}
+  html,body{height:100%;margin:0;background:#000;font-family:Inter,system-ui,Segoe UI,Roboto,Arial;display:flex;align-items:center;justify-content:center;}
+  #container{width:100%;height:100%;max-width:133.33vh;max-height:75vw;aspect-ratio:4/3;position:relative;background:#000;}
+  canvas{display:block;width:100%;height:100%;}
+</style>
+</head>
+<body>
+<div id="container">
+  <canvas id="c"></canvas>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const container = document.getElementById('container');
+
+function updateCanvasSize(){
+  const rect = container.getBoundingClientRect();
+  canvas.width = rect.width;
+  canvas.height = rect.height;
+  W = canvas.width;
+  H = canvas.height;
+}
+
+let W, H;
+updateCanvasSize();
+addEventListener('resize', updateCanvasSize);
+
+// --- Configuration Constants ---
+const SEG_LEN = 200;
+const ROAD_W = 2000;
+const CAMERA_H = 1000;
+const CAMERA_DEPTH = 0.84;
+const DRAW_DISTANCE = 300;
+
+// Swiss Life Expectancy Data (approximate mortality distribution)
+// Based on Swiss mortality statistics
+function generateLifespan(){
+  const rand = Math.random();
+  if(rand < 0.005) return Math.floor(Math.random() * 18); // Infant/child (0.5%)
+  if(rand < 0.015) return 18 + Math.floor(Math.random() * 22); // Young adult 18-40 (1%)
+  if(rand < 0.035) return 40 + Math.floor(Math.random() * 20); // Middle age 40-60 (2%)
+  if(rand < 0.10) return 60 + Math.floor(Math.random() * 15); // Senior 60-75 (6.5%)
+  if(rand < 0.35) return 75 + Math.floor(Math.random() * 10); // Elderly 75-85 (25%)
+  return 85 + Math.floor(Math.random() * 20); // Very old 85-105 (65%)
+}
+
+// Out Run Colors
+const ROAD_COLOR1 = '#6B6B6B'; // Light Gray
+const ROAD_COLOR2 = '#555555'; // Dark Gray
+const RUMBLE_COLOR1 = '#FFFFFF'; // White
+const RUMBLE_COLOR2 = '#FF0000'; // Red
+const GRASS_COLOR1 = '#3c8b3c'; // Light Green
+const GRASS_COLOR2 = '#2d7c2d'; // Dark Green
+const SKY_TOP = '#14083a';
+const SKY_BOT = '#4c0e64';
+
+// --- State Variables ---
+let age = 0;
+let segments = [];
+let seed = Math.random()*10000;
+let playerZ = 0;
+let speed = 0;
+let maxSpeed = 8000;
+let acceleration = 100;
+let lastTime = performance.now();
+let cameraX = 0;
+let fadeAlpha = 0;
+let fadeColor = 'black';
+let lifeExpectancy = generateLifespan();
+let isEarlyDeath = lifeExpectancy < 80;
+
+console.log('Initial life expectancy:', lifeExpectancy, 'Early death:', isEarlyDeath);
+
+// --- Utility Functions ---
+
+function interpolateColor(color1, color2, t){
+  // Parse hex colors
+  const r1 = parseInt(color1.slice(1,3), 16);
+  const g1 = parseInt(color1.slice(3,5), 16);
+  const b1 = parseInt(color1.slice(5,7), 16);
+  const r2 = parseInt(color2.slice(1,3), 16);
+  const g2 = parseInt(color2.slice(3,5), 16);
+  const b2 = parseInt(color2.slice(5,7), 16);
+  
+  const r = Math.round(r1 + (r2 - r1) * t);
+  const g = Math.round(g1 + (g2 - g1) * t);
+  const b = Math.round(b1 + (b2 - b1) * t);
+  
+  return `rgb(${r},${g},${b})`;
+}
+
+function rand(min,max,seedOffset=0){
+  const x = Math.sin(seed + seedOffset) * 10000;
+  seed += 0.0001 + seedOffset*0.1;
+  return min + (x - Math.floor(x)) * (max-min);
+}
+function easeIn(a,b,t){ return a + (b-a)*(t*t); }
+function easeOut(a,b,t){ return a + (b-a)*(1 - Math.pow(1-t,2)); }
+
+// --- Track Building ---
+
+function addSegment(curve, y){
+  const n = segments.length;
+  segments.push({index:n, curve: curve||0, y: y||0, p1:{world:{z:n*SEG_LEN}}, p2:{world:{z:(n+1)*SEG_LEN}}});
+}
+function addRoad(enter, hold, leave, curve, height){
+  for(let i=0;i<enter;i++){
+    const t = i/enter;
+    addSegment(easeIn(0,curve,t), easeIn(0,height,t));
+  }
+  for(let i=0;i<hold;i++) addSegment(curve, height);
+  for(let i=0;i<leave;i++){
+    const t = i/leave;
+    addSegment(easeOut(curve,0,t), easeOut(height,0,t));
+  }
+}
+function buildTrack(){
+  segments.length = 0;
+  // Initialize road with a few straight segments
+  for(let i=0;i<20;i++) addSegment(0,0);
+  const sections = 40 + Math.floor(rand(0,20,1));
+  for(let s=0;s<sections;s++){
+    const type = Math.floor(rand(0,3,s));
+    if(type === 0){
+      addRoad(10 + Math.floor(rand(5,15,s+1)), 20 + Math.floor(rand(10,40,s+2)), 10 + Math.floor(rand(5,15,s+3)), rand(-1.2,1.2,s+4), 0);
+    } else if(type === 1){
+      addRoad(10 + Math.floor(rand(5,15,s+1)), 20 + Math.floor(rand(10,40,s+2)), 10 + Math.floor(rand(5,15,s+3)), 0, rand(-700,700,s+4));
+    } else {
+      addRoad(12 + Math.floor(rand(6,18,s+1)), 24 + Math.floor(rand(12,48,s+2)), 12 + Math.floor(rand(6,18,s+3)), rand(-1.2,1.2,s+4), rand(-500,500,s+5));
+    }
+  }
+  // End road with a few straight segments
+  for(let i=0;i<30;i++) addSegment(0,0);
+  for(let i=0;i<segments.length;i++){
+    segments[i].p1.world.y = segments[i].y || 0;
+    segments[i].p2.world.y = (segments[i+1] ? segments[i+1].y : segments[i].y) || 0;
+  }
+}
+buildTrack();
+
+function findSegment(z){
+  let index = Math.floor(z/SEG_LEN) % segments.length;
+  if(index < 0) index += segments.length;
+  return segments[index];
+}
+
+// --- Projection & Drawing ---
+
+function project(p, cameraX, cameraY, cameraZ){
+  const dz = p.world.z - cameraZ;
+  if(dz <= 0) return null;
+  const scale = CAMERA_DEPTH / dz;
+  return {
+    x: (1 + (p.world.x - cameraX) * scale) * W/2,
+    y: Math.round((1 - (p.world.y - cameraY) * scale) * H/2), // Round Y to align pixels
+    w: scale * ROAD_W * W/2
+  };
+}
+
+function drawQuad(x1,y1,w1, x2,y2,w2, color){
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x1 - w1, y1);
+  ctx.lineTo(x2 - w2, y2);
+  ctx.lineTo(x2 + w2, y2);
+  ctx.lineTo(x1 + w1, y1);
+  ctx.closePath();
+  ctx.fill();
+}
+
+// --- Game Loop ---
+
+function frame(now){
+  const dt = Math.min((now - lastTime)/1000, 0.05);
+   lastTime = now;
+  update(dt);
+  render();
+  requestAnimationFrame(frame);
+}
+
+function update(dt){
+  age += dt * 2;
+  
+  // Accelerate continuously
+  speed += acceleration * dt;
+  if(speed > maxSpeed) speed = maxSpeed;
+  
+  // Calculate current age display (0-120)
+  const ageDisplay = (speed / maxSpeed) * 120;
+  
+  // Check if we've reached life expectancy
+  if(ageDisplay >= lifeExpectancy){
+    if(isEarlyDeath){
+      // Dark red fade for early death
+      fadeAlpha += dt * 0.5;
+      fadeColor = 'darkred';
+    } else {
+      // Black fade for natural end
+      fadeAlpha += dt * 0.3;
+      fadeColor = 'black';
+    }
+  }
+  
+  // Reset when fully faded
+  if(fadeAlpha >= 1.2){
+    // Generate new lifespan for next journey
+    lifeExpectancy = generateLifespan();
+    isEarlyDeath = lifeExpectancy < 80;
+    
+    console.log('New life expectancy:', lifeExpectancy, 'Early death:', isEarlyDeath);
+    
+    age = 0;
+    playerZ = 0;
+    speed = 0;
+    fadeAlpha = 0;
+    fadeColor = 'black';
+    seed = Math.random()*10000;
+    buildTrack();
+    return;
+  }
+
+  playerZ += speed * dt;
+  while(playerZ >= segments.length*SEG_LEN) playerZ -= segments.length*SEG_LEN;
+}
+
+function render(){
+  // Calculate time of day based on speed (0 = dawn, 1 = deep night)
+  const timeOfDay = Math.min(speed / maxSpeed, 1);
+  
+  // Cinematic color transitions through the day
+  let skyTop, skyBot;
+  
+  if(timeOfDay < 0.2){ // Dawn - Deep purple to warm orange
+    const t = timeOfDay / 0.2;
+    skyTop = interpolateColor('#1a0f2e', '#ff6b4a', t);
+    skyBot = interpolateColor('#4a2545', '#ffa36c', t);
+  } else if(timeOfDay < 0.45){ // Morning to Day - Warm to cool blue
+    const t = (timeOfDay - 0.2) / 0.25;
+    skyTop = interpolateColor('#ff6b4a', '#5b9bd5', t);
+    skyBot = interpolateColor('#ffa36c', '#a8d5ff', t);
+  } else if(timeOfDay < 0.65){ // Day - Crisp blue sky
+    const t = (timeOfDay - 0.45) / 0.2;
+    skyTop = interpolateColor('#5b9bd5', '#3d7bb5', t);
+    skyBot = interpolateColor('#a8d5ff', '#87ceeb', t);
+  } else if(timeOfDay < 0.85){ // Golden hour - Blue to amber/purple
+    const t = (timeOfDay - 0.65) / 0.2;
+    skyTop = interpolateColor('#3d7bb5', '#d95d39', t);
+    skyBot = interpolateColor('#87ceeb', '#e8a87c', t);
+  } else { // Night - Deep blue/black
+    const t = (timeOfDay - 0.85) / 0.15;
+    skyTop = interpolateColor('#d95d39', '#0d1b2a', t);
+    skyBot = interpolateColor('#e8a87c', '#1b263b', t);
+  }
+  
+  // 1. Draw Sky (Gradient)
+  const g = ctx.createLinearGradient(0,0,0,H/2);
+  g.addColorStop(0, skyTop);
+  g.addColorStop(1, skyBot);
+  ctx.fillStyle = g;
+  ctx.fillRect(0,0,W,H/2);
+
+  // 2. Draw Ground/Grass - cinematic color shift
+  const grassBrightness = Math.max(0.25, 1 - timeOfDay * 0.75);
+  const grassHue = 120 - (timeOfDay * 20); // Shift from green to blue-green
+  const grassColorBg = `hsl(${grassHue}, 45%, ${20 * grassBrightness}%)`;
+  ctx.fillStyle = grassColorBg;
+  ctx.fillRect(0,H/2,W,H/2);
+
+  const baseSegmentIndex = Math.floor(playerZ/SEG_LEN);
+  const baseSegment = segments[baseSegmentIndex % segments.length];
+  if(!baseSegment) return;
+
+  // The camera should always look at a point a certain depth ahead
+  const cameraY = CAMERA_H + baseSegment.y;
+  const cameraZ = playerZ + SEG_LEN*CAMERA_DEPTH;
+
+  let maxY = H;
+  let x = 0;
+  let dx = 0;
+
+  for(let n=0;n<DRAW_DISTANCE;n++){
+    const segIndex = (baseSegmentIndex + n) % segments.length;
+    const seg = segments[segIndex];
+
+    const p1 = {world:{x: x, y: seg.p1.world.y, z: seg.p1.world.z}};
+    const p2 = {world:{x: x + dx, y: seg.p2.world.y, z: seg.p2.world.z}};
+
+    dx += seg.curve;
+    x += dx;
+
+    const proj1 = project(p1, 0, cameraY, cameraZ);
+    const proj2 = project(p2, 0, cameraY, cameraZ);
+
+    if(!proj1 || !proj2) continue;
+    if(proj2.y >= maxY) continue;
+
+    // 3. Draw Grass (Wide background - cinematic desaturated greens)
+    const grassBrightness = Math.max(0.25, 1 - timeOfDay * 0.75);
+    const grassSat = Math.max(25, 45 - timeOfDay * 20); // Desaturate at night
+    const grass1 = `hsl(115, ${grassSat}%, ${Math.floor(28 * grassBrightness)}%)`;
+    const grass2 = `hsl(118, ${grassSat}%, ${Math.floor(22 * grassBrightness)}%)`;
+    const grassColor = (Math.floor(segIndex/3) % 2 === 0) ? grass1 : grass2;
+    drawQuad(proj1.x, proj1.y, W, proj2.x, proj2.y, W, grassColor);
+
+    // 4. Draw Road (Desaturated grays with subtle warmth)
+    const roadBrightness = Math.max(0.4, 1 - timeOfDay * 0.6);
+    const road1 = `hsl(30, 5%, ${Math.floor(42 * roadBrightness)}%)`;
+    const road2 = `hsl(30, 5%, ${Math.floor(32 * roadBrightness)}%)`;
+    const roadColor = (Math.floor(segIndex/3) % 2 === 0) ? road1 : road2;
+    drawQuad(proj1.x, proj1.y, proj1.w, proj2.x, proj2.y, proj2.w, roadColor);
+
+    // 5. Draw Rumble Strips on edges (White and Red alternating, thin strips on the sides)
+    const rumbleColor = (Math.floor(segIndex/3) % 2 === 0) ? RUMBLE_COLOR1 : RUMBLE_COLOR2;
+    const rumbleW1 = proj1.w * 0.08;
+    const rumbleW2 = proj2.w * 0.08;
+    // Left rumble
+    drawQuad(proj1.x - proj1.w, proj1.y, rumbleW1, proj2.x - proj2.w, proj2.y, rumbleW2, rumbleColor);
+    // Right rumble
+    drawQuad(proj1.x + proj1.w, proj1.y, rumbleW1, proj2.x + proj2.w, proj2.y, rumbleW2, rumbleColor);
+
+    // 6. Dashed center line (White, drawn last)
+    if((segIndex % 15) < 10){
+      const laneW1 = proj1.w * 0.02;
+      const laneW2 = proj2.w * 0.02;
+      drawQuad(proj1.x, proj1.y, laneW1, proj2.x, proj2.y, laneW2, '#fff');
+    }
+    
+    maxY = proj2.y;
+  }
+  drawPhilosophicalText();
+  drawAgeNumber();
+  
+  // Add sepia vignette that increases with age
+  drawSepiaVignette(timeOfDay);
+  
+  // Add film grain that increases with age
+  drawFilmGrain(timeOfDay);
+  
+  // Draw fade overlay (black or dark red)
+  if(fadeAlpha > 0){
+    if(fadeColor === 'darkred'){
+      ctx.fillStyle = `rgba(139,0,0,${fadeAlpha})`;
+    } else {
+      ctx.fillStyle = `rgba(0,0,0,${fadeAlpha})`;
+    }
+    ctx.fillRect(0, 0, W, H);
+  }
+}
+
+function drawSepiaVignette(intensity){
+  // Sepia vignette increases with age
+  const sepiaAmount = Math.pow(intensity, 0.5) * 0.7;
+  
+  if(sepiaAmount > 0.1){
+    // Create radial gradient from center to edges
+    const centerX = W / 2;
+    const centerY = H / 2;
+    const maxRadius = Math.sqrt(W * W + H * H) / 2;
+    
+    const gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, maxRadius);
+    gradient.addColorStop(0, 'rgba(112, 66, 20, 0)'); // Transparent sepia in center
+    gradient.addColorStop(0.5, `rgba(112, 66, 20, ${sepiaAmount * 0.3})`);
+    gradient.addColorStop(1, `rgba(112, 66, 20, ${sepiaAmount})`); // Full sepia at edges
+    
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, W, H);
+  }
+}
+
+function drawFilmGrain(intensity){
+  // Heavy VHS-style grain that increases as life progresses
+  const grainAmount = Math.pow(intensity, 0.7) * 0.8; // More aggressive scaling
+  
+  if(grainAmount > 0.02){
+    const imageData = ctx.getImageData(0, 0, W, H);
+    const pixels = imageData.data;
+    
+    // Heavy grain on every pixel as we age
+    const skipRate = Math.max(1, Math.floor(4 / (intensity * 2 + 0.1)));
+    
+    for(let i = 0; i < pixels.length; i += 4 * skipRate){
+      // VHS-style luminance noise (affects all channels)
+      const noise = (Math.random() - 0.5) * 120 * grainAmount;
+      pixels[i] += noise;     // R
+      pixels[i + 1] += noise; // G
+      pixels[i + 2] += noise; // B
+      
+      // Add color noise for degraded tape look
+      if(intensity > 0.5 && Math.random() > 0.97){
+        pixels[i] += (Math.random() - 0.5) * 80;     // R shift
+        pixels[i + 2] += (Math.random() - 0.5) * 80; // B shift
+      }
+    }
+    
+    // Add scanlines for VHS effect (more visible as we age)
+    if(intensity > 0.3){
+      for(let y = 0; y < H; y += 3){
+        for(let x = 0; x < W; x++){
+          const idx = (y * W + x) * 4;
+          const darken = 25 * intensity;
+          pixels[idx] -= darken;
+          pixels[idx + 1] -= darken;
+          pixels[idx + 2] -= darken;
+        }
+      }
+    }
+    
+    ctx.putImageData(imageData, 0, 0);
+  }
+}
+
+function drawAgeNumber(){
+  // Calculate age - continues beyond 100
+  const displayAge = Math.floor((speed / maxSpeed) * 120);
+  
+  // Position at bottom center of screen (where a car would be)
+  const carX = W / 2;
+  const carY = H * 0.82; // Slightly higher
+  
+  // Subtle cinematic glow - less intense, more atmospheric
+  const grd = ctx.createRadialGradient(carX, carY, 5, carX, carY, 120);
+  grd.addColorStop(0, 'rgba(240,230,210,0.4)');
+  grd.addColorStop(0.3, 'rgba(180,170,150,0.15)');
+  grd.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = grd;
+  ctx.beginPath();
+  ctx.arc(carX, carY, 120, 0, Math.PI*2);
+  ctx.fill();
+
+  // Draw the number with subtle shadow - same font as text
+  const ageStr = String(displayAge);
+  const size = 110;
+  ctx.font = `300 ${size}px Inter, Georgia, serif`; // Match philosophical text font
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  
+  // Subtle shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.fillText(ageStr, carX + 2, carY + 2);
+  
+  // Main number - warm white
+  ctx.fillStyle = '#f5f3ed';
+  ctx.fillText(ageStr, carX, carY);
+}
+
+function drawPhilosophicalText(){
+  const timeOfDay = Math.min(speed / maxSpeed, 1);
+  
+  // Fade in text gradually as journey progresses
+  const textAlpha = Math.min(timeOfDay * 2, 1);
+  
+  if(textAlpha > 0){
+    ctx.font = '300 italic 28px Inter, Georgia, serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    
+    ctx.fillStyle = `rgba(255, 255, 255, ${textAlpha * 0.8})`;
+    ctx.fillText('You cannot OutRun it', W / 2, H * 0.15);
+  }
+}
+
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

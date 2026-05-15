@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Squares</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: #111;
+            position: relative;
+        }
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: repeating-linear-gradient(
+                0deg,
+                rgba(0, 0, 0, 0.15) 0px,
+                rgba(0, 0, 0, 0.15) 1px,
+                transparent 1px,
+                transparent 2px
+            );
+            pointer-events: none;
+            z-index: 10;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 1fr 1fr;
+            gap: 2px;
+            background: #333;
+            padding: 2px;
+            width: 600px;
+            height: 600px;
+            max-width: 90vmin;
+            max-height: 90vmin;
+            position: relative;
+            transition: transform 1s ease-in-out;
+            --scanline-rotation: 0deg;
+        }
+        .grid::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            box-shadow: inset 0 0 100px rgba(0, 100, 255, 0.2);
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            background: #000;
+        }
+    </style>
+</head>
+<body>
+    <div class="grid">
+        <canvas id="canvas1" width="600" height="600"></canvas>
+        <canvas id="canvas2" width="600" height="600"></canvas>
+        <canvas id="canvas3" width="600" height="600"></canvas>
+        <canvas id="canvas4" width="600" height="600"></canvas>
+    </div>
+    <script>
+        const canvases = [
+            document.getElementById('canvas1'),
+            document.getElementById('canvas2'),
+            document.getElementById('canvas3'),
+            document.getElementById('canvas4')
+        ];
+        
+        const ctxs = canvases.map(c => c.getContext('2d'));
+        
+        ctxs.forEach(ctx => {
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, 600, 600);
+        });
+        
+        const amplitude = 300;
+        const frequency = 0.15;
+        
+        let directions = [0, 1, 2, 3];
+        let hues = canvases.map(() => Math.random() * 360);
+        let useComplementary = [false, false, false, false];
+        let rotation = 0;
+        
+        const grid = document.querySelector('.grid');
+        
+        function drawCurve(canvasIndex) {
+            const ctx = ctxs[canvasIndex];
+            hues[canvasIndex] = (hues[canvasIndex] + 0.5) % 360;
+            const currentHue = useComplementary[canvasIndex] ? (hues[canvasIndex] + 180) % 360 : hues[canvasIndex];
+            const saturation = 100;
+            const lightness = 50 + Math.sin(currentHue * 0.1) * 10;
+            const color = `hsl(${currentHue}, ${saturation}%, ${lightness}%)`;
+            const phase = Math.random() * Math.PI * 2;
+            const randomFrequency = frequency + (Math.random() - 0.5) * 0.1;
+            
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1;
+            ctx.globalAlpha = 0.6;
+            ctx.beginPath();
+            
+            const diagonalLength = Math.sqrt(600 * 600 + 600 * 600);
+            
+            switch(directions[canvasIndex]) {
+                case 0:
+                    const y1 = 300;
+                    for (let x = 0; x < 600; x++) {
+                        const wave = Math.sin(x * randomFrequency + phase) * amplitude;
+                        const yPos = y1 + wave;
+                        x === 0 ? ctx.moveTo(x, yPos) : ctx.lineTo(x, yPos);
+                    }
+                    break;
+                    
+                case 1:
+                    const x1 = 300;
+                    for (let y = 0; y < 600; y++) {
+                        const wave = Math.sin(y * randomFrequency + phase) * amplitude;
+                        const xPos = x1 + wave;
+                        y === 0 ? ctx.moveTo(xPos, y) : ctx.lineTo(xPos, y);
+                    }
+                    break;
+                    
+                case 2:
+                    for (let t = 0; t < diagonalLength; t += 2) {
+                        const baseX = t * Math.cos(Math.PI / 4);
+                        const baseY = t * Math.sin(Math.PI / 4);
+                        const wave = Math.sin(t * randomFrequency * 0.5 + phase) * (diagonalLength / 2);
+                        const xPos = baseX + wave * Math.cos(Math.PI / 4 + Math.PI / 2);
+                        const yPos = baseY + wave * Math.sin(Math.PI / 4 + Math.PI / 2);
+                        t === 0 ? ctx.moveTo(xPos, yPos) : ctx.lineTo(xPos, yPos);
+                    }
+                    break;
+                    
+                case 3:
+                    for (let t = 0; t < diagonalLength; t += 2) {
+                        const baseX = 600 - t * Math.cos(Math.PI / 4);
+                        const baseY = t * Math.sin(Math.PI / 4);
+                        const wave = Math.sin(t * randomFrequency * 0.5 + phase) * (diagonalLength / 2);
+                        const xPos = baseX + wave * Math.cos(3 * Math.PI / 4 + Math.PI / 2);
+                        const yPos = baseY + wave * Math.sin(3 * Math.PI / 4 + Math.PI / 2);
+                        t === 0 ? ctx.moveTo(xPos, yPos) : ctx.lineTo(xPos, yPos);
+                    }
+                    break;
+                    
+                case 4:
+                    for (let t = 0; t < diagonalLength; t += 2) {
+                        const baseX = 600 - t * Math.cos(Math.PI / 4);
+                        const baseY = 600 - t * Math.sin(Math.PI / 4);
+                        const wave = Math.sin(t * randomFrequency * 0.5 + phase) * (diagonalLength / 2);
+                        const xPos = baseX + wave * Math.cos(5 * Math.PI / 4 + Math.PI / 2);
+                        const yPos = baseY + wave * Math.sin(5 * Math.PI / 4 + Math.PI / 2);
+                        t === 0 ? ctx.moveTo(xPos, yPos) : ctx.lineTo(xPos, yPos);
+                    }
+                    break;
+                    
+                case 5:
+                    for (let t = 0; t < diagonalLength; t += 2) {
+                        const baseX = t * Math.cos(Math.PI / 4);
+                        const baseY = 600 - t * Math.sin(Math.PI / 4);
+                        const wave = Math.sin(t * randomFrequency * 0.5 + phase) * (diagonalLength / 2);
+                        const xPos = baseX + wave * Math.cos(7 * Math.PI / 4 + Math.PI / 2);
+                        const yPos = baseY + wave * Math.sin(7 * Math.PI / 4 + Math.PI / 2);
+                        t === 0 ? ctx.moveTo(xPos, yPos) : ctx.lineTo(xPos, yPos);
+                    }
+                    break;
+            }
+            
+            ctx.stroke();
+        }
+        
+        setInterval(() => {
+            canvases.forEach((_, i) => drawCurve(i));
+        }, 50);
+        
+        setInterval(() => {
+            directions = directions.map(d => (d + 1) % 6);
+            useComplementary = useComplementary.map(u => !u);
+            rotation += 90;
+            grid.style.transform = `rotate(${rotation}deg)`;
+        }, 3000);
+    </script>
+</body>
+</html>

@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Svengali</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a1a; display: flex; align-items: center; justify-content: center; height: 100vh; overflow: hidden; }
+  canvas { border-radius: 4px; box-shadow: 0 0 60px rgba(80, 40, 160, 0.4); display: block; image-rendering: pixelated; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const c = document.getElementById('c');
+const ctx = c.getContext('2d');
+let W, H;
+const LO = 320;
+
+const rng = (a,b) => Math.random()*(b-a)+a;
+function rgbStr(c) { return `rgb(${c[0]},${c[1]},${c[2]})`; }
+
+const ppPal = [
+  [0,0,34],[17,0,68],[34,0,102],[68,0,136],[102,0,170],[136,0,204],
+  [170,34,221],[204,85,255],[255,136,255],[255,170,204],[255,204,170],
+  [255,221,136],[255,255,85],[221,255,85],[136,255,85],[85,255,136],
+  [0,221,170],[0,170,204],[0,119,187],[0,68,153],[0,34,119],
+  [170,85,0],[204,119,34],[238,170,68],[255,204,102],[170,136,85],
+  [119,68,34],[68,34,17],[34,17,0],[255,51,51],[204,0,68],
+  [255,255,255],[204,204,221],[153,153,187],[102,102,153],[51,51,102]
+];
+
+function pickPal() { return ppPal[Math.floor(Math.random()*ppPal.length)]; }
+
+function makeGradStops(n) {
+  n = n || Math.floor(rng(3,6));
+  const stops = [];
+  for (let i=0; i<n; i++) stops.push({pos:i/(n-1), col: pickPal()});
+  return stops;
+}
+
+function buildLinGrad(c,x0,y0,x1,y1,stops) {
+  const g=c.createLinearGradient(x0,y0,x1,y1);
+  for(const s of stops) g.addColorStop(s.pos, rgbStr(s.col));
+  return g;
+}
+
+function buildRadGrad(c,cx,cy,r,stops) {
+  const g=c.createRadialGradient(cx,cy,0,cx,cy,r);
+  for(const s of stops) g.addColorStop(s.pos, rgbStr(s.col));
+  return g;
+}
+
+function amiga12(r,g,b) {
+  return [Math.round(r/17)*17, Math.round(g/17)*17, Math.round(b/17)*17];
+}
+
+function applyHAM(imageData, w, h) {
+  const d = imageData.data;
+  const basePal = [
+    [0,0,0],[255,255,255],[0,0,170],[170,0,0],
+    [0,170,0],[170,170,0],[0,170,170],[170,0,170]
+  ];
+  for (let y=0; y<h; y++) {
+    let pr=0, pg=0, pb=0;
+    for (let x=0; x<w; x++) {
+      const i=(y*w+x)*4;
+      const [qr,qg,qb]=amiga12(d[i],d[i+1],d[i+2]);
+      let inPal=false;
+      for (const c of basePal) {
+        if(Math.abs(c[0]-qr)<10&&Math.abs(c[1]-qg)<10&&Math.abs(c[2]-qb)<10) {
+          pr=qr;pg=qg;pb=qb;inPal=true;break;
+        }
+      }
+      if(!inPal) {
+        const dr=Math.abs(qr-pr),dg=Math.abs(qg-pg),db=Math.abs(qb-pb);
+        if(dr>=dg&&dr>=db) pr=qr;
+        else if(dg>=dr&&dg>=db) pg=qg;
+        else pb=qb;
+      }
+      d[i]=pr;d[i+1]=pg;d[i+2]=pb;
+    }
+  }
+}
+
+// --- Scene management ---
+
+function makeCanvas() {
+  const cv = document.createElement('canvas');
+  cv.width = LO; cv.height = LO;
+  return cv;
+}
+
+function generateBg() {
+  const cv = makeCanvas();
+  const x = cv.getContext('2d');
+  const stops = makeGradStops(5);
+  x.fillStyle = buildLinGrad(x, 0, 0, LO, LO, stops);
+  x.fillRect(0, 0, LO, LO);
+  const rStops = makeGradStops(3);
+  rStops[rStops.length-1].col = [0,0,0];
+  x.globalAlpha = 0.4;
+  x.fillStyle = buildRadGrad(x, LO*0.4, LO*0.35, LO*0.7, rStops);
+  x.fillRect(0, 0, LO, LO);
+  x.globalAlpha = 1;
+  // Dither
+  const img = x.getImageData(0,0,LO,LO);
+  const d = img.data;
+  for (let i=0; i<LO*LO; i++) {
+    const j=i*4, noise=(Math.random()-0.5)*32;
+    d[j]=Math.max(0,Math.min(255,d[j]+noise));
+    d[j+1]=Math.max(0,Math.min(255,d[j+1]+noise));
+    d[j+2]=Math.max(0,Math.min(255,d[j+2]+noise));
+  }
+  applyHAM(img, LO, LO);
+  x.putImageData(img, 0, 0);
+  return cv;
+}
+
+function makeAirbrush() {
+  const r=rng(25,70);
+  return { type:'airbrush', x:rng(r,LO-r), y:rng(r,LO-r), r,
+    vx:rng(-0.15,0.15), vy:rng(-0.15,0.15),
+    gradStops:makeGradStops(4), phase:rng(0,Math.PI*2), speed:rng(0.006,0.015), breathe:rng(0.05,0.15) };
+}
+function makeOrganic() {
+  const pts=Math.floor(rng(5,9)), baseR=rng(20,55), angles=[], radii=[];
+  for(let j=0;j<=pts;j++) { angles.push((j/pts)*Math.PI*2); radii.push(baseR+rng(-baseR*0.4,baseR*0.4)); }
+  return { type:'organic', x:rng(40,LO-40), y:rng(40,LO-40), rot:rng(0,Math.PI*2),
+    vx:rng(-0.12,0.12), vy:rng(-0.12,0.12), vr:rng(-0.002,0.002),
+    pts, angles, radii, baseR, gradStops:makeGradStops(4), phase:rng(0,Math.PI*2), speed:rng(0.004,0.012) };
+}
+function makeStroke() {
+  const points=[]; let x=rng(0,LO), y=rng(0,LO);
+  for(let i=0;i<Math.floor(rng(8,20));i++) { points.push({x,y}); x+=rng(-15,15); y+=rng(-15,15); }
+  return { type:'stroke', points, width:rng(4,18), gradStops:makeGradStops(3),
+    phase:rng(0,Math.PI*2), speed:rng(0.008,0.02), amp:rng(2,8) };
+}
+function makeEllipse() {
+  return { type:'ellipse', x:rng(30,LO-30), y:rng(30,LO-30), rx:rng(15,50), ry:rng(10,35),
+    rot:rng(0,Math.PI*2), vr:rng(-0.003,0.003), vx:rng(-0.12,0.12), vy:rng(-0.12,0.12),
+    gradStops:makeGradStops(4), phase:rng(0,Math.PI*2), speed:rng(0.005,0.012) };
+}
+function makeSpray() {
+  return { type:'spray', x:rng(0,LO), y:rng(0,LO), r:rng(2,6),
+    vx:rng(-0.2,0.2), vy:rng(-0.2,0.2), col:pickPal(), phase:rng(0,Math.PI*2) };
+}
+
+function generateScene() {
+  return {
+    bg: generateBg(),
+    shapeC: makeCanvas(),
+    compC: makeCanvas(),
+    shapes: [
+      ...Array.from({length:2}, makeAirbrush),
+      ...Array.from({length:3}, makeOrganic),
+      ...Array.from({length:2}, makeStroke),
+      ...Array.from({length:2}, makeEllipse),
+      ...Array.from({length:12}, makeSpray)
+    ]
+  };
+}
+
+function wrap(o) {
+  if(o.x<-60) o.x=LO+60; if(o.x>LO+60) o.x=-60;
+  if(o.y<-60) o.y=LO+60; if(o.y>LO+60) o.y=-60;
+}
+
+function drawShapes(scene, t) {
+  const sx = scene.shapeC.getContext('2d');
+  sx.clearRect(0,0,LO,LO);
+
+  for (const s of scene.shapes) {
+    if (s.type==='airbrush') {
+      s.x+=s.vx; s.y+=s.vy; wrap(s);
+      const r=Math.max(2, s.r+Math.sin(t*s.speed+s.phase)*s.r*s.breathe);
+      sx.beginPath(); sx.arc(s.x,s.y,r,0,Math.PI*2);
+      sx.fillStyle=buildRadGrad(sx,s.x-r*0.25,s.y-r*0.3,r*1.3,s.gradStops);
+      sx.globalAlpha=0.7; sx.fill(); sx.globalAlpha=1;
+    }
+    else if (s.type==='organic') {
+      s.x+=s.vx; s.y+=s.vy; s.rot+=s.vr; wrap(s);
+      sx.save(); sx.translate(s.x,s.y); sx.rotate(s.rot);
+      sx.beginPath();
+      for(let j=0;j<=s.pts;j++) {
+        const a=s.angles[j], r=s.radii[j]+Math.sin(t*s.speed+s.phase+j)*4;
+        const x=Math.cos(a)*r, y=Math.sin(a)*r;
+        if(j===0) sx.moveTo(x,y);
+        else { const cp=r*(0.8+Math.sin(t*s.speed*0.5+j)*0.2); sx.quadraticCurveTo(Math.cos(a-0.4)*cp,Math.sin(a-0.4)*cp,x,y); }
+      }
+      sx.closePath();
+      sx.fillStyle=buildRadGrad(sx,0,0,s.baseR*1.4,s.gradStops);
+      sx.globalAlpha=0.65; sx.fill(); sx.globalAlpha=1;
+      sx.restore();
+    }
+    else if (s.type==='ellipse') {
+      s.x+=s.vx; s.y+=s.vy; s.rot+=s.vr; wrap(s);
+      const p=1+Math.sin(t*s.speed+s.phase)*0.1;
+      sx.save(); sx.translate(s.x,s.y); sx.rotate(s.rot);
+      sx.beginPath(); sx.ellipse(0,0,s.rx*p,s.ry*p,0,0,Math.PI*2);
+      sx.fillStyle=buildRadGrad(sx,-s.rx*0.2,-s.ry*0.2,Math.max(s.rx,s.ry)*1.3,s.gradStops);
+      sx.globalAlpha=0.6; sx.fill(); sx.globalAlpha=1;
+      sx.restore();
+    }
+    else if (s.type==='stroke') {
+      sx.beginPath();
+      let fx,fy,lx,ly;
+      for(let j=0;j<s.points.length;j++) {
+        const p=s.points[j];
+        const ox=Math.sin(t*s.speed+s.phase+j*0.5)*s.amp;
+        const oy=Math.cos(t*s.speed*0.7+s.phase+j*0.7)*s.amp;
+        const px=p.x+ox, py=p.y+oy;
+        if(j===0){sx.moveTo(px,py);fx=px;fy=py;}
+        else{sx.lineTo(px,py);lx=px;ly=py;}
+      }
+      sx.strokeStyle=buildLinGrad(sx,fx,fy,lx||fx,ly||fy,s.gradStops);
+      sx.lineWidth=s.width; sx.lineCap='round'; sx.lineJoin='round';
+      sx.globalAlpha=0.6; sx.stroke(); sx.globalAlpha=1;
+    }
+    else if (s.type==='spray') {
+      s.x+=s.vx; s.y+=s.vy; wrap(s);
+      const r=Math.max(0.5, s.r+Math.sin(t*0.025+s.phase));
+      sx.beginPath(); sx.arc(s.x,s.y,r,0,Math.PI*2);
+      sx.fillStyle=rgbStr(s.col); sx.globalAlpha=0.7; sx.fill(); sx.globalAlpha=1;
+    }
+  }
+
+  // Quantize to 4096
+  const img=sx.getImageData(0,0,LO,LO);
+  const d=img.data;
+  for(let i=0;i<LO*LO;i++) {
+    const j=i*4;
+    if(d[j+3]>0) { d[j]=Math.round(d[j]/17)*17; d[j+1]=Math.round(d[j+1]/17)*17; d[j+2]=Math.round(d[j+2]/17)*17; }
+  }
+  sx.putImageData(img, 0, 0);
+}
+
+function compositeScene(scene) {
+  const cx = scene.compC.getContext('2d');
+  cx.drawImage(scene.bg, 0, 0);
+  cx.drawImage(scene.shapeC, 0, 0);
+}
+
+// --- Transition state ---
+let current = generateScene();
+let next = null;
+let slideY = 0;        // 0 = no transition, 0->LO = sliding down
+let sliding = false;
+let lastReset = performance.now();
+const SCENE_DURATION = 5000;
+const SLIDE_SPEED = 3;  // pixels per frame
+
+function resize() {
+  const s = Math.min(window.innerWidth, window.innerHeight);
+  W=H=s; c.width=c.height=s;
+}
+resize();
+window.addEventListener('resize', resize);
+
+let t = 0;
+
+function draw() {
+  t++;
+  const now = performance.now();
+
+  // Start transition
+  if (!sliding && now - lastReset >= SCENE_DURATION) {
+    sliding = true;
+    slideY = 0;
+    next = generateScene();
+  }
+
+  // Animate current scene
+  drawShapes(current, t);
+  compositeScene(current);
+
+  if (sliding) {
+    // Animate next scene too
+    drawShapes(next, t);
+    compositeScene(next);
+
+    slideY += SLIDE_SPEED;
+
+    // Draw: next scene on top, current slides down
+    ctx.imageSmoothingEnabled = false;
+
+    // Next scene (revealed from top)
+    const srcTopNext = LO - slideY;
+    const srcHNext = slideY;
+    if (srcHNext > 0 && srcTopNext >= 0) {
+      const dstH = (srcHNext / LO) * H;
+      ctx.drawImage(next.compC, 0, srcTopNext, LO, srcHNext, 0, 0, W, dstH);
+    }
+
+    // Current scene (pushed down)
+    const srcHCur = LO - slideY;
+    if (srcHCur > 0) {
+      const dstY = (slideY / LO) * H;
+      const dstH = (srcHCur / LO) * H;
+      ctx.drawImage(current.compC, 0, 0, LO, srcHCur, 0, dstY, W, dstH);
+    }
+
+    if (slideY >= LO) {
+      current = next;
+      next = null;
+      sliding = false;
+      slideY = 0;
+      lastReset = now;
+    }
+  } else {
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(current.compC, 0, 0, W, H);
+  }
+
+  // Scanlines
+  ctx.fillStyle = 'rgba(0,0,0,0.18)';
+  for (let y=0; y<H; y+=3) ctx.fillRect(0, y, W, 1);
+
+  requestAnimationFrame(draw);
+}
+
+draw();
+</script>
+</body>
+</html>

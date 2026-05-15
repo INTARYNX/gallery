@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Be Kind Rewind</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+    body {
+      background: #000;
+    }
+    canvas {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d', { alpha: false });
+    let w = canvas.width = window.innerWidth;
+    let h = canvas.height = window.innerHeight;
+
+    window.addEventListener('resize', () => {
+      w = canvas.width = window.innerWidth;
+      h = canvas.height = window.innerHeight;
+    });
+
+    const cassetteX = w / 2 - 112;
+    const cassetteY = 100;
+    const leftSpoolX = cassetteX + 56;
+    const leftSpoolY = cassetteY + 75;
+    const rightSpoolX = cassetteX + 168;
+    const rightSpoolY = cassetteY + 75;
+
+    let reelRotation = 0;
+    let tapeOffset = 0;
+    let artifactIntensity = 0.2;
+    let scrollX = w;
+    let bandAngle = -0.08;
+    let bandY = h * 0.68;
+    let waveAmplitude = 2;
+    let waveFrequency = 0.005;
+    let targetWaveAmplitude = 2;
+    let targetWaveFrequency = 0.005;
+    let lastChangeTime = Date.now();
+    let startTime = Date.now();
+    let fadeProgress = 0;
+
+    // Pre-compute constants
+    const TWO_PI = Math.PI * 2;
+    const cos = Math.cos;
+    const sin = Math.sin;
+    const random = Math.random;
+
+    // Cache gradients
+    let bgGradient, sunGlow, sunGradient, floorGradient, gridGradient;
+    let tapeGradient, shineGradient;
+    
+    const createGradients = () => {
+      bgGradient = ctx.createRadialGradient(w/2, h/3, 0, w/2, h/3, h);
+      bgGradient.addColorStop(0, '#1a0f2e');
+      bgGradient.addColorStop(0.5, '#0f0520');
+      bgGradient.addColorStop(1, '#000000');
+      
+      const sunY = h * 0.35;
+      const sunSize = h * 0.25;
+      
+      sunGlow = ctx.createRadialGradient(w/2, sunY, 0, w/2, sunY, sunSize * 1.5);
+      sunGlow.addColorStop(0, 'rgba(255, 100, 200, 0.3)');
+      sunGlow.addColorStop(0.5, 'rgba(255, 0, 150, 0.1)');
+      sunGlow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      
+      sunGradient = ctx.createLinearGradient(0, sunY - sunSize, 0, sunY + sunSize);
+      const stripeColors = ['#ffeb3b', '#ffa726', '#ff7043', '#ec407a', '#ab47bc', '#7e57c2'];
+      stripeColors.forEach((color, i) => {
+        sunGradient.addColorStop(i / (stripeColors.length - 1), color);
+      });
+      
+      const gridStart = h * 0.55 + 2;
+      floorGradient = ctx.createLinearGradient(0, gridStart, 0, h);
+      floorGradient.addColorStop(0, '#3d1a5a');
+      floorGradient.addColorStop(0.5, '#2d1450');
+      floorGradient.addColorStop(1, '#1a0a30');
+      
+      gridGradient = ctx.createLinearGradient(0, gridStart, 0, h);
+      gridGradient.addColorStop(0, '#ff69b4');
+      gridGradient.addColorStop(0.7, '#ff1493');
+      gridGradient.addColorStop(1, '#8b0a50');
+
+      const gradient = ctx.createLinearGradient(leftSpoolX, leftSpoolY, rightSpoolX, rightSpoolY);
+      gradient.addColorStop(0, '#3d2617');
+      gradient.addColorStop(0.5, '#5c3a26');
+      gradient.addColorStop(1, '#3d2617');
+      
+      shineGradient = ctx.createLinearGradient(leftSpoolX, leftSpoolY, rightSpoolX, rightSpoolY);
+      shineGradient.addColorStop(0, 'rgba(120, 80, 50, 0.3)');
+      shineGradient.addColorStop(0.5, 'rgba(180, 130, 90, 0.6)');
+      shineGradient.addColorStop(1, 'rgba(120, 80, 50, 0.3)');
+      
+      const bandHeight = 50;
+      tapeGradient = ctx.createLinearGradient(0, -bandHeight/2, 0, bandHeight/2);
+      tapeGradient.addColorStop(0, '#1a0f0a');
+      tapeGradient.addColorStop(0.3, '#3d2617');
+      tapeGradient.addColorStop(0.5, '#5c3a26');
+      tapeGradient.addColorStop(0.7, '#3d2617');
+      tapeGradient.addColorStop(1, '#1a0f0a');
+    };
+    
+    createGradients();
+
+    const drawCassette = (ctx, x, y) => {
+      const vhsWidth = 224;
+      const vhsHeight = 124;
+      
+      ctx.fillStyle = '#1a1a1a';
+      ctx.fillRect(x, y, vhsWidth, vhsHeight);
+      
+      ctx.fillStyle = '#0a0a0a';
+      ctx.fillRect(x + 12, y + 12, vhsWidth - 24, 38);
+      
+      const reelY = y + 75;
+      const reelRadius = 26;
+      const reelCenterRadius = 14;
+      
+      // Left reel
+      ctx.fillStyle = '#2a2a2a';
+      ctx.beginPath();
+      ctx.arc(x + 56, reelY, reelRadius, 0, TWO_PI);
+      ctx.fill();
+      
+      ctx.fillStyle = '#1a1a1a';
+      ctx.beginPath();
+      ctx.arc(x + 56, reelY, reelCenterRadius, 0, TWO_PI);
+      ctx.fill();
+      
+      ctx.save();
+      ctx.translate(x + 56, reelY);
+      ctx.rotate(reelRotation);
+      
+      ctx.strokeStyle = '#555';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const angle = i / 6 * TWO_PI;
+        ctx.moveTo(0, 0);
+        ctx.lineTo(cos(angle) * 20, sin(angle) * 20);
+      }
+      ctx.stroke();
+      
+      ctx.fillStyle = '#0a0a0a';
+      for (let i = 0; i < 8; i++) {
+        const angle = i / 8 * TWO_PI;
+        ctx.fillRect(cos(angle) * 10 - 3, sin(angle) * 10 - 3, 6, 6);
+      }
+      ctx.restore();
+      
+      // Right reel
+      ctx.fillStyle = '#2a2a2a';
+      ctx.beginPath();
+      ctx.arc(x + vhsWidth - 56, reelY, reelRadius, 0, TWO_PI);
+      ctx.fill();
+      
+      ctx.fillStyle = '#1a1a1a';
+      ctx.beginPath();
+      ctx.arc(x + vhsWidth - 56, reelY, reelCenterRadius, 0, TWO_PI);
+      ctx.fill();
+      
+      ctx.save();
+      ctx.translate(x + vhsWidth - 56, reelY);
+      ctx.rotate(-reelRotation);
+      
+      ctx.strokeStyle = '#555';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const angle = i / 6 * TWO_PI;
+        ctx.moveTo(0, 0);
+        ctx.lineTo(cos(angle) * 20, sin(angle) * 20);
+      }
+      ctx.stroke();
+      
+      ctx.fillStyle = '#0a0a0a';
+      for (let i = 0; i < 8; i++) {
+        const angle = i / 8 * TWO_PI;
+        ctx.fillRect(cos(angle) * 10 - 3, sin(angle) * 10 - 3, 6, 6);
+      }
+      ctx.restore();
+      
+      ctx.fillStyle = '#666';
+      ctx.fillRect(x + 18, y + 18, 85, 26);
+      
+      ctx.fillStyle = '#ff3333';
+      ctx.font = 'bold 14px monospace';
+      ctx.fillText('VHS', x + 30, y + 36);
+      
+      ctx.strokeStyle = '#333';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x, y, vhsWidth, vhsHeight);
+    };
+    
+    const drawRetroBackground = () => {
+      ctx.fillStyle = bgGradient;
+      ctx.fillRect(0, 0, w, h);
+      
+      const sunY = h * 0.35;
+      const sunSize = h * 0.25;
+      
+      // Stars (pre-computed positions) - seulement en dessous du soleil
+      ctx.fillStyle = '#ffffff';
+      for (let i = 0; i < 100; i++) {
+        const x = (i * 123.45) % w;
+        const y = (i * 67.89) % (h * 0.6);
+        if (y > sunY + sunSize) {
+          const size = (i % 3) ? 1 : 2;
+          ctx.fillRect(x, y, size, size);
+        }
+      }
+      
+      ctx.fillStyle = sunGlow;
+      ctx.fillRect(0, 0, w, h);
+      
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(w/2, sunY, sunSize, 0, TWO_PI);
+      ctx.clip();
+      
+      ctx.fillStyle = sunGradient;
+      ctx.fillRect(0, sunY - sunSize, w, sunSize * 2);
+      
+      ctx.restore();
+      
+      // Sun stripes
+      ctx.strokeStyle = '#1a0520';
+      for (let i = 1; i < 8; i++) {
+        const t = i / 7;
+        const eased = t * t * 1.3;
+        const y = sunY - sunSize + eased * sunSize * 2;
+        const dy = y - sunY;
+        if (Math.abs(dy) <= sunSize) {
+          const dx = Math.sqrt(sunSize * sunSize - dy * dy);
+          const lineWidth = 8 - (i / 7) * 6;
+          const extension = lineWidth * 2;
+          ctx.lineWidth = lineWidth;
+          ctx.beginPath();
+          ctx.moveTo(w/2 - dx - extension, y);
+          ctx.lineTo(w/2 + dx + extension, y);
+          ctx.stroke();
+        }
+      }
+      
+      ctx.fillStyle = '#ff1493';
+      ctx.fillRect(0, h * 0.55, w, 2);
+      
+      const centerX = w / 2;
+      const gridStart = h * 0.55 + 2;
+      
+      ctx.fillStyle = floorGradient;
+      ctx.fillRect(0, gridStart, w, h - gridStart);
+      
+      // Grid lines
+      ctx.strokeStyle = gridGradient;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (let row = 0; row <= 20; row++) {
+        const y = gridStart + row * 30;
+        if (y > h) break;
+        ctx.globalAlpha = 1 - (row / 20) * 0.3;
+        ctx.moveTo(0, y);
+        ctx.lineTo(w, y);
+      }
+      ctx.stroke();
+      
+      ctx.globalAlpha = 1;
+      ctx.beginPath();
+      for (let i = -25; i <= 25; i++) {
+        const xTop = centerX + i * 40;
+        const xBottom = centerX + i * 100;
+        ctx.moveTo(xTop, gridStart);
+        ctx.lineTo(xBottom, h);
+      }
+      ctx.stroke();
+    };
+    
+    const animate = () => {
+      const elapsed = (Date.now() - startTime) / 1000;
+      
+      // Crash brutal à 45 secondes
+      if (elapsed > 45) {
+        fadeProgress = 1;
+      }
+      
+      reelRotation += 0.1 * (1 - fadeProgress);
+      tapeOffset += 2 * (1 - fadeProgress);
+      scrollX -= 3 * (1 - fadeProgress);
+      
+      waveAmplitude += (targetWaveAmplitude - waveAmplitude) * 0.01;
+      waveFrequency += (targetWaveFrequency - waveFrequency) * 0.01;
+      
+      const currentTime = Date.now();
+      if (currentTime - lastChangeTime > 5000) {
+        lastChangeTime = currentTime;
+        targetWaveAmplitude = 1 + random() * 8;
+        targetWaveFrequency = 0.002 + random() * 0.01;
+        artifactIntensity = Math.min(artifactIntensity + 0.3, 2.5);
+      }
+      
+      drawRetroBackground();
+      
+      // Draw tape between reels
+      ctx.globalAlpha = 0.85;
+      
+      ctx.strokeStyle = '#1a0f0a';
+      ctx.lineWidth = 36;
+      ctx.beginPath();
+      ctx.moveTo(leftSpoolX, leftSpoolY);
+      ctx.lineTo(rightSpoolX, rightSpoolY);
+      ctx.stroke();
+      
+      const gradient = ctx.createLinearGradient(leftSpoolX, leftSpoolY, rightSpoolX, rightSpoolY);
+      gradient.addColorStop(0, '#3d2617');
+      gradient.addColorStop(0.5, '#5c3a26');
+      gradient.addColorStop(1, '#3d2617');
+      ctx.strokeStyle = gradient;
+      ctx.lineWidth = 30;
+      ctx.beginPath();
+      ctx.moveTo(leftSpoolX, leftSpoolY);
+      ctx.lineTo(rightSpoolX, rightSpoolY);
+      ctx.stroke();
+      
+      // Animated stripes
+      ctx.strokeStyle = 'rgba(180, 130, 90, 0.6)';
+      ctx.lineWidth = 3;
+      for (let i = 0; i < 20; i++) {
+        const t = ((i * 10 + tapeOffset) % 200) / 200;
+        const x = leftSpoolX + (rightSpoolX - leftSpoolX) * t;
+        const y = leftSpoolY + (rightSpoolY - leftSpoolY) * t;
+        ctx.beginPath();
+        ctx.moveTo(x - 15, y - 1);
+        ctx.lineTo(x + 15, y + 1);
+        ctx.stroke();
+      }
+      
+      ctx.strokeStyle = shineGradient;
+      ctx.lineWidth = 10;
+      ctx.beginPath();
+      ctx.moveTo(leftSpoolX, leftSpoolY);
+      ctx.lineTo(rightSpoolX, rightSpoolY);
+      ctx.stroke();
+      
+      ctx.globalAlpha = 1;
+      
+      drawCassette(ctx, cassetteX, cassetteY);
+      
+      // Diagonal tape band
+      ctx.save();
+      const bandHeight = 50;
+      
+      ctx.translate(0, bandY);
+      ctx.rotate(bandAngle);
+      
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+      ctx.fillRect(-200, -bandHeight/2 + 3, w + 400, bandHeight);
+      
+      // Band edges with wave
+      ctx.beginPath();
+      ctx.moveTo(-200, -bandHeight/2);
+      for (let x = -200; x < w + 400; x += 10) {
+        const wave = sin(x * waveFrequency + tapeOffset * 0.02) * waveAmplitude;
+        ctx.lineTo(x, -bandHeight/2 + wave);
+      }
+      for (let x = w + 400; x > -200; x -= 10) {
+        const wave = sin(x * waveFrequency + tapeOffset * 0.02) * waveAmplitude;
+        ctx.lineTo(x, bandHeight/2 + wave);
+      }
+      ctx.closePath();
+      ctx.fillStyle = '#0d0a08';
+      ctx.fill();
+      
+      // Magnetic layer
+      ctx.beginPath();
+      ctx.moveTo(-200, -bandHeight/2 + 2);
+      for (let x = -200; x < w + 400; x += 10) {
+        const wave = sin(x * waveFrequency + tapeOffset * 0.02) * waveAmplitude;
+        ctx.lineTo(x, -bandHeight/2 + 2 + wave);
+      }
+      for (let x = w + 400; x > -200; x -= 10) {
+        const wave = sin(x * waveFrequency + tapeOffset * 0.02) * waveAmplitude;
+        ctx.lineTo(x, bandHeight/2 - 2 + wave);
+      }
+      ctx.closePath();
+      ctx.fillStyle = tapeGradient;
+      ctx.fill();
+      
+      // Reading stripes
+      ctx.strokeStyle = 'rgba(120, 80, 50, 0.4)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      for (let i = 0; i < 150; i++) {
+        const x = (i * 8 - tapeOffset * 3) % (w + 400) - 200;
+        const wave = sin(x * waveFrequency + tapeOffset * 0.02) * waveAmplitude;
+        ctx.moveTo(x, -bandHeight/2 + 5 + wave);
+        ctx.lineTo(x, bandHeight/2 - 5 + wave);
+      }
+      ctx.stroke();
+      
+      // Shine effect
+      for (let x = -200; x < w + 400; x += 5) {
+        const wave = sin(x * waveFrequency + tapeOffset * 0.02) * waveAmplitude;
+        const alpha = 0.6 - Math.abs(wave / (waveAmplitude + 1)) * 0.3;
+        ctx.fillStyle = `rgba(220, 180, 140, ${alpha})`;
+        ctx.fillRect(x, -10 + wave, 5, 20);
+      }
+      
+      // Read heads
+      for (let i = 0; i < 2; i++) {
+        const headPos = ((tapeOffset * 4 + i * (w / 2)) % (w + 400)) - 200;
+        const wave = sin(headPos * waveFrequency + tapeOffset * 0.02) * waveAmplitude;
+        
+        const glowGrad = ctx.createRadialGradient(headPos, wave, 0, headPos, wave, 50);
+        glowGrad.addColorStop(0, 'rgba(255, 220, 150, 0.3)');
+        glowGrad.addColorStop(0.5, 'rgba(255, 180, 100, 0.15)');
+        glowGrad.addColorStop(1, 'rgba(255, 150, 50, 0)');
+        ctx.fillStyle = glowGrad;
+        ctx.fillRect(headPos - 50, -bandHeight/2 + wave, 100, bandHeight);
+        
+        ctx.strokeStyle = 'rgba(255, 240, 200, 0.5)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(headPos, -bandHeight/2 + 5 + wave);
+        ctx.lineTo(headPos, bandHeight/2 - 5 + wave);
+        ctx.stroke();
+      }
+      
+      ctx.restore();
+      
+      // Scrolling text
+      const scrollText = "*** BE KIND REWIND *** LATE FEE $2.99/DAY *** MEMBERSHIP REQUIRED *** NOW PLAYING *** OPEN UNTIL MIDNIGHT *** ";
+      
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      ctx.fillRect(0, h - 80, w, 80);
+      
+      ctx.font = 'bold 32px monospace';
+      const textWidth = ctx.measureText(scrollText).width;
+      
+      if (scrollX < -textWidth) scrollX = 0;
+      
+      ctx.fillStyle = '#ff69b4';
+      ctx.shadowColor = '#ff1493';
+      ctx.shadowBlur = 10;
+      ctx.fillText(scrollText, scrollX, h - 40);
+      ctx.fillText(scrollText, scrollX + textWidth, h - 40);
+      
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+      for (let i = h - 80; i < h; i += 4) {
+        ctx.fillRect(0, i, w, 2);
+      }
+      
+      // VHS artifacts
+      if (artifactIntensity > 0.5) {
+        const shift = Math.floor(artifactIntensity * 2);
+        ctx.globalCompositeOperation = 'screen';
+        ctx.fillStyle = `rgba(255, 0, 0, ${0.1 * artifactIntensity})`;
+        ctx.fillRect(shift, 0, w, h);
+        ctx.fillStyle = `rgba(0, 255, 255, ${0.1 * artifactIntensity})`;
+        ctx.fillRect(-shift, 0, w, h);
+        ctx.globalCompositeOperation = 'source-over';
+      }
+      
+      // Glitch lines
+      const glitchCount = Math.floor(5 * artifactIntensity);
+      for (let i = 0; i < glitchCount; i++) {
+        const y = random() * h;
+        const height = 2 + random() * 4 * artifactIntensity;
+        const offset = (random() - 0.5) * 20 * artifactIntensity;
+        ctx.fillStyle = `rgba(255, 0, 255, ${0.3 * artifactIntensity})`;
+        ctx.fillRect(offset, y, w, height);
+      }
+      
+      // Tracking lines
+      if (random() < artifactIntensity * 0.1) {
+        const trackY = random() * h;
+        const trackHeight = 5 + random() * 20;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+        ctx.fillRect(0, trackY, w, trackHeight);
+      }
+      
+      // Noise
+      const noiseAmount = Math.floor(w * h * 0.002 * artifactIntensity);
+      for (let i = 0; i < noiseAmount; i++) {
+        const x = random() * w;
+        const y = random() * h;
+        const size = random() * 2;
+        const brightness = random() > 0.5 ? 255 : 0;
+        ctx.fillStyle = `rgba(${brightness}, ${brightness}, ${brightness}, ${0.3 * artifactIntensity})`;
+        ctx.fillRect(x, y, size, size);
+      }
+      
+      // Scanlines
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+      for (let i = 0; i < h; i += 4) {
+        ctx.fillRect(0, i, w, 2);
+      }
+      
+      // Film grain
+      const grainAmount = Math.floor(w * h * 0.001 * (1 + artifactIntensity));
+      for (let i = 0; i < grainAmount; i++) {
+        const x = random() * w;
+        const y = random() * h;
+        const brightness = random() * 60;
+        ctx.fillStyle = `rgba(${brightness}, ${brightness}, ${brightness}, 0.1)`;
+        ctx.fillRect(x, y, 1, 1);
+      }
+      
+      // Flicker
+      ctx.fillStyle = `rgba(255, 255, 255, ${random() * 0.03 * artifactIntensity})`;
+      ctx.fillRect(0, 0, w, h);
+      
+      // Crash brutal avec message
+      if (fadeProgress > 0) {
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, w, h);
+        
+        // Scanlines sur le message
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+        for (let i = 0; i < h; i += 3) {
+          ctx.fillRect(0, i, w, 1.5);
+        }
+        
+        // Glitch effect subtil
+        const glitchOffset = elapsed > 45.5 ? (random() - 0.5) * 4 : 0;
+        
+        // Red channel shift
+        const fontSize = Math.min(w * 0.04, 48);
+        ctx.font = `bold ${fontSize}px "Courier New", monospace`;
+        ctx.textAlign = 'center';
+        ctx.fillStyle = 'rgba(255, 100, 100, 0.3)';
+        ctx.fillText('TRACKING ERROR', w/2 + glitchOffset + 2, h/2 - fontSize/2);
+        
+        // Cyan channel shift
+        ctx.fillStyle = 'rgba(100, 200, 255, 0.3)';
+        ctx.fillText('TRACKING ERROR', w/2 + glitchOffset - 2, h/2 - fontSize/2);
+        
+        // Main text
+        ctx.fillStyle = 'rgba(220, 220, 220, 1)';
+        ctx.shadowColor = 'rgba(150, 150, 150, 0.5)';
+        ctx.shadowBlur = 15;
+        ctx.fillText('TRACKING ERROR', w/2 + glitchOffset, h/2 - fontSize/2);
+        
+        // Bottom text
+        const smallFont = Math.min(w * 0.025, 32);
+        ctx.font = `bold ${smallFont}px "Courier New", monospace`;
+        ctx.fillStyle = 'rgba(200, 200, 200, 0.9)';
+        ctx.shadowColor = 'rgba(100, 100, 100, 0.4)';
+        ctx.shadowBlur = 10;
+        ctx.fillText('PLEASE EJECT TAPE', w/2, h/2 + fontSize);
+        
+        // Barre clignotante subtile
+        if (Math.floor(Date.now() / 500) % 2 === 0) {
+          ctx.fillStyle = 'rgba(180, 180, 180, 0.6)';
+          const barWidth = Math.min(w * 0.4, 400);
+          ctx.fillRect(w/2 - barWidth/2, h/2 + fontSize * 1.8, barWidth, 3);
+        }
+        
+        ctx.shadowBlur = 0;
+        ctx.textAlign = 'left';
+      }
+      
+      requestAnimationFrame(animate);
+    };
+
+    animate();
+  </script>
+</body>
+</html>

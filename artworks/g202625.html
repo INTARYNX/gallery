@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Genuary 2025 #25</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: #0a0a0a;
+            overflow: hidden;
+        }
+        #container {
+            width: 90vmin;
+            height: 90vmin;
+            max-width: 800px;
+            max-height: 800px;
+        }
+        canvas {
+            width: 100%;
+            height: 100%;
+            border: 1px solid #222;
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <canvas id="canvas"></canvas>
+    </div>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        let canvasSize = 0;
+        
+        function resize() {
+            const dpr = window.devicePixelRatio || 1;
+            const size = Math.min(window.innerWidth, window.innerHeight) * 0.9;
+            canvasSize = size;
+            canvas.width = canvas.height = size * dpr;
+            canvas.style.width = canvas.style.height = size + 'px';
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        }
+        
+        resize();
+        window.addEventListener('resize', resize);
+        
+        const ectoplasm = {
+            x: 0,
+            y: 0,
+            segments: [],
+            innerCircles: []
+        };
+        
+        for (let i = 0; i < 16; i++) {
+            ectoplasm.segments.push({
+                angle: (Math.PI * 2 / 16) * i,
+                radius: 80 + Math.random() * 40,
+                speed: 0.02 + Math.random() * 0.02,
+                wobble: Math.random() * Math.PI * 2
+            });
+        }
+        
+        for (let layer = 0; layer < 5; layer++) {
+            const numPoints = 8 + layer * 4;
+            const radius = 20 + layer * 20;
+            for (let i = 0; i < numPoints; i++) {
+                ectoplasm.innerCircles.push({
+                    angle: (Math.PI * 2 / numPoints) * i,
+                    radius: radius + Math.random() * 10,
+                    speed: 0.02 + Math.random() * 0.03,
+                    wobble: Math.random() * Math.PI * 2,
+                    layer
+                });
+            }
+        }
+        
+        let time = 0;
+        
+        function animate() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
+            ctx.fillRect(0, 0, canvasSize, canvasSize);
+            
+            const cx = canvasSize / 2;
+            const cy = canvasSize / 2;
+            
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.rotate(time * 0.05);
+            
+            for (let i = 0; i < 8; i++) {
+                const angle = (Math.PI * 2 / 8) * i;
+                ctx.beginPath();
+                for (let r = 0; r < 600; r += 5) {
+                    const spiralAngle = angle + (r / 600) * Math.PI * 6;
+                    const x = Math.cos(spiralAngle) * r;
+                    const y = Math.sin(spiralAngle) * r;
+                    r === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+                }
+                ctx.strokeStyle = 'rgba(40, 40, 40, 0.15)';
+                ctx.lineWidth = 30;
+                ctx.stroke();
+            }
+            
+            ctx.restore();
+            
+            time += 0.008;
+            
+            ectoplasm.x = cx + Math.sin(time * 0.3) * 30;
+            ectoplasm.y = cy + Math.cos(time * 0.4) * 20;
+            
+            ctx.save();
+            ctx.translate(ectoplasm.x, ectoplasm.y);
+            const zoom = 1 + Math.sin(time * 0.2) * 0.3;
+            ctx.scale(zoom, zoom);
+            ctx.rotate(time * 0.3);
+            
+            ectoplasm.segments.forEach(seg => {
+                seg.wobble += seg.speed;
+                seg.angle += Math.sin(seg.wobble) * 0.0003;
+            });
+            
+            ectoplasm.innerCircles.forEach(pt => pt.wobble += pt.speed);
+            
+            ctx.beginPath();
+            ectoplasm.segments.forEach((seg, i) => {
+                const wobbleRadius = seg.radius + Math.sin(seg.wobble) * 10;
+                const x = Math.cos(seg.angle) * wobbleRadius;
+                const y = Math.sin(seg.angle) * wobbleRadius;
+                i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+            });
+            ctx.closePath();
+            ctx.fillStyle = 'rgba(60, 150, 100, 0.3)';
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(80, 180, 120, 0.8)';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            
+            const len = ectoplasm.segments.length;
+            for (let i = 0; i < len; i++) {
+                const seg1 = ectoplasm.segments[i];
+                const seg2 = ectoplasm.segments[(i + 1) % len];
+                const wobbleRadius1 = seg1.radius + Math.sin(seg1.wobble) * 10;
+                const wobbleRadius2 = seg2.radius + Math.sin(seg2.wobble) * 10;
+                const x1 = Math.cos(seg1.angle) * wobbleRadius1;
+                const y1 = Math.sin(seg1.angle) * wobbleRadius1;
+                const x2 = Math.cos(seg2.angle) * wobbleRadius2;
+                const y2 = Math.sin(seg2.angle) * wobbleRadius2;
+                
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.lineTo(x1, y1);
+                ctx.strokeStyle = 'rgba(80, 180, 120, 0.3)';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+                
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+                ctx.strokeStyle = 'rgba(80, 180, 120, 0.5)';
+                ctx.stroke();
+            }
+            
+            ctx.save();
+            ctx.beginPath();
+            ectoplasm.segments.forEach((seg, i) => {
+                const wobbleRadius = seg.radius + Math.sin(seg.wobble) * 10;
+                const x = Math.cos(seg.angle) * wobbleRadius;
+                const y = Math.sin(seg.angle) * wobbleRadius;
+                i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+            });
+            ctx.closePath();
+            ctx.clip();
+            
+            for (let layer = 0; layer < 4; layer++) {
+                const offset = -layer * 12;
+                const phaseShift = layer * 0.7;
+                
+                for (let i = 0; i < len; i++) {
+                    const seg1 = ectoplasm.segments[i];
+                    const seg2 = ectoplasm.segments[(i + 1) % len];
+                    const wobbleRadius1 = seg1.radius + offset + Math.sin(seg1.wobble + phaseShift) * 8;
+                    const wobbleRadius2 = seg2.radius + offset + Math.sin(seg2.wobble + phaseShift) * 8;
+                    const x1 = Math.cos(seg1.angle) * wobbleRadius1;
+                    const y1 = Math.sin(seg1.angle) * wobbleRadius1;
+                    const x2 = Math.cos(seg2.angle) * wobbleRadius2;
+                    const y2 = Math.sin(seg2.angle) * wobbleRadius2;
+                    
+                    const gradient = ctx.createLinearGradient(0, 0, x1, y1);
+                    gradient.addColorStop(0, `rgba(20, 60, 40, ${0.2 - layer * 0.04})`);
+                    gradient.addColorStop(1, `rgba(60, 120, 80, ${0.25 - layer * 0.05})`);
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(0, 0);
+                    ctx.lineTo(x1, y1);
+                    ctx.lineTo(x2, y2);
+                    ctx.closePath();
+                    ctx.fillStyle = gradient;
+                    ctx.fill();
+                }
+            }
+            
+            const icLen = ectoplasm.innerCircles.length;
+            for (let i = 0; i < icLen; i++) {
+                const pt1 = ectoplasm.innerCircles[i];
+                const wobbleRadius1 = pt1.radius + Math.sin(pt1.wobble) * 6;
+                const x1 = Math.cos(pt1.angle) * wobbleRadius1;
+                const y1 = Math.sin(pt1.angle) * wobbleRadius1;
+                
+                for (let j = i + 1; j < icLen; j++) {
+                    const pt2 = ectoplasm.innerCircles[j];
+                    if (Math.abs(pt1.layer - pt2.layer) > 1) continue;
+                    
+                    const wobbleRadius2 = pt2.radius + Math.sin(pt2.wobble) * 6;
+                    const x2 = Math.cos(pt2.angle) * wobbleRadius2;
+                    const y2 = Math.sin(pt2.angle) * wobbleRadius2;
+                    const dist = Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+                    
+                    if (dist < 60) {
+                        ctx.beginPath();
+                        ctx.moveTo(x1, y1);
+                        ctx.lineTo(x2, y2);
+                        ctx.strokeStyle = `rgba(80, 180, 120, ${(1 - dist / 60) * 0.6})`;
+                        ctx.lineWidth = 1.5;
+                        ctx.stroke();
+                    }
+                }
+            }
+            
+            ctx.restore();
+            ctx.restore();
+            
+            requestAnimationFrame(animate);
+        }
+        
+        animate();
+    </script>
+</body>
+</html>

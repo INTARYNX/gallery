@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Snake Planet</title>
+  <style>
+    body{margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#000;overflow:hidden}
+    #c{image-rendering:pixelated;image-rendering:crisp-edges}
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <script>
+    const c = document.getElementById('c');
+    const ctx = c.getContext('2d', { alpha: false });
+    const W = 640, H = 480;
+    c.width = W; c.height = H;
+
+    const palCold = new Uint8Array([
+      10,15,35, 20,30,70, 30,50,110, 40,70,150,
+      50,90,180, 60,110,200, 70,150,220, 80,180,240,
+      100,200,255, 120,220,255, 50,255,200, 30,200,180,
+      20,150,160, 40,100,140, 100,150,200, 180,220,255
+    ]);
+
+    const palHot = new Uint8Array([
+      20,5,5, 60,10,10, 100,20,10, 140,40,10,
+      180,60,20, 220,80,30, 255,120,40, 255,160,60,
+      255,200,80, 255,230,100, 255,255,120, 255,200,150,
+      220,150,100, 180,100,80, 140,60,40, 255,180,100
+    ]);
+
+    const pal = new Uint8Array(48);
+    const buf = new Uint8ClampedArray(W * H * 4);
+    const img = new ImageData(buf, W, H);
+    let f = 0;
+    const sin = Math.sin, cos = Math.cos, floor = Math.floor, sqrt = Math.sqrt, PI = Math.PI, atan2 = Math.atan2, asin = Math.asin;
+
+    const txtCanvas = document.createElement('canvas');
+    const txW = 128, txH = 64;
+    txtCanvas.width = txW; txtCanvas.height = txH;
+    const txtCtx = txtCanvas.getContext('2d');
+    const txtData = txtCtx.createImageData(txW, txH);
+
+    const grid = new Uint8Array(txW * txH);
+
+    let snake1 = [{x:30,y:32}];
+    let snake2 = [{x:98,y:32}];
+    let dir1 = {x:1,y:0}, dir2 = {x:-1,y:0};
+    let dead1 = false, dead2 = false;
+
+    function resetGame() {
+      grid.fill(0);
+      snake1 = [{x:30,y:32}];
+      snake2 = [{x:98,y:32}];
+      dir1 = {x:1,y:0}; dir2 = {x:-1,y:0};
+      dead1 = false; dead2 = false;
+      grid[snake1[0].y * txW + snake1[0].x] = 1;
+      grid[snake2[0].y * txW + snake2[0].x] = 2;
+      drawSnake();
+    }
+
+    function isFree(x,y){
+      return grid[((y%txH+txH)%txH)*txW + ((x%txW+txW)%txW)] === 0;
+    }
+
+    function findBestMove(head, dir, snakeId) {
+      const dirs = [
+        {x: dir.x, y: dir.y, score:100},
+        {x: -dir.y, y: dir.x, score:50},
+        {x: dir.y, y: -dir.x, score:50},
+        {x: -dir.x, y: -dir.y, score:10}
+      ];
+
+      const candidates = [];
+
+      for (const d of dirs) {
+        const nx = (head.x + d.x + txW) % txW;
+        const ny = (head.y + d.y + txH) % txH;
+
+        if (!isFree(nx, ny)) continue;
+
+        const visited = new Uint8Array(txW * txH);
+        const QCAP = 4000;
+        const queue = new Uint16Array(QCAP);
+        let qStart = 0, qEnd = 0;
+
+        function enqueue(px, py, depth) {
+          if (qEnd + 3 >= QCAP) return false;
+          queue[qEnd++] = px;
+          queue[qEnd++] = py;
+          queue[qEnd++] = depth;
+          return true;
+        }
+
+        enqueue(nx, ny, 0);
+        let space = 0;
+        while (qStart < qEnd && space < 500) {
+          const px = queue[qStart++], py = queue[qStart++], depth = queue[qStart++];
+          const idx = py * txW + px;
+          if (visited[idx] || !isFree(px, py)) continue;
+          visited[idx] = 1;
+          space++;
+          if (depth >= 8) continue;
+          const px1 = (px + 1) % txW;
+          const px2 = (px + txW - 1) % txW;
+          const py1 = (py + 1) % txH;
+          const py2 = (py + txH - 1) % txH;
+
+          if (!enqueue(px1, py, depth + 1)) break;
+          if (!enqueue(px2, py, depth + 1)) break;
+          if (!enqueue(px, py1, depth + 1)) break;
+          if (!enqueue(px, py2, depth + 1)) break;
+        }
+
+        const totalScore = space * 10 + d.score + Math.random() * 30;
+        candidates.push({dir: d, score: totalScore});
+      }
+
+      if (candidates.length === 0) return {x:0,y:0};
+
+      candidates.sort((a,b)=>b.score - a.score);
+      if (Math.random() < 0.15) {
+        const idx = Math.min(floor(Math.random() * 2), candidates.length - 1);
+        return candidates[idx].dir;
+      }
+      return candidates[0].dir;
+    }
+
+    function updateSnake() {
+      if (dead1 && dead2) {
+        resetGame();
+        return;
+      }
+
+      if (!dead1) {
+        const head1 = snake1[0];
+        dir1 = findBestMove(head1, dir1, 1);
+        const newHead1 = { x: (head1.x + dir1.x + txW) % txW, y: (head1.y + dir1.y + txH) % txH };
+        if (isFree(newHead1.x, newHead1.y)) {
+          snake1.unshift(newHead1);
+          grid[newHead1.y * txW + newHead1.x] = 1;
+        } else {
+          dead1 = true;
+        }
+      }
+
+      if (!dead2) {
+        const head2 = snake2[0];
+        dir2 = findBestMove(head2, dir2, 2);
+        const newHead2 = { x: (head2.x + dir2.x + txW) % txW, y: (head2.y + dir2.y + txH) % txH };
+        if (isFree(newHead2.x, newHead2.y)) {
+          snake2.unshift(newHead2);
+          grid[newHead2.y * txW + newHead2.x] = 2;
+        } else {
+          dead2 = true;
+        }
+      }
+
+      if (snake1.length > 1 && !dead1) snake1.pop();
+      if (snake2.length > 1 && !dead2) snake2.pop();
+    }
+
+    function drawSnake() {
+      const d = txtData.data;
+      for (let i = 0; i < d.length; i += 4) {
+        d[i] = d[i+1] = d[i+2] = 0;
+        d[i+3] = 255;
+      }
+      for (let i = 0; i < txW * txH; i++) {
+        const idx = i * 4;
+        const v = grid[i];
+        if (v === 1) { d[idx] = 0; d[idx+1] = 255; d[idx+2] = 255; }
+        else if (v === 2) { d[idx] = 255; d[idx+1] = 136; d[idx+2] = 0; }
+      }
+    }
+
+    resetGame();
+
+    function draw() {
+      const t = f * 0.02;
+      const cx = W/2, cy = H/2, r = 180;
+
+      const colorPhase = (sin(f * 0.002) + 1) * 0.5;
+      for (let i = 0; i < 48; i++) {
+        pal[i] = (palCold[i] * (1 - colorPhase) + palHot[i] * colorPhase) | 0;
+      }
+
+      if (f % 2 === 0) {
+        updateSnake();
+        drawSnake();
+      }
+
+      let p = 0;
+      for (let y = 0; y < H; y++) {
+        const dy = y - cy;
+        for (let x = 0; x < W; x++) {
+          const dx = x - cx;
+          const dist = sqrt(dx*dx + dy*dy);
+
+          if (dist < r) {
+            const z = sqrt(r*r - dist*dist);
+            const nx = dx / r, ny = dy / r, nz = z / r;
+
+            const cosT = cos(t), sinT = sin(t);
+            const rx = cosT * nx - sinT * nz;
+            const ry = ny;
+            const rz = sinT * nx + cosT * nz;
+
+            const theta = atan2(rx, rz);
+            const phi = asin(Math.max(-1, Math.min(1, ry)));
+
+            const texU = ((theta / PI + 1) * 0.5 * txW) % txW | 0;
+            const texV = ((phi / PI + 0.5) * txH) % txH | 0;
+            const texIdx = (texV * txW + texU) * 4;
+            const snakeR = txtData.data[texIdx], snakeG = txtData.data[texIdx+1], snakeB = txtData.data[texIdx+2];
+            const hasSnake = (snakeR | snakeG | snakeB) > 0;
+
+            const u = theta * 10, v = phi * 20;
+            const tSlow = f * 0.007;
+            const val = sin(u * 0.3 + tSlow * 2) +
+                        sin(v * 0.5 + tSlow * 3) +
+                        sin((u + v) * 0.2 + tSlow * 2.5) +
+                        sin(sqrt(u*u + v*v) * 0.25 + tSlow * 4);
+
+            const idx = (floor((val + 4) * 2) & 15) * 3;
+            const light = (nz * 0.7 + 0.3);
+            const scanline = ((floor(phi * 60) & 1) ? 0.75 : 1.0);
+            const finalLight = light * scanline * (hasSnake ? 0.3 : 1.0);
+            const glowR = hasSnake ? snakeR * light * 0.8 : 0;
+            const glowG = hasSnake ? snakeG * light * 0.8 : 0;
+            const glowB = hasSnake ? snakeB * light * 0.8 : 0;
+
+            buf[p]     = (pal[idx]     * finalLight + glowR) | 0;
+            buf[p + 1] = (pal[idx + 1] * finalLight + glowG) | 0;
+            buf[p + 2] = (pal[idx + 2] * finalLight + glowB) | 0;
+            buf[p + 3] = 255;
+          } else {
+            buf[p] = buf[p+1] = buf[p+2] = 0;
+            buf[p + 3] = 255;
+          }
+          p += 4;
+        }
+      }
+
+      ctx.putImageData(img, 0, 0);
+      f++;
+      requestAnimationFrame(draw);
+    }
+
+    draw();
+  </script>
+</body>
+</html>

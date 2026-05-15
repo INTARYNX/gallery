@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { margin:0; overflow:hidden; background:#000; }
+    canvas { display:block; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); border:1px solid #333; }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <script>
+    const c = document.getElementById('c');
+    const G = c.getContext('2d');
+
+    let S = 0;
+    function resize() {
+      S = Math.min(innerWidth, innerHeight);
+      if (S <= 0) return;
+      c.width = c.height = S;
+    }
+    resize();
+    addEventListener('resize', resize);
+
+    const PI = Math.PI, TAU = PI * 2;
+    const W = 500, hw = W / 2;
+
+    // Disc definitions: cx, cy offset, radius, point count, speed, spin dir
+    const NDISCS = 7;
+    const discs = [];
+    for (let i = 0; i < NDISCS; i++) {
+      const a = i / NDISCS * TAU;
+      const orbitR = 60 + (i % 3) * 45;
+      const nPts = 200 + (i * 80);
+      const r = 70 + Math.sin(i * 1.7) * 25 + i * 15;
+      const pts = [];
+      // Fill disc with spiral-distributed points
+      for (let p = 0; p < nPts; p++) {
+        const t = p / nPts;
+        const pr = Math.sqrt(t) * r; // sqrt for uniform fill
+        const pa = p * 2.399963; // golden angle
+        pts.push(pr, pa);
+      }
+      discs.push({
+        angle: a, orbitR, r, pts, nPts,
+        speed: 0.3 + i * 0.12,
+        spin: i % 2 ? 1 : -1,
+        tilt: 0.2 + i * 0.15,
+        colorOff: i * 2.5
+      });
+    }
+
+    let f = 0, last = 0;
+
+    function fmColor(u, v, t, off) {
+      const s03 = Math.sin(t * 0.3), s017 = Math.sin(t * 0.17);
+      const s023 = Math.sin(t * 0.23), s011 = Math.sin(t * 0.11 + 1.5);
+      const gM = 0.618 + s023 * 0.3, bM = 0.381 + s011 * 0.2;
+      const fmB = 1 + s03 * 0.8;
+      const fm = fmB + Math.sin(s017 + u + off) * 0.5;
+      const j = (u + v) * 7.3 * fm + t * 1.7;
+      const cr = Math.sin(j) * 0.5 + 0.5;
+      const cg = Math.sin(j * gM + 2.09) * 0.5 + 0.5;
+      const cb = Math.sin(j * bM + 4.18) * 0.5 + 0.5;
+      const br = 0.3 + cr * 0.7;
+      return [(cr * br * 255) | 0, (cg * br * 200 + 30) | 0, (cb * br * 255) | 0];
+    }
+
+    function draw(now) {
+      if (S <= 0) { requestAnimationFrame(draw); return; }
+      if (!last) last = now;
+      const dt = Math.min((now - last) / 1000, 0.05);
+      last = now;
+      const sc = S / W;
+
+      // Fade trails
+      G.fillStyle = 'rgba(0,0,0,0.06)';
+      G.fillRect(0, 0, S, S);
+
+      G.save();
+      G.translate(S / 2, S / 2);
+      G.scale(sc, sc);
+      G.rotate(f * 0.04);
+
+      const breath = Math.sin(f * 0.2) * 0.3;
+
+      for (let di = 0; di < NDISCS; di++) {
+        const D = discs[di];
+        // Disc orbits around center
+        const da = D.angle + f * D.speed * 0.4;
+        const orb = D.orbitR * (1 + breath);
+        const dcx = Math.cos(da) * orb;
+        const dcy = Math.sin(da) * orb * 0.6; // slight perspective squash
+
+        // Disc rotation
+        const spin = f * D.speed * D.spin * 2;
+        // Tilt oscillation
+        const tilt = Math.cos(f * 0.3 + di) * D.tilt;
+        const cosT = Math.cos(tilt);
+
+        // Disc size pulsates
+        const discScale = 0.6 + Math.sin(f * 0.4 + di * 1.2) * 0.4;
+        const curR = D.r * discScale;
+
+        // Point count pulsates (very different frequency)
+        const ptRatio = 0.3 + Math.sin(f * 0.13 + di * 2.3) * 0.35 + 0.35;
+        const visPts = (D.nPts * ptRatio) | 0;
+
+        const pts = D.pts;
+
+        for (let p = 0; p < visPts; p++) {
+          const pr = pts[p * 2] * discScale;
+          const pa = pts[p * 2 + 1] + spin;
+
+          // Point in disc local space
+          let px = Math.cos(pa) * pr;
+          let py = Math.sin(pa) * pr * cosT; // tilt squash
+
+          // Wobble
+          px += Math.sin(pa * 3 + f * 2) * 2;
+          py += Math.cos(pa * 2 + f * 1.5) * 2;
+
+          const wx = dcx + px;
+          const wy = dcy + py;
+
+          // Size by fake depth
+          const depth = 0.5 + py / (curR * 2);
+          const sz = 0.8 + depth * 1.8;
+          const a = 0.3 + depth * 0.5;
+
+          const col = fmColor(da + di, pr * 0.01, f * 0.15, D.colorOff);
+          G.fillStyle = `rgba(${col[0]},${col[1]},${col[2]},${a})`;
+          G.beginPath();
+          G.arc(wx, wy, sz, 0, TAU);
+          G.fill();
+        }
+      }
+
+      // Central glow
+      const pulse = 0.5 + Math.sin(f * 0.8) * 0.3;
+      const gH = (f * 30) % 360;
+      const glow = G.createRadialGradient(0, 0, 0, 0, 0, 80);
+      glow.addColorStop(0, `hsla(${gH},100%,70%,${0.04 * pulse})`);
+      glow.addColorStop(0.5, `hsla(${(gH + 60) % 360},100%,40%,${0.015 * pulse})`);
+      glow.addColorStop(1, 'transparent');
+      G.fillStyle = glow;
+      G.fillRect(-hw, -hw, W, W);
+
+      G.restore();
+
+      f += dt;
+      requestAnimationFrame(draw);
+    }
+
+    requestAnimationFrame(draw);
+  </script>
+</body>
+</html>

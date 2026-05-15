@@ -1,0 +1,1094 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cognitive Automation Unit</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(180deg, #0a0a0a 0%, #1a1a2e 100%);
+            overflow: hidden;
+        }
+        canvas {
+            border: 2px solid #333;
+            box-shadow: 0 0 50px rgba(255, 215, 0, 0.3);
+        }
+    </style>
+</head>
+<body>
+    <canvas id="retroComputer"></canvas>
+    <script>
+        const canvas = document.getElementById('retroComputer');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 900;
+        canvas.height = 700;
+
+        let time = 0;
+        let scanlineOffset = 0;
+        let caseIndex = 0;
+        let caseTimer = 0;
+        let paperScrollY = 0;
+        
+        const printedStamps = [];
+        
+        const concreteTexture = [];
+        for (let i = 0; i < 2000; i++) {
+            concreteTexture.push({
+                x: Math.random() * 900,
+                y: Math.random() * 200,
+                size: Math.random() * 3 + 1,
+                color: 50 + (Math.random() > 0.5 ? 1 : -1) * (Math.random() * 30),
+                opacity: Math.random() * 0.6 + 0.2
+            });
+        }
+        
+        const concreteStains = [];
+        for (let i = 0; i < 15; i++) {
+            concreteStains.push({
+                x: Math.random() * 900,
+                y: Math.random() * 200,
+                sizeX: Math.random() * 40 + 20,
+                sizeY: (Math.random() * 40 + 20) * 0.6,
+                rotation: Math.random() * Math.PI,
+                color: 30 + Math.random() * 20
+            });
+        }
+
+        const firstNames = ['John', 'Maria', 'Ahmed', 'Li', 'Svetlana', 'Carlos', 'Yuki', 'Fatima', 'Hans', 'Priya', 'Jean', 'Olga', 'Miguel', 'Aisha', 'Ivan'];
+        const lastNames = ['Smith', 'Garcia', 'Wang', 'Petrov', 'Tanaka', 'Silva', 'Khan', 'Mueller', 'Cohen', 'Rossi', 'Kim', 'Ali', 'Chen', 'Lopez', 'Patel'];
+        
+        const bureaucraticCases = [
+            {
+                action: 'NAME MIX-UP',
+                person: '',
+                issue: 'CONFUSED WITH CRIMINAL',
+                absurdity: 'NEVER MET THE CRIMINAL',
+                consequence: 'DETENTION: 5 YEARS',
+                rule: 'YOU ARE RESPONSIBLE FOR YOUR NAMESAKE'
+            },
+            {
+                action: 'HEATING ENGINEER ERROR',
+                person: '',
+                issue: 'TUTTLE MISSPELLED AS BUTTLE',
+                absurdity: 'WRONG MAN ARRESTED',
+                consequence: 'SUBJECT UNRESPONSIVE',
+                rule: 'CLERICAL ERROR = YOUR PROBLEM'
+            },
+            {
+                action: 'TAX ERROR',
+                person: '',
+                issue: 'NEIGHBOR CLAIMED YOUR INCOME',
+                absurdity: 'YOU NEVER RECEIVED THIS MONEY',
+                consequence: 'PAYMENT REQUIRED: $25,000',
+                rule: 'RESPONSIBLE FOR OTHERS ERRORS'
+            },
+            {
+                action: 'PARKING VIOLATION',
+                person: '',
+                issue: 'CAR REGISTERED IN YOUR NAME',
+                absurdity: 'CAR BELONGS TO COUSIN',
+                consequence: 'LICENSE: SUSPENDED 365 DAYS',
+                rule: 'OWNER = YOU, NOT THE DRIVER'
+            },
+            {
+                action: 'UNEMPLOYMENT CLAIM',
+                person: '',
+                issue: 'EMPLOYER SUBMITTED WRONG DATA',
+                absurdity: 'YOU WERE FIRED MONTHS AGO',
+                consequence: 'REQUEST: DECLINED',
+                rule: 'YOU ARE RESPONSIBLE FOR EMPLOYER MISTAKES'
+            },
+            {
+                action: 'BANK ACCOUNT FROZEN',
+                person: '',
+                issue: 'ACCOUNT USED BY ANOTHER PERSON',
+                absurdity: 'YOU NEVER TOUCHED THE FUNDS',
+                consequence: 'ACCESS DENIED 90 DAYS',
+                rule: 'SYSTEM HOLDS YOU ACCOUNTABLE'
+            },
+            {
+                action: 'FORM 27-B FILED',
+                person: '',
+                issue: 'DECLARED LEGALLY DEAD',
+                absurdity: 'PERSON ALIVE - FILING APPEAL',
+                consequence: 'STATUS: DECEASED',
+                rule: 'DEAD CANNOT APPEAL DEATH'
+            },
+            {
+                action: 'MARRIAGE LICENSE ERROR',
+                person: '',
+                issue: 'MARRIED TO STRANGER',
+                absurdity: 'NEVER MET SPOUSE',
+                consequence: 'JOINT FILING MANDATORY',
+                rule: 'PAPERWORK CANNOT BE UNDONE'
+            },
+            {
+                action: 'BIRTH CERTIFICATE REJECTED',
+                person: '',
+                issue: 'DOES NOT LEGALLY EXIST',
+                absurdity: 'BORN IN HOSPITAL - HAS ID',
+                consequence: 'EMPLOYMENT: PROHIBITED',
+                rule: 'NO BIRTH = NO PERSON'
+            },
+            {
+                action: 'CITIZENSHIP REVIEW',
+                person: '',
+                issue: 'CITIZENSHIP REVOKED',
+                absurdity: 'BORN IN COUNTRY',
+                consequence: 'REMOVAL ORDER EXECUTED',
+                rule: 'ERROR IRREVERSIBLE'
+            },
+            {
+                action: 'PROPERTY TAX ASSESSED',
+                person: '',
+                issue: 'OWES $2M ON APARTMENT',
+                absurdity: 'APARTMENT WORTH $80K',
+                consequence: 'HOUSING STATUS: TERMINATED',
+                rule: 'ASSESSMENT FINAL'
+            }
+        ];
+
+        function generateName() {
+            const first = firstNames[Math.floor(Math.random() * firstNames.length)];
+            const last = lastNames[Math.floor(Math.random() * lastNames.length)];
+            return `${first} ${last}`;
+        }
+
+        function drawComputer() {
+            ctx.fillStyle = '#0a0a0a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.save();
+            
+            const paperShakeX = (Math.random() - 0.5) * 1.2;
+            const paperShakeY = (Math.random() - 0.5) * 1.2;
+            ctx.translate(paperShakeX, paperShakeY);
+            
+            const isDecisionMoment = (caseTimer >= 720 && caseTimer <= 810);
+            if (isDecisionMoment) {
+                const shakeX = (Math.random() - 0.5) * 4;
+                const shakeY = (Math.random() - 0.5) * 4;
+                ctx.translate(shakeX, shakeY);
+            }
+
+            const concreteGrad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+            concreteGrad.addColorStop(0, '#4a4a4a');
+            concreteGrad.addColorStop(0.3, '#585858');
+            concreteGrad.addColorStop(0.5, '#505050');
+            concreteGrad.addColorStop(0.7, '#454545');
+            concreteGrad.addColorStop(1, '#404040');
+            ctx.fillStyle = concreteGrad;
+            ctx.fillRect(0, 0, canvas.width, 200);
+            
+            concreteTexture.forEach(spot => {
+                ctx.fillStyle = `rgba(${spot.color}, ${spot.color}, ${spot.color}, ${spot.opacity})`;
+                ctx.fillRect(spot.x, spot.y, spot.size, spot.size);
+            });
+            
+            concreteStains.forEach(stain => {
+                ctx.fillStyle = `rgba(${stain.color}, ${stain.color}, ${stain.color}, 0.3)`;
+                ctx.beginPath();
+                ctx.ellipse(stain.x, stain.y, stain.sizeX, stain.sizeY, stain.rotation, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            
+            ctx.strokeStyle = 'rgba(20, 20, 20, 0.7)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(100, 50);
+            ctx.lineTo(150, 80);
+            ctx.lineTo(180, 120);
+            ctx.lineTo(200, 160);
+            ctx.stroke();
+            
+            ctx.beginPath();
+            ctx.moveTo(600, 30);
+            ctx.lineTo(650, 70);
+            ctx.lineTo(680, 100);
+            ctx.lineTo(700, 140);
+            ctx.stroke();
+            
+            ctx.beginPath();
+            ctx.moveTo(350, 20);
+            ctx.lineTo(380, 60);
+            ctx.lineTo(400, 90);
+            ctx.stroke();
+
+            ctx.fillStyle = 'rgba(212, 175, 55, 0.05)';
+            for (let i = 0; i < 50; i++) {
+                const x = Math.random() * canvas.width;
+                const y = (Math.random() * canvas.height + time * 2) % canvas.height;
+                ctx.fillRect(x, y, 1, Math.random() * 20);
+            }
+            
+            const paperStartX = 550;
+            const paperStartY = 180;
+            const paperWidth = 165;
+            const paperScroll = -(time * 0.4) % 8;
+            
+            ctx.save();
+            
+            for (let step = 0; step <= 100; step++) {
+                const t = step / 100;
+                const height = t * 180;
+                const segmentY = paperStartY - height + paperScroll;
+                
+                if (segmentY < -20) continue;
+                
+                let curveX = paperStartX;
+                if (t > 0.2) {
+                    const curveT = (t - 0.2) / 0.8;
+                    curveX = paperStartX + Math.pow(curveT, 1.5) * 120;
+                }
+                
+                const absolutePosition = height - (paperScrollY * 0.5);
+                const lineNum = Math.floor(absolutePosition / 8);
+                
+                const paperGrad = ctx.createLinearGradient(curveX - paperWidth/2, segmentY, curveX + paperWidth/2, segmentY);
+                
+                const verticalShade = 1 - (t * 0.3);
+                
+                if (lineNum % 2 === 0) {
+                    paperGrad.addColorStop(0, `rgba(${Math.floor(200 * verticalShade)}, ${Math.floor(232 * verticalShade)}, ${Math.floor(200 * verticalShade)}, 1)`);
+                    paperGrad.addColorStop(0.2, `rgba(${Math.floor(232 * verticalShade)}, ${Math.floor(245 * verticalShade)}, ${Math.floor(232 * verticalShade)}, 1)`);
+                    paperGrad.addColorStop(0.5, `rgba(${Math.floor(240 * verticalShade)}, ${Math.floor(250 * verticalShade)}, ${Math.floor(240 * verticalShade)}, 1)`);
+                    paperGrad.addColorStop(0.8, `rgba(${Math.floor(232 * verticalShade)}, ${Math.floor(245 * verticalShade)}, ${Math.floor(232 * verticalShade)}, 1)`);
+                    paperGrad.addColorStop(1, `rgba(${Math.floor(200 * verticalShade)}, ${Math.floor(232 * verticalShade)}, ${Math.floor(200 * verticalShade)}, 1)`);
+                } else {
+                    paperGrad.addColorStop(0, `rgba(${Math.floor(216 * verticalShade)}, ${Math.floor(216 * verticalShade)}, ${Math.floor(208 * verticalShade)}, 1)`);
+                    paperGrad.addColorStop(0.2, `rgba(${Math.floor(248 * verticalShade)}, ${Math.floor(248 * verticalShade)}, ${Math.floor(240 * verticalShade)}, 1)`);
+                    paperGrad.addColorStop(0.5, `rgba(${Math.floor(255 * verticalShade)}, ${Math.floor(255 * verticalShade)}, ${Math.floor(255 * verticalShade)}, 1)`);
+                    paperGrad.addColorStop(0.8, `rgba(${Math.floor(248 * verticalShade)}, ${Math.floor(248 * verticalShade)}, ${Math.floor(240 * verticalShade)}, 1)`);
+                    paperGrad.addColorStop(1, `rgba(${Math.floor(216 * verticalShade)}, ${Math.floor(216 * verticalShade)}, ${Math.floor(208 * verticalShade)}, 1)`);
+                }
+                ctx.fillStyle = paperGrad;
+                ctx.fillRect(curveX - paperWidth/2, segmentY, paperWidth, 3);
+                
+                if (step % 4 === 0) {
+                    ctx.fillStyle = '#909090';
+                    ctx.beginPath();
+                    ctx.arc(curveX - paperWidth/2 + 6, segmentY + 1, 2, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.beginPath();
+                    ctx.arc(curveX + paperWidth/2 - 6, segmentY + 1, 2, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                
+                if (step % 3 === 0 && lineNum % 2 === 0) {
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+                    ctx.font = '7px monospace';
+                    const caseNum = 10000 + lineNum;
+                    const textLength = 10 + Math.floor(Math.sin(lineNum) * 5 + Math.cos(lineNum * 0.7) * 3);
+                    const randomText = 'CASE#' + caseNum + ' ' + 'PROCESSING'.substring(0, textLength);
+                    ctx.fillText(randomText, curveX - paperWidth/2 + 12, segmentY + 2);
+                }
+            }
+            
+            ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([3, 2]);
+            
+            for (let step = 0; step <= 100; step += 2) {
+                const t = step / 100;
+                const height = t * 180;
+                const segmentY = paperStartY - height + paperScroll;
+                
+                if (segmentY < -20) continue;
+                
+                let curveX = paperStartX;
+                if (t > 0.2) {
+                    const curveT = (t - 0.2) / 0.8;
+                    curveX = paperStartX + Math.pow(curveT, 1.5) * 120;
+                }
+                
+                ctx.beginPath();
+                ctx.moveTo(curveX - paperWidth/2 + 10, segmentY);
+                ctx.lineTo(curveX - paperWidth/2 + 10, segmentY + 3);
+                ctx.stroke();
+                
+                ctx.beginPath();
+                ctx.moveTo(curveX + paperWidth/2 - 10, segmentY);
+                ctx.lineTo(curveX + paperWidth/2 - 10, segmentY + 3);
+                ctx.stroke();
+            }
+            
+            ctx.setLineDash([]);
+            ctx.restore();
+            
+            ctx.save();
+            ctx.font = 'bold 12px monospace';
+            
+            printedStamps.forEach(stamp => {
+                const relativeScrollY = paperScrollY - stamp.startScrollY;
+                const distanceFromStart = relativeScrollY * 0.5;
+                
+                if (distanceFromStart < 0 || distanceFromStart > 180) return;
+                
+                const stampT = distanceFromStart / 180;
+                const baseStampY = paperStartY - distanceFromStart + paperScroll;
+                
+                let baseCurveX = paperStartX;
+                if (stampT > 0.2) {
+                    const curveT = (stampT - 0.2) / 0.8;
+                    baseCurveX = paperStartX + Math.pow(curveT, 1.5) * 120;
+                }
+                
+                const tempCanvas = document.createElement('canvas');
+                const tempCtx = tempCanvas.getContext('2d');
+                tempCanvas.width = 200;
+                tempCanvas.height = 20;
+                
+                tempCtx.font = 'bold 12px monospace';
+                tempCtx.fillStyle = 'rgba(60, 60, 60, 0.9)';
+                const textWidth = tempCtx.measureText(stamp.word).width;
+                tempCtx.fillText(stamp.word, 100 - textWidth / 2, 12);
+                
+                const imgData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+                
+                for (let y = 0; y < tempCanvas.height; y++) {
+                    if (y % 2 === 1) continue;
+                    
+                    const lineY = baseStampY + y - 10;
+                    const lineDistanceFromStart = distanceFromStart + (y - 10);
+                    const lineT = lineDistanceFromStart / 180;
+                    
+                    let lineCurveX = paperStartX;
+                    if (lineT > 0.2) {
+                        const curveT = (lineT - 0.2) / 0.8;
+                        lineCurveX = paperStartX + Math.pow(curveT, 1.5) * 120;
+                    }
+                    
+                    const xOffset = baseCurveX - lineCurveX;
+                    
+                    for (let x = 0; x < tempCanvas.width; x++) {
+                        const idx = (y * tempCanvas.width + x) * 4;
+                        const a = imgData.data[idx + 3];
+                        
+                        if (a > 0) {
+                            ctx.fillStyle = 'rgba(60, 60, 60, 0.8)';
+                            ctx.fillRect(x - 100 + baseCurveX + xOffset, lineY, 1, 1);
+                        }
+                    }
+                }
+            });
+            
+            ctx.restore();
+
+            const boxGradient = ctx.createRadialGradient(450, 350, 50, 450, 350, 400);
+            boxGradient.addColorStop(0, '#b0b0c0');
+            boxGradient.addColorStop(0.3, '#909099');
+            boxGradient.addColorStop(0.5, '#707078');
+            boxGradient.addColorStop(0.7, '#505058');
+            boxGradient.addColorStop(1, '#303038');
+            ctx.fillStyle = boxGradient;
+            
+            ctx.beginPath();
+            ctx.moveTo(260, 150);
+            ctx.lineTo(640, 150);
+            ctx.quadraticCurveTo(660, 150, 660, 170);
+            ctx.lineTo(660, 530);
+            ctx.quadraticCurveTo(660, 550, 640, 550);
+            ctx.lineTo(260, 550);
+            ctx.quadraticCurveTo(240, 550, 240, 530);
+            ctx.lineTo(240, 170);
+            ctx.quadraticCurveTo(240, 150, 260, 150);
+            ctx.closePath();
+            ctx.fill();
+            
+            const highlightGrad = ctx.createLinearGradient(200, 150, 400, 350);
+            highlightGrad.addColorStop(0, 'rgba(255, 255, 255, 0.5)');
+            highlightGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.1)');
+            highlightGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+            ctx.fillStyle = highlightGrad;
+            ctx.beginPath();
+            ctx.moveTo(250, 150);
+            ctx.quadraticCurveTo(200, 250, 250, 400);
+            ctx.lineTo(300, 400);
+            ctx.quadraticCurveTo(250, 250, 300, 150);
+            ctx.closePath();
+            ctx.fill();
+
+            const edgeRivets = [];
+            for (let i = 1; i < 10; i++) {
+                const t = i / 10;
+                const y = 150 + t * 400;
+                edgeRivets.push([240, y], [660, y]);
+            }
+            
+            edgeRivets.forEach(([x, y]) => {
+                ctx.fillStyle = '#202028';
+                ctx.beginPath();
+                ctx.arc(x + 1, y + 1, 4, 0, Math.PI * 2);
+                ctx.fill();
+                
+                const rivetGrad = ctx.createRadialGradient(x - 1, y - 1, 0, x, y, 4);
+                rivetGrad.addColorStop(0, '#e0e0e8');
+                rivetGrad.addColorStop(0.6, '#909099');
+                rivetGrad.addColorStop(1, '#505058');
+                ctx.fillStyle = rivetGrad;
+                ctx.beginPath();
+                ctx.arc(x, y, 4, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+                ctx.beginPath();
+                ctx.arc(x - 1, y - 1, 1.5, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            ctx.strokeStyle = 'rgba(40, 40, 50, 0.8)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(450, 150);
+            ctx.lineTo(450, 550);
+            ctx.stroke();
+
+            const bezelGradient = ctx.createLinearGradient(260, 180, 640, 470);
+            bezelGradient.addColorStop(0, '#9a9aaa');
+            bezelGradient.addColorStop(0.2, '#dadae5');
+            bezelGradient.addColorStop(0.4, '#ffffff');
+            bezelGradient.addColorStop(0.5, '#c0c0d0');
+            bezelGradient.addColorStop(0.6, '#ffffff');
+            bezelGradient.addColorStop(0.8, '#b0b0c0');
+            bezelGradient.addColorStop(1, '#7a7a8a');
+            ctx.fillStyle = bezelGradient;
+            ctx.fillRect(260, 180, 380, 290);
+            
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+            ctx.fillRect(265, 185, 370, 5);
+            ctx.fillRect(265, 185, 5, 280);
+            
+            ctx.fillStyle = 'rgba(60, 60, 70, 0.6)';
+            ctx.fillRect(630, 185, 5, 280);
+            ctx.fillRect(265, 465, 370, 5);
+            
+            const rivetPositions = [
+                [270, 190], [350, 190], [430, 190], [510, 190], [590, 190],
+                [630, 240], [630, 300], [630, 360], [630, 420],
+                [590, 460], [510, 460], [430, 460], [350, 460], [270, 460],
+                [270, 420], [270, 360], [270, 300], [270, 240]
+            ];
+            
+            rivetPositions.forEach(([x, y]) => {
+                ctx.fillStyle = '#3a3a4a';
+                ctx.beginPath();
+                ctx.arc(x + 1, y + 1, 5, 0, Math.PI * 2);
+                ctx.fill();
+                
+                const rivetGrad = ctx.createRadialGradient(x - 1, y - 1, 0, x, y, 5);
+                rivetGrad.addColorStop(0, '#e0e0e8');
+                rivetGrad.addColorStop(0.6, '#a0a0b0');
+                rivetGrad.addColorStop(1, '#606070');
+                ctx.fillStyle = rivetGrad;
+                ctx.beginPath();
+                ctx.arc(x, y, 5, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+                ctx.beginPath();
+                ctx.arc(x - 1.5, y - 1.5, 2, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.strokeStyle = '#404050';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(x - 3, y);
+                ctx.lineTo(x + 3, y);
+                ctx.moveTo(x, y - 3);
+                ctx.lineTo(x, y + 3);
+                ctx.stroke();
+            });
+            
+            ctx.fillStyle = '#001a0f';
+            ctx.fillRect(280, 200, 340, 250);
+
+            ctx.strokeStyle = 'rgba(0, 255, 150, 0.1)';
+            ctx.lineWidth = 1;
+            for (let i = 0; i < 250; i += 4) {
+                ctx.beginPath();
+                ctx.moveTo(280, 200 + i + scanlineOffset);
+                ctx.lineTo(620, 200 + i + scanlineOffset);
+                ctx.stroke();
+            }
+
+            ctx.shadowColor = '#00ff96';
+            ctx.shadowBlur = 10;
+            ctx.fillStyle = '#00ff96';
+            ctx.font = 'bold 13px monospace';
+            
+            if (caseTimer === 0) {
+                const currentCase = bureaucraticCases[caseIndex];
+                if (currentCase.action === 'HEATING ENGINEER ERROR') {
+                    currentCase.person = 'Archibald Buttle';
+                } else {
+                    currentCase.person = generateName();
+                }
+            }
+            
+            const currentCase = bureaucraticCases[caseIndex];
+            const ph = Math.floor(caseTimer / 180) % 6;
+            
+            let caseLines = [];
+            if (ph === 0) {
+                caseLines = [`> CASE #${10000 + caseIndex}`, `> SUBJECT: ${currentCase.person}`, `> ACTION: ${currentCase.action}_`];
+            } else if (ph === 1) {
+                caseLines = [`> COGNITIVE AUTOMATION UNIT...`, `> ISSUE: ${currentCase.issue}`, `> ANALYZING..._`];
+            } else if (ph === 2) {
+                caseLines = [`> ANALYSIS: ${currentCase.absurdity}`, `> CAU DECISION: OVERRIDE DENIED`, `> PROCEDURE MUST BE FOLLOWED_`];
+            } else if (ph === 3) {
+                caseLines = [`> EXECUTING PROTOCOL`, `> CONSEQUENCE: ${currentCase.consequence}`, `> STATUS: FINAL_`];
+            } else if (ph === 4) {
+                caseLines = [`> GENERATING JUSTIFICATION...`, `> NEW RULE: ${currentCase.rule}`, `> RULE ADDED TO DATABASE_`];
+            } else {
+                caseLines = [`> GENERATING PDF...`, `> PRINTING ON CERTIFIED PAPER...`, `> SIGNATURE APPLIED`, `> STAMPED BY AUTHORITY`, `> FILED IN AUTHORIZED BINDER_`];
+            }
+            
+            const maxWidth = 320;
+            let displayLines = [];
+            
+            caseLines.forEach(line => {
+                if (ctx.measureText(line).width > maxWidth) {
+                    const words = line.split(' ');
+                    let currentLine = '';
+                    words.forEach(word => {
+                        const testLine = currentLine + (currentLine ? ' ' : '') + word;
+                        if (ctx.measureText(testLine).width > maxWidth) {
+                            displayLines.push(currentLine);
+                            currentLine = word;
+                        } else {
+                            currentLine = testLine;
+                        }
+                    });
+                    if (currentLine) displayLines.push(currentLine);
+                } else {
+                    displayLines.push(line);
+                }
+            });
+            
+            displayLines.forEach((line, i) => {
+                if (line.includes('RESPONSIBLE')) {
+                    const parts = line.split('RESPONSIBLE');
+                    const beforeText = parts[0];
+                    const afterText = parts[1] || '';
+                    
+                    ctx.fillStyle = '#00ff96';
+                    ctx.fillText(beforeText, 290, 220 + i * 20);
+                    
+                    const beforeWidth = ctx.measureText(beforeText).width;
+                    const responsibleWidth = ctx.measureText('RESPONSIBLE').width;
+                    
+                    const intensity = Math.sin(time / 10) * 0.3 + 0.7;
+                    ctx.fillStyle = `rgba(0, 255, 150, ${intensity})`;
+                    ctx.fillRect(290 + beforeWidth - 2, 220 + i * 20 - 12, responsibleWidth + 4, 16);
+                    
+                    ctx.shadowBlur = 0;
+                    ctx.fillStyle = '#001a0f';
+                    ctx.fillText('RESPONSIBLE', 290 + beforeWidth, 220 + i * 20);
+                    
+                    ctx.fillStyle = '#00ff96';
+                    ctx.shadowColor = '#00ff96';
+                    ctx.shadowBlur = 10;
+                    ctx.fillText(afterText, 290 + beforeWidth + responsibleWidth, 220 + i * 20);
+                } else {
+                    ctx.fillStyle = '#00ff96';
+                    ctx.fillText(line, 290, 220 + i * 20);
+                }
+            });
+            
+            ctx.font = 'bold 11px monospace';
+            ctx.fillText(`CASES PROCESSED: ${1247 + caseIndex}`, 290, 340);
+            ctx.fillText(`CASES CLOSED: ${3891 + caseIndex * 3}`, 290, 357);
+            ctx.fillText(`APPEALS REVIEWED: ${4567 + caseIndex * 2}`, 290, 374);
+            ctx.fillText(`PROCEDURES UPDATED: ${2134 + caseIndex}`, 290, 391);
+            
+            ctx.font = 'bold 14px monospace';
+            ctx.fillText('⟳ COGNITIVE AUTOMATION UNIT', 290, 420);
+            ctx.font = 'bold 10px monospace';
+            ctx.fillText('CAU v2.7 - STREAMLINED GOVERNANCE', 290, 435);
+            
+            ctx.shadowBlur = 0;
+
+            if (Math.floor(time / 30) % 2 === 0) {
+                const lastLine = displayLines[displayLines.length - 1];
+                ctx.fillRect(290 + ctx.measureText(lastLine).width - 8, 220 + (displayLines.length - 1) * 20 - 10, 8, 12);
+            }
+            
+            caseTimer++;
+            if (caseTimer >= 1080) {
+                caseTimer = 0;
+                caseIndex = (caseIndex + 1) % bureaucraticCases.length;
+            }
+            
+            if (caseTimer === 720) {
+                const currentCase = bureaucraticCases[caseIndex];
+                let stampWord = 'RESOLVED';
+                
+                if (currentCase.rule.includes('RESPONSIBLE')) stampWord = 'ACCOUNTABLE';
+                else if (currentCase.consequence.includes('DENIED')) stampWord = 'REVIEWED';
+                else if (currentCase.consequence.includes('FROZEN')) stampWord = 'SUSPENDED';
+                else if (currentCase.consequence.includes('SUSPENDED')) stampWord = 'REVOKED';
+                else if (currentCase.consequence.includes('PRISON')) stampWord = 'PROCESSED';
+                else if (currentCase.consequence.includes('DIED')) stampWord = 'CLOSED';
+                
+                printedStamps.push({
+                    word: stampWord,
+                    startScrollY: paperScrollY,
+                    caseId: caseIndex
+                });
+            }
+
+            ctx.fillStyle = '#505058';
+            ctx.fillRect(260, 490, 380, 50);
+            
+            for (let i = 0; i < 8; i++) {
+                const x = 280 + i * 50;
+                ctx.fillStyle = '#303038';
+                ctx.beginPath();
+                ctx.arc(x, 495, 3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            for (let i = 0; i < 6; i++) {
+                const x = 300 + i * 60;
+                const y = 515;
+                
+                const socketGrad = ctx.createLinearGradient(x - 10, y - 10, x + 10, y + 10);
+                socketGrad.addColorStop(0, '#8a8a90');
+                socketGrad.addColorStop(0.5, '#606068');
+                socketGrad.addColorStop(1, '#404048');
+                ctx.fillStyle = socketGrad;
+                ctx.beginPath();
+                ctx.arc(x, y, 14, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.strokeStyle = '#303038';
+                ctx.lineWidth = 1;
+                for (let j = 0; j < 4; j++) {
+                    ctx.beginPath();
+                    ctx.arc(x, y, 14 - j * 2, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+                
+                const isDecisionMoment = (caseTimer >= 720 && caseTimer <= 810);
+                const active = isDecisionMoment ? true : ((time + i * 20) % 120 < 60);
+                
+                const bulbGrad = ctx.createRadialGradient(x - 3, y - 3, 0, x, y, 12);
+                if (isDecisionMoment) {
+                    bulbGrad.addColorStop(0, '#ffdddd');
+                    bulbGrad.addColorStop(0.4, '#ff5555');
+                    bulbGrad.addColorStop(0.7, '#dd0000');
+                    bulbGrad.addColorStop(1, 'rgba(139, 0, 0, 0.8)');
+                } else if (active) {
+                    bulbGrad.addColorStop(0, '#fffacd');
+                    bulbGrad.addColorStop(0.4, '#ffdb58');
+                    bulbGrad.addColorStop(0.7, '#ff8c00');
+                    bulbGrad.addColorStop(1, 'rgba(139, 69, 19, 0.6)');
+                } else {
+                    bulbGrad.addColorStop(0, 'rgba(255, 250, 205, 0.1)');
+                    bulbGrad.addColorStop(0.5, 'rgba(139, 69, 19, 0.3)');
+                    bulbGrad.addColorStop(1, 'rgba(80, 50, 20, 0.5)');
+                }
+                ctx.fillStyle = bulbGrad;
+                ctx.beginPath();
+                ctx.arc(x, y, 11, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+                ctx.beginPath();
+                ctx.arc(x - 4, y - 4, 3, 0, Math.PI * 2);
+                ctx.fill();
+                
+                if (active) {
+                    ctx.shadowColor = isDecisionMoment ? '#dd0000' : '#ff8c00';
+                    ctx.shadowBlur = isDecisionMoment ? 35 : 25;
+                    ctx.beginPath();
+                    ctx.arc(x, y, 11, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.shadowBlur = 0;
+                    
+                    ctx.strokeStyle = isDecisionMoment ? 'rgba(255, 100, 100, 0.9)' : 'rgba(255, 220, 100, 0.8)';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.moveTo(x - 3, y);
+                    ctx.lineTo(x + 3, y);
+                    ctx.stroke();
+                }
+            }
+
+            ctx.strokeStyle = '#8a8a90';
+            ctx.lineWidth = 2;
+            for (let i = 0; i < 8; i++) {
+                ctx.beginPath();
+                ctx.moveTo(240 + i * 15, 570);
+                ctx.lineTo(250 + i * 15, 580);
+                ctx.stroke();
+            }
+
+            const kbGradient = ctx.createLinearGradient(200, 570, 700, 620);
+            kbGradient.addColorStop(0, '#3a3a3a');
+            kbGradient.addColorStop(0.5, '#2a2a2a');
+            kbGradient.addColorStop(1, '#1a1a1a');
+            ctx.fillStyle = kbGradient;
+            ctx.fillRect(200, 570, 500, 80);
+            
+            for (let i = 0; i < 10; i++) {
+                const x = 210 + i * 50;
+                const y = 575;
+                
+                ctx.fillStyle = '#0a0a0a';
+                ctx.beginPath();
+                ctx.arc(x, y, 3, 0, Math.PI * 2);
+                ctx.fill();
+                
+                const rivetGrad = ctx.createRadialGradient(x - 1, y - 1, 0, x, y, 3);
+                rivetGrad.addColorStop(0, '#8a8a8a');
+                rivetGrad.addColorStop(0.6, '#4a4a4a');
+                rivetGrad.addColorStop(1, '#2a2a2a');
+                ctx.fillStyle = rivetGrad;
+                ctx.beginPath();
+                ctx.arc(x, y, 3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            for (let row = 0; row < 3; row++) {
+                for (let col = 0; col < 12; col++) {
+                    const x = 215 + col * 38;
+                    const y = 585 + row * 22;
+                    
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+                    ctx.beginPath();
+                    ctx.arc(x + 16, y + 10, 14, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    const keyGrad = ctx.createRadialGradient(x + 14, y + 7, 2, x + 16, y + 9, 13);
+                    keyGrad.addColorStop(0, '#b8b8c0');
+                    keyGrad.addColorStop(0.3, '#888890');
+                    keyGrad.addColorStop(0.6, '#686870');
+                    keyGrad.addColorStop(0.85, '#484850');
+                    keyGrad.addColorStop(1, '#303038');
+                    ctx.fillStyle = keyGrad;
+                    ctx.beginPath();
+                    ctx.arc(x + 16, y + 9, 13, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    ctx.strokeStyle = '#404048';
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    ctx.arc(x + 16, y + 9, 10, 0, Math.PI * 2);
+                    ctx.stroke();
+                    
+                    ctx.strokeStyle = '#505058';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.arc(x + 16, y + 9, 7, 0, Math.PI * 2);
+                    ctx.stroke();
+                    
+                    ctx.fillStyle = 'rgba(220, 220, 230, 0.6)';
+                    ctx.beginPath();
+                    ctx.arc(x + 13, y + 6, 4, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    for (let i = 0; i < 3; i++) {
+                        const angle = (i * Math.PI * 2) / 3 - Math.PI / 2;
+                        const rx = x + 16 + Math.cos(angle) * 9;
+                        const ry = y + 9 + Math.sin(angle) * 9;
+                        
+                        ctx.fillStyle = '#202028';
+                        ctx.beginPath();
+                        ctx.arc(rx, ry, 1.5, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                    
+                    if (Math.random() > 0.2) {
+                        ctx.fillStyle = '#606068';
+                        ctx.font = 'bold 7px monospace';
+                        const letters = 'QWERTYUIOPASDFGHJKLZXCVBNM1234567890';
+                        const letter = letters[Math.floor(Math.random() * letters.length)];
+                        ctx.textAlign = 'center';
+                        ctx.fillText(letter, x + 16, y + 12);
+                        ctx.textAlign = 'left';
+                    }
+                }
+            }
+            
+            const mugX = 340;
+            const mugY = 60;
+            
+            const mugBodyGrad = ctx.createLinearGradient(mugX - 35, mugY + 20, mugX + 35, mugY + 20);
+            mugBodyGrad.addColorStop(0, '#d8d8d8');
+            mugBodyGrad.addColorStop(0.3, '#ffffff');
+            mugBodyGrad.addColorStop(0.5, '#f5f5f5');
+            mugBodyGrad.addColorStop(0.7, '#e8e8e8');
+            mugBodyGrad.addColorStop(1, '#c8c8c8');
+            ctx.fillStyle = mugBodyGrad;
+            
+            ctx.beginPath();
+            ctx.moveTo(mugX - 32, mugY + 10);
+            ctx.lineTo(mugX - 32, 150);
+            ctx.lineTo(mugX, 150);
+            ctx.lineTo(mugX, mugY + 10);
+            ctx.closePath();
+            ctx.fill();
+            
+            ctx.beginPath();
+            ctx.moveTo(mugX, mugY + 10);
+            ctx.lineTo(mugX, 150);
+            ctx.lineTo(mugX + 32, 150);
+            ctx.lineTo(mugX + 32, mugY + 10);
+            ctx.closePath();
+            ctx.fill();
+            
+            ctx.fillStyle = '#f0f0f0';
+            ctx.fillRect(mugX - 32, 150, 64, 1);
+            
+            ctx.strokeStyle = '#c0c0c0';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.ellipse(mugX, mugY + 10, 32, 3, 0, 0, Math.PI * 2);
+            ctx.stroke();
+            
+            ctx.strokeStyle = '#e8e8e8';
+            ctx.lineWidth = 10;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.arc(mugX + 32, mugY + 55, 20, -Math.PI / 2.1, Math.PI / 2.1);
+            ctx.stroke();
+            
+            ctx.strokeStyle = '#c8c8c8';
+            ctx.lineWidth = 5;
+            ctx.beginPath();
+            ctx.arc(mugX + 32, mugY + 55, 20, -Math.PI / 2.1, Math.PI / 2.1);
+            ctx.stroke();
+            
+            ctx.save();
+            ctx.translate(mugX, mugY + 60);
+            
+            ctx.strokeStyle = '#404040';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(0, 0, 18, 0, Math.PI * 2);
+            ctx.stroke();
+            
+            ctx.fillStyle = '#505050';
+            ctx.beginPath();
+            ctx.arc(0, 0, 16, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.strokeStyle = '#202020';
+            ctx.lineWidth = 2.5;
+            
+            ctx.strokeRect(-8, -8, 16, 16);
+            
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(-6, -4);
+            ctx.lineTo(6, -4);
+            ctx.moveTo(-6, 0);
+            ctx.lineTo(6, 0);
+            ctx.moveTo(-6, 4);
+            ctx.lineTo(6, 4);
+            ctx.stroke();
+            
+            ctx.strokeStyle = '#8a0000';
+            ctx.lineWidth = 2.5;
+            ctx.beginPath();
+            ctx.moveTo(-10, -10);
+            ctx.lineTo(10, 10);
+            ctx.moveTo(10, -10);
+            ctx.lineTo(-10, 10);
+            ctx.stroke();
+            
+            ctx.fillStyle = '#303030';
+            ctx.font = 'bold 5px monospace';
+            ctx.fillText('CAU', -7, 26);
+            
+            ctx.restore();
+            
+            ctx.shadowBlur = 6;
+            ctx.shadowColor = 'rgba(255, 255, 255, 0.15)';
+            
+            for (let s = 0; s < 25; s++) {
+                const particleLife = s / 25;
+                const baseX = mugX + (Math.sin(s * 0.4) * 20 - 10);
+                const steamY = mugY + 10 - particleLife * 70;
+                const drift = Math.sin(time / 20 + s * 0.25) * (particleLife * 25);
+                const steamX = baseX + drift;
+                
+                const opacity = (1 - particleLife) * 0.08;
+                const size = (2 + particleLife * 4);
+                
+                ctx.fillStyle = `rgba(240, 240, 240, ${opacity})`;
+                ctx.beginPath();
+                ctx.arc(steamX, steamY, size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            ctx.shadowBlur = 0;
+            
+            ctx.save();
+            
+            const postItX = 560;
+            const postItY = 410;
+            const postItWidth = 70;
+            const postItHeight = 60;
+            
+            ctx.translate(postItX, postItY);
+            ctx.rotate(0.08);
+            
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+            ctx.fillRect(2, 2, postItWidth, postItHeight);
+            
+            const postItGrad = ctx.createLinearGradient(0, 0, postItWidth, postItHeight);
+            postItGrad.addColorStop(0, '#ffeb8a');
+            postItGrad.addColorStop(0.5, '#fff9c4');
+            postItGrad.addColorStop(1, '#ffe57f');
+            ctx.fillStyle = postItGrad;
+            ctx.fillRect(0, 0, postItWidth, postItHeight);
+            
+            ctx.fillStyle = 'rgba(240, 200, 50, 0.3)';
+            ctx.fillRect(0, 0, postItWidth, 8);
+            
+            ctx.strokeStyle = 'rgba(200, 180, 100, 0.4)';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(0, 0, postItWidth, postItHeight);
+            
+            ctx.fillStyle = 'rgba(50, 50, 150, 0.8)';
+            ctx.font = 'italic bold 7px Arial';
+            
+            ctx.fillText('Q1-FY25', 6, 18);
+            ctx.fillText('TARGET:', 6, 28);
+            
+            ctx.font = 'italic bold 9px Arial';
+            ctx.fillText('EFF+20%', 8, 40);
+            
+            ctx.font = 'italic bold 6px Arial';
+            ctx.fillText('(DIR-042)', 6, 52);
+            ctx.fillText('COMPLIANCE', 4, 58);
+            
+            ctx.restore();
+            
+            ctx.save();
+            
+            const printerX = paperStartX;
+            const printerY = 165;
+            
+            const supportGrad = ctx.createLinearGradient(printerX - 95, printerY - 20, printerX - 85, printerY + 20);
+            supportGrad.addColorStop(0, '#5a5a5a');
+            supportGrad.addColorStop(0.5, '#3a3a3a');
+            supportGrad.addColorStop(1, '#2a2a2a');
+            ctx.fillStyle = supportGrad;
+            ctx.fillRect(printerX - 95, printerY - 20, 10, 40);
+            
+            ctx.fillStyle = supportGrad;
+            ctx.fillRect(printerX + 85, printerY - 20, 10, 40);
+            
+            for (let i = 0; i < 2; i++) {
+                const rollerX = printerX - 40 + i * 80;
+                const rollerY = printerY;
+                const rotation = (time * 0.1) % (Math.PI * 2);
+                
+                const rollerGrad = ctx.createRadialGradient(rollerX - 5, rollerY - 5, 0, rollerX, rollerY, 12);
+                rollerGrad.addColorStop(0, '#9a9a9a');
+                rollerGrad.addColorStop(0.5, '#6a6a6a');
+                rollerGrad.addColorStop(1, '#4a4a4a');
+                ctx.fillStyle = rollerGrad;
+                ctx.beginPath();
+                ctx.arc(rollerX, rollerY, 12, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.save();
+                ctx.translate(rollerX, rollerY);
+                ctx.rotate(rotation);
+                ctx.strokeStyle = '#3a3a3a';
+                ctx.lineWidth = 1.5;
+                for (let j = 0; j < 12; j++) {
+                    const angle = (j * Math.PI * 2) / 12;
+                    ctx.beginPath();
+                    ctx.moveTo(0, 0);
+                    ctx.lineTo(Math.cos(angle) * 12, Math.sin(angle) * 12);
+                    ctx.stroke();
+                }
+                ctx.restore();
+                
+                ctx.save();
+                ctx.translate(rollerX - 15, rollerY);
+                ctx.rotate(-rotation * 1.5);
+                
+                for (let j = 0; j < 6; j++) {
+                    const angle = (j * Math.PI * 2) / 6;
+                    ctx.fillStyle = '#5a5a5a';
+                    ctx.beginPath();
+                    ctx.moveTo(Math.cos(angle) * 4, Math.sin(angle) * 4);
+                    ctx.lineTo(Math.cos(angle + 0.3) * 7, Math.sin(angle + 0.3) * 7);
+                    ctx.lineTo(Math.cos(angle + 0.7) * 7, Math.sin(angle + 0.7) * 7);
+                    ctx.lineTo(Math.cos(angle + 1) * 4, Math.sin(angle + 1) * 4);
+                    ctx.closePath();
+                    ctx.fill();
+                }
+                
+                ctx.fillStyle = '#2a2a2a';
+                ctx.beginPath();
+                ctx.arc(0, 0, 3, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.restore();
+            }
+            
+            ctx.fillStyle = '#4a4a4a';
+            ctx.beginPath();
+            ctx.moveTo(printerX - 90, printerY - 18);
+            ctx.lineTo(printerX - 85, printerY - 25);
+            ctx.lineTo(printerX + 85, printerY - 25);
+            ctx.lineTo(printerX + 90, printerY - 18);
+            ctx.closePath();
+            ctx.fill();
+            
+            ctx.strokeStyle = '#7a7a7a';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(printerX - 85, printerY - 25);
+            ctx.lineTo(printerX + 85, printerY - 25);
+            ctx.stroke();
+            
+            for (let i = 0; i < 7; i++) {
+                const x = printerX - 60 + i * 20;
+                const y = printerY + 15;
+                
+                ctx.fillStyle = '#1a1a1a';
+                ctx.beginPath();
+                ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+                ctx.fill();
+                
+                const rivetGrad = ctx.createRadialGradient(x - 0.5, y - 0.5, 0, x, y, 2.5);
+                rivetGrad.addColorStop(0, '#8a8a8a');
+                rivetGrad.addColorStop(0.6, '#4a4a4a');
+                rivetGrad.addColorStop(1, '#2a2a2a');
+                ctx.fillStyle = rivetGrad;
+                ctx.beginPath();
+                ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            ctx.restore();
+            
+            ctx.restore();
+        }
+
+        function animate() {
+            time++;
+            scanlineOffset = (scanlineOffset + 0.5) % 4;
+            paperScrollY += 0.5;
+            drawComputer();
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+    </script>
+</body>
+</html>

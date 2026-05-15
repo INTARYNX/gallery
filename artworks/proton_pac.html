@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Proton Pac</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#000; display:flex; justify-content:center; align-items:center; height:100vh; overflow:hidden; }
+#wrap { position:relative; width:100vmin; height:100vmin; }
+#c, #g { position:absolute; top:0; left:0; width:100%; height:100%; }
+#g { pointer-events:none; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c"></canvas>
+  <canvas id="g"></canvas>
+</div>
+<script>
+var wc = document.getElementById('c');
+var gl = wc.getContext('webgl');
+var oc = document.getElementById('g');
+var gc = oc.getContext('2d');
+
+function resize() {
+    var s = Math.min(window.innerWidth, window.innerHeight);
+    wc.width = wc.height = oc.width = oc.height = s;
+    gl.viewport(0, 0, s, s);
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ── WebGL water ───────────────────────────────────────────────────────────────
+var vs = 'attribute vec2 a;void main(){gl_Position=vec4(a,0,1);}';
+var fs = [
+  'precision mediump float;',
+  'uniform float u_t;uniform vec2 u_r;',
+  'float hash(vec2 p){p=fract(p*vec2(127.1,311.7));p+=dot(p,p+19.19);return fract(p.x*p.y);}',
+  'float noise(vec2 p){vec2 i=floor(p),f=fract(p),u=f*f*(3.-2.*f);',
+  'return mix(mix(hash(i),hash(i+vec2(1,0)),u.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),u.x),u.y);}',
+  'float fbm(vec2 p){return noise(p)*.5+noise(p*2.)*.25+noise(p*4.)*.125;}',
+  'vec3 pal(float h){vec3 a=vec3(0.,.3,.6),b=vec3(0.,.5,.5),c=vec3(.5,.5,.5),d=vec3(0.,.2,.4);',
+  'return a+b*cos(6.2831*(c*h+d));}',
+  'void main(){',
+  'vec2 uv=gl_FragCoord.xy/u_r,pos=gl_FragCoord.xy-u_r*.5;',
+  'float maxR=u_r.x*.5,d=length(pos),a=atan(pos.y,pos.x),t=u_t;',
+  'float spiral=a+t*.7-d*.025,w=fbm(uv*4.);',
+  'float c1=sin(d/maxR*8.-t*2.5+w*6.),c2=sin(d/maxR*5.5-t*1.8+a*2.+w*4.),c3=sin(spiral+w*5.+t*1.2);',
+  'float caustic=(c1+c2+c3)/3.*.5+.5;',
+  'float sw=sin(spiral+w*3.),streak=sw>0.?pow(sw,8.):0.;',
+  'float vortex=max(0.,1.-d/(maxR*.87)),depth=max(0.,1.-d/(maxR*1.03));',
+  'float base=caustic*vortex+w*.3+streak*.5;',
+  'vec3 col=pal(base*.6+t*.25);',
+  'col=mix(col,vec3(.8,.95,1.),max(0.,base*2.-.8)+streak*.6);',
+  'col*=depth*.75+.25;',
+  'gl_FragColor=vec4(clamp(col,0.,1.),1.);}',
+].join('\n');
+
+function mkShader(type, src) {
+    var s = gl.createShader(type);
+    gl.shaderSource(s, src); gl.compileShader(s); return s;
+}
+var prog = gl.createProgram();
+gl.attachShader(prog, mkShader(gl.VERTEX_SHADER, vs));
+gl.attachShader(prog, mkShader(gl.FRAGMENT_SHADER, fs));
+gl.linkProgram(prog); gl.useProgram(prog);
+var vbuf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, vbuf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,1,1]), gl.STATIC_DRAW);
+var aLoc = gl.getAttribLocation(prog, 'a');
+gl.enableVertexAttribArray(aLoc);
+gl.vertexAttribPointer(aLoc, 2, gl.FLOAT, false, 0, 0);
+var uT = gl.getUniformLocation(prog, 'u_t');
+var uR = gl.getUniformLocation(prog, 'u_r');
+
+// ── Ghost sprites (2 frames, 16×16) ──────────────────────────────────────────
+// Physical size is kept = old 12×10 grid × px
+// sprite px = floor(12/16 * px) so width matches exactly
+var GHOST_FRAMES = [
+    [
+        [0,0,0,0,1,1,1,1,1,1,1,1,0,0,0,0],
+        [0,0,1,1,1,1,1,1,1,1,1,1,1,1,0,0],
+        [0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],
+        [0,1,1,2,2,2,1,1,1,1,2,2,2,1,1,0],
+        [1,1,2,2,2,2,2,1,1,2,2,2,2,2,1,1],
+        [1,1,2,2,3,3,2,1,1,2,2,3,3,2,1,1],
+        [1,1,2,2,3,3,2,1,1,2,2,3,3,2,1,1],
+        [1,1,2,2,2,2,2,1,1,2,2,2,2,2,1,1],
+        [1,1,1,2,2,2,1,1,1,1,2,2,2,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,0,1,1,1,0,0,0,0,1,1,1,0,1,1],
+        [1,0,0,1,1,0,0,0,0,0,0,1,1,0,0,1],
+    ],
+    [
+        [0,0,0,0,1,1,1,1,1,1,1,1,0,0,0,0],
+        [0,0,1,1,1,1,1,1,1,1,1,1,1,1,0,0],
+        [0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],
+        [0,1,1,2,2,2,1,1,1,1,2,2,2,1,1,0],
+        [1,1,2,2,2,2,2,1,1,2,2,2,2,2,1,1],
+        [1,1,2,2,3,3,2,1,1,2,2,3,3,2,1,1],
+        [1,1,2,2,3,3,2,1,1,2,2,3,3,2,1,1],
+        [1,1,2,2,2,2,2,1,1,2,2,2,2,2,1,1],
+        [1,1,1,2,2,2,1,1,1,1,2,2,2,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+        [0,1,1,0,1,1,0,1,0,1,0,1,1,0,1,0],
+        [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0],
+    ],
+];
+
+// Old grid was 12 cols × 10 rows — we keep that physical footprint
+var GHOST_COLS_OLD = 12;
+var GHOST_ROWS_OLD = 10;
+
+var TRAP      = [[4,4,4,4],[4,5,5,4],[4,4,4,4]];
+var TRAP_OPEN = [[4,0,0,4],[4,5,6,4],[4,4,4,4]];
+var SPRITE_COL = { 4:'#888', 5:'#ff0', 6:'#fff' };
+
+function drawSprite(sprite, ox, oy, cellPx, palette) {
+    for (var r = 0; r < sprite.length; r++) {
+        for (var c = 0; c < sprite[r].length; c++) {
+            var v = sprite[r][c];
+            if (!v) continue;
+            gc.fillStyle = (palette && palette[v]) ? palette[v] : SPRITE_COL[v];
+            gc.fillRect(Math.round(ox + c*cellPx), Math.round(oy + r*cellPx), cellPx, cellPx);
+        }
+    }
+}
+
+function drawGhostSprite(ox, oy, cellPx, scared) {
+    var frame = Math.floor(time * 8) % 2;
+    var pal = {
+        1: scared ? '#6060ff' : 'rgba(255,50,50,0.92)',
+        2: '#fff',
+        3: '#00c'
+    };
+    drawSprite(GHOST_FRAMES[frame], ox, oy, cellPx, pal);
+}
+
+function drawBeam(x1, y1, x2, y2, bpx) {
+    var dx = x2-x1, dy = y2-y1;
+    var len = Math.sqrt(dx*dx + dy*dy);
+    if (len < 1) return;
+    var steps = Math.floor(len / bpx);
+    var nx = -dy/len, ny = dx/len;
+    for (var i = 0; i <= steps; i++) {
+        var t = i/steps;
+        var w1 = Math.sin(t*12 - time*10) * bpx * 1.2;
+        var w2 = Math.sin(t*12 - time*10 + Math.PI*0.6) * bpx * 1.2;
+        gc.fillStyle = '#ff4500';
+        gc.fillRect(Math.round((x1+dx*t+nx*w1)/bpx)*bpx, Math.round((y1+dy*t+ny*w1)/bpx)*bpx, bpx, bpx);
+        gc.fillStyle = '#ffaa00';
+        gc.fillRect(Math.round((x1+dx*t+nx*w2)/bpx)*bpx, Math.round((y1+dy*t+ny*w2)/bpx)*bpx, bpx, bpx);
+    }
+}
+
+function drawPacMan(x, y, size, facingLeft, mouthAngle, spinning) {
+    var cx = x + size/2, cy = y + size/2, r = size/2;
+    var dir = facingLeft ? Math.PI : 0;
+    gc.save();
+    if (spinning) {
+        gc.translate(cx, cy);
+        gc.rotate(spinning);
+        gc.translate(-cx, -cy);
+    } else {
+        var packW = size*0.45, packH = size*0.6;
+        var packX = facingLeft ? cx+r+2 : cx-r-packW-2;
+        var packY = cy - packH*0.5;
+        gc.fillStyle = '#555';
+        gc.fillRect(packX, packY, packW, packH);
+        gc.fillStyle = '#333';
+        gc.fillRect(packX+packW*0.1, packY+packH*0.08, packW*0.8, packH*0.22);
+        gc.fillStyle = '#0ff';
+        gc.shadowColor = '#0ff'; gc.shadowBlur = 6;
+        gc.fillRect(packX+packW*0.15, packY+packH*0.42, packW*0.7, packH*0.18);
+        gc.shadowBlur = 0;
+        gc.fillStyle = '#f80';
+        gc.fillRect(packX+packW*0.15, packY+packH*0.68, packW*0.7, packH*0.12);
+        gc.fillStyle = '#888';
+        var nozzleW = size*0.35, nozzleH = size*0.1;
+        if (facingLeft) gc.fillRect(packX-nozzleW, packY+packH*0.05, nozzleW, nozzleH);
+        else            gc.fillRect(packX+packW,   packY+packH*0.05, nozzleW, nozzleH);
+    }
+    gc.fillStyle = '#ffe000';
+    gc.beginPath();
+    gc.moveTo(cx, cy);
+    gc.arc(cx, cy, r, dir+mouthAngle, dir+Math.PI*2-mouthAngle);
+    gc.closePath(); gc.fill();
+    gc.fillStyle = '#000';
+    gc.beginPath();
+    gc.arc(cx+(facingLeft?-r*0.25:r*0.25), cy-r*0.45, r*0.12, 0, Math.PI*2);
+    gc.fill();
+    gc.restore();
+}
+
+function drawDecor(S, p) {
+    var u = Math.min(p*2, 1);
+    gc.globalAlpha = u;
+    var wall = S*0.018, dotR = S*0.012, bigR = S*0.025;
+    gc.fillStyle = '#1a1aff';
+    gc.fillRect(S*0.05,  S*0.05,  S*0.9,  wall);
+    gc.fillRect(S*0.05,  S*0.92,  S*0.9,  wall);
+    gc.fillRect(S*0.05,  S*0.05,  wall,   S*0.87);
+    gc.fillRect(S*0.93,  S*0.05,  wall,   S*0.87);
+    gc.fillRect(S*0.35,  S*0.42,  S*0.30, wall);
+    gc.fillRect(S*0.35,  S*0.55,  S*0.30, wall);
+    gc.fillRect(S*0.35,  S*0.42,  wall,   S*0.13);
+    gc.fillRect(S*0.635, S*0.42,  wall,   S*0.13);
+    gc.fillRect(S*0.15,  S*0.18,  S*0.18, wall);
+    gc.fillRect(S*0.67,  S*0.18,  S*0.18, wall);
+    gc.fillRect(S*0.15,  S*0.75,  S*0.18, wall);
+    gc.fillRect(S*0.67,  S*0.75,  S*0.18, wall);
+    gc.fillRect(S*0.15,  S*0.18,  wall,   S*0.18);
+    gc.fillRect(S*0.15,  S*0.35,  S*0.10, wall);
+    gc.fillRect(S*0.75,  S*0.35,  S*0.10, wall);
+    gc.fillStyle = '#ffb8ae';
+    for (var i = 0; i < 11; i++) {
+        gc.beginPath();
+        gc.arc(S*0.1 + i*S*0.08, S*0.12, dotR, 0, Math.PI*2);
+        gc.fill();
+    }
+    gc.beginPath(); gc.arc(S*0.1, S*0.88, bigR, 0, Math.PI*2); gc.fill();
+    gc.beginPath(); gc.arc(S*0.9, S*0.88, bigR, 0, Math.PI*2); gc.fill();
+    gc.beginPath(); gc.arc(S*0.1, S*0.12, bigR, 0, Math.PI*2); gc.fill();
+    gc.beginPath(); gc.arc(S*0.9, S*0.12, bigR, 0, Math.PI*2); gc.fill();
+    gc.fillStyle = '#fff';
+    gc.font = 'bold ' + Math.floor(S*0.045) + 'px monospace';
+    gc.textAlign = 'center';
+    gc.fillText('GHOST BUSTED!', S/2, S*0.5);
+    gc.font = Math.floor(S*0.03) + 'px monospace';
+    gc.fillStyle = '#ff0';
+    gc.fillText('1UP   5000', S/2, S*0.5 + S*0.06);
+    gc.globalAlpha = 1;
+    gc.textAlign = 'left';
+}
+
+function drawScanlines(S) {
+    for (var sy = 0; sy < S; sy += 2) {
+        gc.fillStyle = 'rgba(0,0,0,0.45)';
+        gc.fillRect(0, sy, S, 1);
+    }
+}
+
+// ── Animation ─────────────────────────────────────────────────────────────────
+var ORDER = ['walk_in','place_trap','walk_back','aim','capture','celebrate'];
+var DUR   = { walk_in:120, place_trap:40, walk_back:80, aim:60, capture:100, celebrate:300 };
+var state = 'walk_in', stateT = 0, time = 0, lastTime = null;
+
+function drawScene(S) {
+    var p   = Math.min(stateT / DUR[state], 1);
+    var px  = Math.max(2, Math.floor(S/48));
+    var gpx = Math.max(1, Math.floor(S/72));
+
+    // Ghost physical size = old 12×10 footprint
+    var ghostW  = GHOST_COLS_OLD * px;
+    var ghostH  = GHOST_ROWS_OLD * px;
+    // Cell size for the new 16×16 sprite to fit in that footprint
+    var ghostPx = Math.max(1, Math.floor(ghostW / GHOST_FRAMES[0][0].length));
+
+    var floatY  = Math.sin(time * 3) * S * 0.008;
+    var ghostX  = Math.floor((S - ghostW) / 2);
+    var ghostY  = Math.floor(S * 0.35) + floatY;
+    var ghostCX = ghostX + ghostW/2;
+    var ghostCY = ghostY + ghostH/2;
+    var ghostBottomY = ghostY + ghostH;
+
+    var gbW    = Math.floor(S/9);
+    var gbH    = gbW;
+    var trapW  = TRAP[0].length * gpx;
+    var trapH  = TRAP.length * gpx;
+    var trapX  = ghostCX - trapW/2;
+    var trapY  = ghostBottomY + gpx*4;
+    var meetX1 = ghostCX - gbW*1.2 - trapW;
+    var meetX2 = ghostCX + trapW + gbW*0.2;
+    var meetY  = trapY + trapH;
+
+    var gb1X, gb2X, gb1Y, gb2Y;
+    var showTrap=false, trapOpen=false;
+    var showBeam1=false, showBeam2=false;
+    var scared=false, ghostVisible=true, ghostScale=1;
+    var spinning1=0, spinning2=0;
+    var mouth = Math.abs(Math.sin(stateT * 0.08)) * 0.35;
+
+    if (state === 'walk_in') {
+        gb1X = -gbW + (meetX1 + gbW) * p;
+        gb2X = S + (meetX2 - S) * p;
+        gb1Y = gb2Y = meetY;
+    } else if (state === 'place_trap') {
+        gb1X = meetX1; gb2X = meetX2; gb1Y = gb2Y = meetY;
+        showTrap = true; trapOpen = p > 0.5;
+    } else if (state === 'walk_back') {
+        gb1X = meetX1 - gpx*20*p;
+        gb2X = meetX2 + gpx*20*p;
+        gb1Y = gb2Y = meetY;
+        showTrap = true; trapOpen = true;
+    } else if (state === 'aim') {
+        gb1X = meetX1 - gpx*20; gb2X = meetX2 + gpx*20;
+        gb1Y = gb2Y = meetY;
+        showTrap = true; trapOpen = true;
+        scared = p > 0.3;
+        showBeam1 = p > 0.5; showBeam2 = p > 0.6;
+    } else if (state === 'capture') {
+        gb1X = meetX1 - gpx*20; gb2X = meetX2 + gpx*20;
+        gb1Y = gb2Y = meetY;
+        showTrap = true; trapOpen = true;
+        scared = true; showBeam1 = showBeam2 = true;
+        ghostScale = 1 - p*0.85;
+        ghostVisible = p < 0.95;
+    } else if (state === 'celebrate') {
+        gb1X = meetX1 - gpx*20; gb2X = meetX2 + gpx*20;
+        gb1Y = gb2Y = meetY;
+        showTrap = true; trapOpen = false;
+        ghostVisible = false;
+        spinning1 =  p * Math.PI * 2;
+        spinning2 = -p * Math.PI * 2;
+    }
+
+    // Trap
+    if (showTrap) drawSprite(trapOpen ? TRAP_OPEN : TRAP, trapX, trapY, gpx, null);
+
+    // Electric arc on place_trap
+    if (state === 'place_trap' && trapOpen) {
+        var burst = (p - 0.5) / 0.5;
+        var tcx = trapX + trapW/2, tcy = trapY + trapH/2;
+        for (var ai = 0; ai < 6; ai++) {
+            var baseAngle = (ai / 6) * Math.PI * 2;
+            var arcLen = S * 0.07 * burst;
+            gc.strokeStyle = ai % 2 === 0
+                ? 'rgba(180,80,255,' + (1 - burst*0.7) + ')'
+                : 'rgba(255,255,255,' + (1 - burst*0.7) + ')';
+            gc.lineWidth = Math.max(1, gpx * 0.8);
+            gc.beginPath();
+            gc.moveTo(tcx, tcy);
+            for (var si = 1; si <= 8; si++) {
+                var tt = si / 8;
+                var jitter = (Math.random() - 0.5) * S * 0.03 * (1 - tt);
+                var nx2 = -Math.sin(baseAngle), ny2 = Math.cos(baseAngle);
+                gc.lineTo(
+                    tcx + Math.cos(baseAngle)*arcLen*tt + nx2*jitter,
+                    tcy + Math.sin(baseAngle)*arcLen*tt + ny2*jitter
+                );
+            }
+            gc.stroke();
+        }
+        var grd = gc.createRadialGradient(tcx, tcy, 0, tcx, tcy, S*0.05*burst);
+        grd.addColorStop(0, 'rgba(200,100,255,' + (0.9*(1-burst)) + ')');
+        grd.addColorStop(1, 'rgba(100,0,200,0)');
+        gc.fillStyle = grd;
+        gc.beginPath();
+        gc.arc(tcx, tcy, S*0.05*burst, 0, Math.PI*2);
+        gc.fill();
+    }
+
+    // Ghost
+    if (ghostVisible) {
+        var capP = state === 'capture' ? p : 0;
+        var drawGhostY = ghostY + (trapY - ghostH*0.5 - ghostY) * capP;
+        gc.save();
+        var gcx = ghostX + ghostW/2;
+        var gcy = drawGhostY + ghostH/2;
+        gc.translate(gcx, gcy);
+        gc.scale(ghostScale, ghostScale);
+        gc.translate(-gcx, -gcy);
+        drawGhostSprite(ghostX, drawGhostY, ghostPx, scared);
+        gc.restore();
+    }
+
+    // Pac-Man
+    drawPacMan(gb1X, gb1Y, gbW, false, mouth, spinning1);
+    drawPacMan(gb2X, gb2Y, gbW, true,  mouth, spinning2);
+
+    // Beams
+    var pr    = gbW/2;
+    var nTipY = gb1Y + gbH*0.28;
+    var p1tx  = gb1X + gbW/2 - pr - 2;
+    var p2tx  = gb2X + gbW/2 + pr + 2;
+    var beamTargX = ghostCX + (trapX + trapW/2 - ghostCX) * (state === 'capture' ? p : 0);
+    var beamTargY = ghostCY + (trapY - ghostCY) * (state === 'capture' ? p : 0);
+    if (showBeam1) drawBeam(p1tx, nTipY, beamTargX, beamTargY, Math.max(2, gpx));
+    if (showBeam2) drawBeam(p2tx, nTipY, beamTargX, beamTargY, Math.max(2, gpx));
+
+    // Vintage flash
+    var flashP = 0;
+    if (state === 'celebrate' && p < 0.1) flashP = 1 - p / 0.1;
+    if (flashP > 0) {
+        gc.fillStyle = 'rgba(255,255,255,' + (flashP * 0.85) + ')';
+        gc.fillRect(0, 0, S, S);
+        if (flashP > 0.5) {
+            var squeeze = (flashP - 0.5) / 0.5;
+            var lineH = Math.max(1, Math.floor(S * (1 - squeeze) * 0.5));
+            gc.fillStyle = '#000';
+            gc.fillRect(0, 0, S, S/2 - lineH);
+            gc.fillRect(0, S/2 + lineH, S, S);
+        }
+    }
+
+    // Decor
+    if (state === 'celebrate') drawDecor(S, p);
+
+    // Scanlines last
+    drawScanlines(S);
+}
+
+function loop(now) {
+    if (!lastTime) lastTime = now;
+    var dt = Math.min((now - lastTime) / 1000, 0.05);
+    lastTime = now;
+    var S = wc.width;
+    if (state !== 'celebrate') {
+        gl.uniform1f(uT, time);
+        gl.uniform2f(uR, S, S);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    } else {
+        gl.clearColor(0, 0, 0, 1);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+    }
+    time += dt;
+    gc.clearRect(0, 0, S, S);
+    drawScene(S);
+    stateT += dt * 60;
+    if (stateT >= DUR[state]) {
+        stateT = 0;
+        state = ORDER[(ORDER.indexOf(state) + 1) % ORDER.length];
+    }
+    requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

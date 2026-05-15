@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #222; display: flex; justify-content: center; align-items: center; height: 100vh; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const c = document.getElementById('c');
+const ctx = c.getContext('2d');
+const S = Math.min(window.innerWidth, window.innerHeight) - 20;
+c.width = c.height = S;
+const W = S;
+
+const WORDS = [
+  'dubnobasswithmyheadman','underworld','born slippy','mmm skyscraper i love you',
+  'dirty','epic','cowgirl','river of bass','m.e.','tongue','spikee',
+  'dark & long','rez','texture','rhythm','noise','bass','head','man','dub',
+  'karl hyde','rick smith','tomato','1994','techno','groove','london',
+  'warehouse','sweat','chemical','system','loop','wire','signal','wave',
+  'frequency','skin','motor','feed','deep','raw','submerge','flood',
+  'surge','machine','ghost','static','heat','drift','pulse','analogue',
+  'born slippy .NUXX','dark & long (dark train)','junior boys own',
+];
+
+function rnd(a,b){return a+Math.random()*(b-a);}
+function ri(a,b){return Math.floor(rnd(a,b));}
+function pick(arr){return arr[ri(0,arr.length)];}
+
+function makeOff(){
+  const oc=document.createElement('canvas');
+  oc.width=oc.height=S;
+  return oc.getContext('2d');
+}
+
+function renderDenseZone(o) {
+  const nb = ri(1, 3);
+  for (let b = 0; b < nb; b++) {
+    const cx = rnd(W*0.05, W*0.7);
+    const cy = rnd(W*0.05, W*0.7);
+    const sz = rnd(6, 13);
+    const lines = ri(6, 18);
+    const font = Math.random() < 0.5 ? 'monospace' : 'sans-serif';
+    o.fillStyle = '#000';
+    o.globalAlpha = 1;
+    for (let l = 0; l < lines; l++) {
+      const y = cy + l * sz * rnd(0.7, 0.9);
+      const targetW = rnd(W*0.12, W*0.45);
+      let line = '';
+      o.font = `bold ${sz}px ${font}`;
+      while (o.measureText(line).width < targetW) {
+        line += pick(WORDS).replace(/ /g,'');
+      }
+      const chars = line.split('');
+      const spacing = targetW / chars.length;
+      for (let i = 0; i < chars.length; i++) {
+        o.fillText(chars[i], cx + i * spacing, y);
+      }
+    }
+  }
+}
+
+function renderText(o) {
+  o.clearRect(0, 0, W, W);
+  const sz = rnd(7, 22);
+  const font = Math.random() < 0.5 ? 'monospace' : 'sans-serif';
+  const angle = Math.random() < 0.25 ? Math.PI/2 : rnd(-0.06, 0.06);
+  o.save();
+  o.translate(W/2, W/2);
+  o.rotate(angle);
+  o.translate(-W/2, -W/2);
+  let y = rnd(-sz*2, sz*2);
+  while (y < W + sz*3) {
+    let x = rnd(-sz*6, 0);
+    const lineH = sz * rnd(0.9, 1.3);
+    while (x < W + sz*6) {
+      const word = pick(WORDS);
+      o.font = `${Math.random()<0.35?'bold ':''}${rnd(7,22)}px ${font}`;
+      o.fillStyle = '#0a0a0a';
+      o.globalAlpha = 1;
+      o.fillText(word, x, y);
+      x += o.measureText(word).width + sz * rnd(0.5, 2);
+    }
+    y += lineH;
+  }
+  o.restore();
+}
+
+function renderBlocks(o) {
+  o.clearRect(0, 0, W, W);
+  const nb = ri(2, 5);
+  for (let b = 0; b < nb; b++) {
+    const bx = rnd(0, W*0.75), by = rnd(0, W*0.75);
+    const bw = rnd(W*0.15, W*0.5), bh = rnd(W*0.08, W*0.25);
+    const sz = rnd(8, 18);
+    o.fillStyle = '#080808';
+    o.globalAlpha = 1;
+    for (let ly = by; ly < by+bh+sz; ly += sz*rnd(0.55,0.75)) {
+      for (let lx = bx; lx < bx+bw+sz*2; lx += sz*rnd(0.55,0.8)) {
+        o.font = `bold ${sz}px monospace`;
+        o.fillText(pick(WORDS).charAt(ri(0,6)), lx, ly);
+      }
+    }
+  }
+  renderDenseZone(o);
+}
+
+let circlePhase = 0;
+function renderCircles(o) {
+  o.clearRect(0, 0, W, W);
+  const nb = ri(3, 6);
+  for (let ci = 0; ci < nb; ci++) {
+    const cx = rnd(W*0.1, W*0.9);
+    const cy = rnd(W*0.1, W*0.9);
+    const r  = rnd(W*0.04, W*0.28);
+    const sz = rnd(7, 16);
+    const word = (pick(WORDS)+' '+pick(WORDS)+' ').toUpperCase();
+    const rings = ri(1, 5);
+    for (let ring = 0; ring < rings; ring++) {
+      const rr = r + ring * sz * rnd(0.9, 1.6);
+      const type = Math.random();
+      if (type < 0.35) {
+        const charCount = Math.floor((2*Math.PI*rr)/(sz*0.58));
+        o.font = `${Math.random()<0.6?'bold ':''}${sz}px monospace`;
+        o.fillStyle = '#080808';
+        o.globalAlpha = 1;
+        for (let i = 0; i < charCount; i++) {
+          const angle = (i/charCount)*Math.PI*2 + circlePhase;
+          o.save();
+          o.translate(cx, cy);
+          o.rotate(angle - Math.PI/2);
+          o.fillText(word[i % word.length], 0, -rr);
+          o.restore();
+        }
+      } else if (type < 0.55) {
+        const startA = rnd(0, Math.PI*2);
+        const endA = startA + rnd(Math.PI*0.3, Math.PI*2);
+        o.beginPath();
+        o.arc(cx, cy, rr, startA, endA);
+        o.strokeStyle = '#080808';
+        o.lineWidth = rnd(0.5, 3);
+        o.globalAlpha = rnd(0.5, 1);
+        o.stroke();
+      } else if (type < 0.72) {
+        const startA = rnd(0, Math.PI*2);
+        const span = rnd(Math.PI*0.3, Math.PI*1.5);
+        const charCount = Math.floor((span * rr) / (sz * 0.58));
+        o.font = `${Math.random()<0.6?'bold ':''}${sz}px monospace`;
+        o.fillStyle = '#000';
+        o.globalAlpha = 1;
+        for (let i = 0; i < charCount; i++) {
+          const angle = startA + (i/charCount)*span + circlePhase;
+          o.save();
+          o.translate(cx, cy);
+          o.rotate(angle - Math.PI/2);
+          o.fillText(word[i % word.length], 0, -rr);
+          o.restore();
+        }
+      } else {
+        const startA = rnd(0, Math.PI*2);
+        const span = rnd(Math.PI*0.2, Math.PI*0.9);
+        const charCount = Math.floor((span * rr) / (sz * 0.3));
+        o.font = `bold ${sz}px monospace`;
+        o.fillStyle = '#000';
+        o.globalAlpha = 1;
+        for (let i = 0; i < charCount; i++) {
+          const angle = startA + (i/charCount)*span + circlePhase;
+          o.save();
+          o.translate(cx, cy);
+          o.rotate(angle - Math.PI/2);
+          for (let d = -sz*0.5; d < sz*0.5; d += sz*0.25) {
+            o.fillText(word[i % word.length], 0, -rr + d);
+          }
+          o.restore();
+        }
+      }
+    }
+  }
+  o.globalAlpha = 1;
+}
+
+function renderScribbles(o) {
+  o.clearRect(0, 0, W, W);
+  const nb = ri(4, 9);
+  for (let s = 0; s < nb; s++) {
+    const isWhite = Math.random() < 0.35;
+    o.strokeStyle = isWhite ? '#fff' : '#000';
+    o.fillStyle   = isWhite ? '#fff' : '#000';
+    o.lineWidth   = rnd(0.5, 4);
+    o.globalAlpha = rnd(0.5, 1);
+    o.lineCap  = 'round';
+    o.lineJoin = 'round';
+    const type = Math.random();
+    const sx = rnd(0, W), sy = rnd(0, W);
+    if (type < 0.3) {
+      o.beginPath();
+      o.moveTo(sx, sy);
+      const steps = ri(6, 20);
+      for (let i = 0; i < steps; i++) {
+        const cpx = sx + rnd(-W*0.3, W*0.3);
+        const cpy = sy + rnd(-W*0.3, W*0.3);
+        const ex  = sx + rnd(-W*0.35, W*0.35);
+        const ey  = sy + rnd(-W*0.35, W*0.35);
+        o.quadraticCurveTo(cpx, cpy, ex, ey);
+      }
+      o.stroke();
+    } else if (type < 0.55) {
+      const hx = rnd(0, W*0.7), hy = rnd(0, W*0.7);
+      const hw = rnd(W*0.05, W*0.3), hh = rnd(W*0.05, W*0.2);
+      const gap = rnd(2, 8);
+      o.beginPath();
+      let toggle = false;
+      for (let yl = hy; yl < hy+hh; yl += gap) {
+        o.moveTo(toggle ? hx+hw : hx, yl);
+        o.lineTo(toggle ? hx : hx+hw, yl + gap*rnd(0.3,0.7));
+        toggle = !toggle;
+      }
+      o.stroke();
+    } else if (type < 0.72) {
+      o.beginPath();
+      const maxR = rnd(W*0.03, W*0.18);
+      const turns = rnd(1.5, 5);
+      const steps = ri(60, 180);
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        const angle = t * turns * Math.PI * 2;
+        const r = t * maxR;
+        const px = sx + Math.cos(angle) * r;
+        const py = sy + Math.sin(angle) * r;
+        i === 0 ? o.moveTo(px, py) : o.lineTo(px, py);
+      }
+      o.stroke();
+    } else if (type < 0.86) {
+      o.beginPath();
+      o.moveTo(sx, sy);
+      const pts = ri(4, 12);
+      for (let i = 0; i < pts; i++) {
+        o.lineTo(sx + rnd(-W*0.4, W*0.4), sy + rnd(-W*0.4, W*0.4));
+      }
+      o.stroke();
+    } else {
+      o.beginPath();
+      const bpts = ri(5, 10);
+      const br = rnd(W*0.01, W*0.06);
+      for (let i = 0; i <= bpts; i++) {
+        const angle = (i / bpts) * Math.PI * 2;
+        const r = br * rnd(0.5, 1.4);
+        const px = sx + Math.cos(angle) * r;
+        const py = sy + Math.sin(angle) * r;
+        i === 0 ? o.moveTo(px, py) : o.lineTo(px, py);
+      }
+      o.closePath();
+      o.fill();
+    }
+  }
+  o.globalAlpha = 1;
+}
+
+const state = {
+  text:      { cur: makeOff(), prev: makeOff(), alpha: 0, blending: false },
+  blocks:    { cur: makeOff(), prev: makeOff(), alpha: 0, blending: false },
+  circles:   { cur: makeOff(), prev: makeOff(), alpha: 0, blending: false },
+  scribbles: { cur: makeOff(), prev: makeOff(), alpha: 0, blending: false },
+};
+
+function startBlend(key, renderFn) {
+  const s = state[key];
+  if (s.blending) return;
+  s.prev.clearRect(0,0,W,W);
+  s.prev.drawImage(s.cur.canvas, 0, 0);
+  renderFn(s.cur);
+  s.alpha = 0;
+  s.blending = true;
+}
+
+function composite() {
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, W, W);
+  for (const key of ['text','blocks','circles','scribbles']) {
+    const s = state[key];
+    if (s.blending) {
+      ctx.globalAlpha = 1 - s.alpha;
+      ctx.drawImage(s.prev.canvas, 0, 0);
+      ctx.globalAlpha = s.alpha;
+      ctx.drawImage(s.cur.canvas, 0, 0);
+      s.alpha = Math.min(1, s.alpha + 0.012);
+      if (s.alpha >= 1) s.blending = false;
+    } else {
+      ctx.globalAlpha = 1;
+      ctx.drawImage(s.cur.canvas, 0, 0);
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+renderText(state.text.cur);
+renderBlocks(state.blocks.cur);
+renderCircles(state.circles.cur);
+renderScribbles(state.scribbles.cur);
+
+let frame = 0;
+function loop() {
+  frame++;
+  if (frame % 20 === 0) startBlend('text',      renderText);
+  if (frame % 40 === 0) startBlend('blocks',    renderBlocks);
+  if (frame % 5  === 0) { circlePhase += 0.015; startBlend('circles', renderCircles); }
+  if (frame % 55 === 0) startBlend('scribbles', renderScribbles);
+  composite();
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>

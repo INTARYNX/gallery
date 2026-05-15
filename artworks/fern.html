@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fern</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #000;
+        }
+        canvas {
+            display: block;
+            position: absolute;
+        }
+        #background { z-index: 1; }
+        #transition { z-index: 2; pointer-events: none; }
+        #foreground { z-index: 3; }
+    </style>
+</head>
+<body>
+    <canvas id="background"></canvas>
+    <canvas id="transition"></canvas>
+    <canvas id="foreground"></canvas>
+    <script>
+        const bgCanvas = document.getElementById('background');
+        const bgCtx = bgCanvas.getContext('2d');
+        const transCanvas = document.getElementById('transition');
+        const transCtx = transCanvas.getContext('2d');
+        const fgCanvas = document.getElementById('foreground');
+        const fgCtx = fgCanvas.getContext('2d');
+        
+        fgCtx.lineCap = 'round';
+        fgCtx.lineJoin = 'round';
+        
+        bgCanvas.width = transCanvas.width = fgCanvas.width = window.innerWidth;
+        bgCanvas.height = transCanvas.height = fgCanvas.height = window.innerHeight;
+        
+        fgCtx.imageSmoothingEnabled = false;
+        
+        // Canvas offscreen pour pré-rendu du fond
+        const offscreenBg = document.createElement('canvas');
+        offscreenBg.width = bgCanvas.width;
+        offscreenBg.height = bgCanvas.height;
+        const offscreenBgCtx = offscreenBg.getContext('2d');
+        
+        // Initialiser l'offscreen avec du noir pour éviter l'erreur "empty canvas"
+        offscreenBgCtx.fillStyle = '#000';
+        offscreenBgCtx.fillRect(0, 0, offscreenBg.width, offscreenBg.height);
+        
+        let time = 0;
+        let isLoading = true;
+        let baseColorOffset = 0;
+        let segmentsDrawn = 0;
+        let totalSegments = 0;
+        let isRegenerating = false;
+        let segmentsToDraw = [];
+        
+        let isTransitioning = false;
+        let transitionTime = 0;
+        let pixelGrid = [];
+        let pixelIndex = 0;
+        const PIXEL_SIZE = 30;
+        const TRANSITION_DURATION = 3.5;
+        const PIXELS_PER_FRAME = 80;
+        
+        const segmentPool = [];
+        function getSegment(x1, y1, x2, y2, alpha, lineWidth, isStem = false) {
+            const seg = segmentPool.pop() || {};
+            seg.x1 = x1; seg.y1 = y1; seg.x2 = x2; seg.y2 = y2;
+            seg.alpha = alpha; seg.lineWidth = lineWidth; seg.isStem = isStem;
+            seg.isTriangle = false;
+            return seg;
+        }
+        
+        function addSharpTip(x, y, angle, width, segments) {
+            const length = width * 12;
+            const baseWidth = width * 0.25;
+            const leftAngle = angle + Math.PI / 2;
+            const rightAngle = angle - Math.PI / 2;
+            const tipX = x + Math.cos(angle) * length;
+            const tipY = y + Math.sin(angle) * length;
+            const baseLeftX = x + Math.cos(leftAngle) * baseWidth;
+            const baseLeftY = y + Math.sin(leftAngle) * baseWidth;
+            const baseRightX = x + Math.cos(rightAngle) * baseWidth;
+            const baseRightY = y + Math.sin(rightAngle) * baseWidth;
+
+            segments.push({
+                isTriangle: true,
+                x1: baseLeftX, y1: baseLeftY,
+                x2: baseRightX, y2: baseRightY,
+                x3: tipX, y3: tipY,
+                alpha: 0.85
+            });
+        }
+        
+        function calculateBarnsleyFern(segments, cx, cy, scale, iterations, rotation, flipX) {
+            let x = 0;
+            let y = 0;
+            
+            const cosR = Math.cos(rotation);
+            const sinR = Math.sin(rotation);
+            
+            for (let i = 0; i < iterations; i++) {
+                let nextX, nextY;
+                const r = Math.random();
+                
+                if (r < 0.01) {
+                    // Tige
+                    nextX = 0;
+                    nextY = 0.16 * y;
+                } else if (r < 0.86) {
+                    // Folioles principales
+                    nextX = 0.85 * x + 0.04 * y;
+                    nextY = -0.04 * x + 0.85 * y + 1.6;
+                } else if (r < 0.93) {
+                    // Foliole gauche
+                    nextX = 0.2 * x - 0.26 * y;
+                    nextY = 0.23 * x + 0.22 * y + 1.6;
+                } else {
+                    // Foliole droite
+                    nextX = -0.15 * x + 0.28 * y;
+                    nextY = 0.26 * x + 0.24 * y + 0.44;
+                }
+                
+                x = nextX;
+                y = nextY;
+                
+                // Créer un point pour chaque itération
+                if (i > 50) {
+                    // Appliquer rotation et flip
+                    let rotX = x * flipX;
+                    let rotY = y;
+                    let finalX = rotX * cosR - rotY * sinR;
+                    let finalY = rotX * sinR + rotY * cosR;
+                    
+                    const screenX = cx + finalX * scale;
+                    const screenY = cy - finalY * scale;
+                    const brightness = Math.min(1, 0.3 + i / (iterations * 2));
+                    
+                    segments.push({
+                        isPoint: true,
+                        x: screenX,
+                        y: screenY,
+                        alpha: brightness * 0.6,
+                        size: 1.5
+                    });
+                }
+            }
+        }
+        
+        function regenerateFern() {
+            fgCtx.setTransform(1, 0, 0, 1, 0, 0);
+            fgCtx.clearRect(0, 0, fgCanvas.width, fgCanvas.height);
+            
+            segmentPool.push(...segmentsToDraw);
+            segmentsToDraw = [];
+            
+            // Position aléatoire plus variée
+            const cx = fgCanvas.width * (0.2 + Math.random() * 0.6);
+            const cy = fgCanvas.height * (0.6 + Math.random() * 0.3);
+            
+            // Taille très variée
+            const scale = 25 + Math.random() * 60;
+            
+            // Nombre d'itérations varié
+            const iterations = 60000 + Math.floor(Math.random() * 60000);
+            
+            // Rotation aléatoire (-30° à +30°)
+            const rotation = (Math.random() - 0.5) * Math.PI / 3;
+            
+            // Flip horizontal aléatoire
+            const flipX = Math.random() > 0.5 ? 1 : -1;
+            
+            calculateBarnsleyFern(segmentsToDraw, cx, cy, scale, iterations, rotation, flipX);
+            
+            totalSegments = segmentsToDraw.length;
+            segmentsDrawn = 0;
+        }
+        
+        function project3D(x, y, z, perspective = 200) {
+            const scale = perspective / (perspective + z);
+            return { x: x * scale, y: y * scale, scale: scale };
+        }
+        
+        function drawTwistedColumn(ctx, col, timeValue) {
+            const segments = 40, sides = 12;
+            const hw = bgCanvas.width / 2, hh = bgCanvas.height / 2;
+            ctx.shadowBlur = 20;
+            
+            for (let i = 0; i < segments; i++) {
+                const y1 = (i / segments) * col.height - col.height / 2;
+                const y2 = ((i + 1) / segments) * col.height - col.height / 2;
+                const twist1 = timeValue * col.twistSpeed + (i / segments) * Math.PI * 4;
+                const twist2 = timeValue * col.twistSpeed + ((i + 1) / segments) * Math.PI * 4;
+                const radiusVar1 = col.baseRadius * (1 + Math.sin(timeValue * col.sinSpeed + col.sinPhase + i * 0.3) * 0.3);
+                const radiusVar2 = col.baseRadius * (1 + Math.sin(timeValue * col.sinSpeed + col.sinPhase + (i + 1) * 0.3) * 0.3);
+                for (let j = 0; j < sides; j++) {
+                    const angle1 = (j / sides) * Math.PI * 2 + twist1;
+                    const angle2 = ((j + 1) / sides) * Math.PI * 2 + twist1;
+                    const angle3 = (j / sides) * Math.PI * 2 + twist2;
+                    const p1 = project3D(col.x + Math.cos(angle1) * radiusVar1, y1, col.z + Math.sin(angle1) * radiusVar1);
+                    const p2 = project3D(col.x + Math.cos(angle2) * radiusVar1, y1, col.z + Math.sin(angle2) * radiusVar1);
+                    const p3 = project3D(col.x + Math.cos(angle3) * radiusVar2, y2, col.z + Math.sin(angle3) * radiusVar2);
+                    const hue = col.colorOffset + (i / segments) * 180;
+                    const brightness = 50 + p1.scale * 80 + Math.sin(timeValue * 2 + i * 0.2) * 30;
+                    const lineWidth = (1 + Math.sin(timeValue * col.sinSpeed * 0.7 + col.sinPhase + i * 0.5) * 0.5) * 2 * p1.scale;
+                    ctx.strokeStyle = `hsl(${hue}, 100%, ${brightness}%)`;
+                    ctx.shadowColor = ctx.strokeStyle;
+                    ctx.lineWidth = lineWidth;
+                    ctx.beginPath();
+                    ctx.moveTo(hw + p1.x, hh + p1.y);
+                    ctx.lineTo(hw + p2.x, hh + p2.y);
+                    ctx.stroke();
+                    ctx.beginPath();
+                    ctx.moveTo(hw + p1.x, hh + p1.y);
+                    ctx.lineTo(hw + p3.x, hh + p3.y);
+                    ctx.stroke();
+                }
+            }
+        }
+        
+        function generateSlide(ctx, colorOffset, timeValue) {
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, bgCanvas.width, bgCanvas.height);
+            const numColumns = 4 + Math.floor(Math.random() * 4);
+            for (let i = 0; i < numColumns; i++) {
+                drawTwistedColumn(ctx, {
+                    x: 0, z: 0, baseRadius: 50 + i * 25, height: 600,
+                    twistSpeed: 0.3 + i * 0.3, colorOffset: colorOffset,
+                    sinSpeed: 1.5 + i * 0.4, sinPhase: i * Math.PI / 3
+                }, timeValue);
+            }
+        }
+        
+        function initPixelGrid() {
+            pixelGrid = [];
+            pixelIndex = 0;
+            const cols = Math.ceil(bgCanvas.width / PIXEL_SIZE);
+            const rows = Math.ceil(bgCanvas.height / PIXEL_SIZE);
+            for (let y = 0; y < rows; y++) {
+                for (let x = 0; x < cols; x++) {
+                    pixelGrid.push({ 
+                        x: x * PIXEL_SIZE, 
+                        y: y * PIXEL_SIZE
+                    });
+                }
+            }
+            for (let i = pixelGrid.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [pixelGrid[i], pixelGrid[j]] = [pixelGrid[j], pixelGrid[i]];
+            }
+        }
+        
+        function startTransition() {
+            if (isTransitioning) return;
+            
+            // Copier l'ancien fond sur le canvas de transition
+            transCtx.drawImage(offscreenBg, 0, 0);
+            
+            // Générer le nouveau fond sur l'offscreen
+            const newColorOffset = (baseColorOffset + 120 + Math.random() * 120) % 360;
+            const randomTime = Math.random() * 100;
+            generateSlide(offscreenBgCtx, newColorOffset, randomTime);
+            
+            // Copier immédiatement le nouveau fond sur bgCanvas (sous la transition)
+            bgCtx.drawImage(offscreenBg, 0, 0);
+            
+            initPixelGrid();
+            isTransitioning = true;
+            baseColorOffset = newColorOffset;
+        }
+        
+        function updateTransition(deltaTime) {
+            if (!isTransitioning) return;
+            
+            // Révéler N pixels par frame au lieu de tous
+            for (let i = 0; i < PIXELS_PER_FRAME; i++) {
+                if (pixelIndex >= pixelGrid.length) break;
+                const pixel = pixelGrid[pixelIndex];
+                transCtx.clearRect(pixel.x, pixel.y, PIXEL_SIZE, PIXEL_SIZE);
+                pixelIndex++;
+            }
+            
+            if (pixelIndex >= pixelGrid.length) {
+                transCtx.clearRect(0, 0, transCanvas.width, transCanvas.height);
+                isTransitioning = false;
+            }
+        }
+        
+        function initialLoad() {
+            isLoading = true;
+            bgCtx.fillStyle = '#000';
+            bgCtx.fillRect(0, 0, bgCanvas.width, bgCanvas.height);
+            
+            // Message artistique
+            bgCtx.fillStyle = '#0f8';
+            bgCtx.font = '60px Arial';
+            bgCtx.textAlign = 'center';
+            bgCtx.fillText('F E R N', bgCanvas.width / 2, bgCanvas.height / 2 - 20);
+            
+            bgCtx.font = '20px Arial';
+            bgCtx.fillStyle = '#0f84';
+            bgCtx.fillText('i n t a r y n x   2 0 2 5', bgCanvas.width / 2, bgCanvas.height / 2 + 30);
+            
+            setTimeout(() => {
+                baseColorOffset = Math.random() * 360;
+                // Générer sur l'offscreen
+                generateSlide(offscreenBgCtx, baseColorOffset, Math.random() * 100);
+                // Copier sur le canvas principal
+                bgCtx.drawImage(offscreenBg, 0, 0);
+                isLoading = false;
+                regenerateFern();
+            }, 50);
+        }
+        
+        function drawLines() {
+            fgCtx.globalCompositeOperation = 'lighter';
+            const batchSize = Math.min(500, totalSegments - segmentsDrawn);
+            for (let i = segmentsDrawn; i < segmentsDrawn + batchSize; i++) {
+                const seg = segmentsToDraw[i];
+                if (seg.isPoint) {
+                    fgCtx.fillStyle = `hsla(${baseColorOffset}, 80%, 50%, ${seg.alpha})`;
+                    fgCtx.fillRect(seg.x, seg.y, seg.size, seg.size);
+                }
+            }
+            segmentsDrawn += batchSize;
+            fgCtx.globalCompositeOperation = 'source-over';
+        }
+        
+        function drawTriangles() {
+            // Pas de triangles pour Barnsley
+        }
+        
+        function drawFractals() {
+            if (isLoading) return;
+            if (segmentsToDraw.length === 0) regenerateFern();
+            
+            // Toujours afficher le fond pré-rendu (sauf pendant la transition)
+            if (!isTransitioning) {
+                bgCtx.drawImage(offscreenBg, 0, 0);
+            }
+            
+            if (segmentsDrawn < totalSegments) {
+                drawLines();
+            }
+            
+            if (segmentsDrawn >= totalSegments && !isRegenerating) {
+                isRegenerating = true;
+                setTimeout(() => {
+                    startTransition();
+                    regenerateFern();
+                    isRegenerating = false;
+                }, 2000);
+            }
+            
+            time += 0.012;
+        }
+        
+        let lastTime = performance.now();
+        function animate() {
+            const currentTime = performance.now();
+            const deltaTime = (currentTime - lastTime) / 1000;
+            lastTime = currentTime;
+            drawFractals();
+            updateTransition(deltaTime);
+            requestAnimationFrame(animate);
+        }
+        
+        initialLoad();
+        animate();
+        
+        window.addEventListener('resize', () => {
+            bgCanvas.width = transCanvas.width = fgCanvas.width = window.innerWidth;
+            bgCanvas.height = transCanvas.height = fgCanvas.height = window.innerHeight;
+            offscreenBg.width = bgCanvas.width;
+            offscreenBg.height = bgCanvas.height;
+            initialLoad();
+        });
+    </script>
+</body>
+</html>

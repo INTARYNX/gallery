@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Butterfly</title>
+    <style>
+        body {
+            margin: 0;
+            background: #0a0a0a;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        canvas {
+            display: block;
+            width: 90vmin;
+            height: 90vmin;
+            max-width: 800px;
+            max-height: 800px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const size = 800;
+        canvas.width = size;
+        canvas.height = size;
+
+        const PHI = (1 + Math.sqrt(5)) / 2;
+        const fibonacci = [1, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144];
+
+        function drawWing(isLeft, animTime, eyeCfg, colorTheme) {
+            const centerX = size / 2;
+            const centerY = size / 2;
+            const sign = isLeft ? -1 : 1;
+            
+            ctx.beginPath();
+            ctx.moveTo(centerX, centerY);
+            
+            ctx.bezierCurveTo(
+                centerX + sign * 100, centerY - 200,
+                centerX + sign * 250, centerY - 250,
+                centerX + sign * 300, centerY - 180
+            );
+            ctx.bezierCurveTo(
+                centerX + sign * 320, centerY - 100,
+                centerX + sign * 280, centerY - 20,
+                centerX + sign * 200, centerY + 20
+            );
+            
+            ctx.bezierCurveTo(
+                centerX + sign * 240, centerY + 80,
+                centerX + sign * 220, centerY + 180,
+                centerX + sign * 150, centerY + 200
+            );
+            ctx.bezierCurveTo(
+                centerX + sign * 80, centerY + 180,
+                centerX + sign * 40, centerY + 100,
+                centerX, centerY
+            );
+            ctx.closePath();
+            
+            ctx.save();
+            ctx.clip();
+            
+            const gradientAngle = animTime * 0.3;
+            const gx1 = centerX + Math.cos(gradientAngle) * 200;
+            const gy1 = centerY + Math.sin(gradientAngle) * 200;
+            
+            const gradient = ctx.createRadialGradient(gx1, gy1, 0, centerX, centerY, 350);
+            const hueBase = colorTheme.base + Math.sin(animTime * 0.5) * 30;
+            gradient.addColorStop(0, `hsl(${hueBase + 20}, 100%, 80%)`);
+            gradient.addColorStop(0.3, `hsl(${hueBase}, 100%, 70%)`);
+            gradient.addColorStop(0.6, `hsl(${hueBase - 20}, 90%, 55%)`);
+            gradient.addColorStop(1, `hsl(${hueBase - 40}, 75%, 25%)`);
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, size, size);
+            
+            const darkenGradient = ctx.createRadialGradient(
+                centerX, centerY, 0,
+                centerX, centerY, 200
+            );
+            darkenGradient.addColorStop(0, 'rgba(0, 0, 0, 0.7)');
+            darkenGradient.addColorStop(0.5, 'rgba(0, 0, 0, 0.3)');
+            darkenGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            ctx.fillStyle = darkenGradient;
+            ctx.fillRect(0, 0, size, size);
+            
+            const highlightGradient = ctx.createRadialGradient(
+                centerX + sign * 200, centerY - 80, 0,
+                centerX, centerY, 350
+            );
+            highlightGradient.addColorStop(0, `hsla(${hueBase + 40}, 100%, 95%, 0.7)`);
+            highlightGradient.addColorStop(0.3, `hsla(${hueBase + 40}, 100%, 85%, 0.4)`);
+            highlightGradient.addColorStop(0.6, `hsla(${hueBase + 30}, 100%, 75%, 0.1)`);
+            highlightGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+            ctx.fillStyle = highlightGradient;
+            ctx.fillRect(0, 0, size, size);
+            
+            const n = 1500;
+            const scale = 0.9;
+            
+            for (let i = 0; i < n; i++) {
+                const angle = i * 137.5 * (Math.PI / 180);
+                const radius = scale * Math.sqrt(i) * 10;
+                
+                const x = centerX + sign * (radius * Math.cos(angle));
+                const y = centerY + radius * Math.sin(angle);
+                
+                const distFromCenter = Math.sqrt(i) / Math.sqrt(n);
+                
+                const wave1 = Math.sin(animTime * 2 + i * 0.1) * 0.3;
+                const wave2 = Math.cos(animTime * 1.5 + distFromCenter * 5) * 0.4;
+                const plasma = Math.sin(x * 0.02 + animTime) * Math.cos(y * 0.02 + animTime * 0.7) * 0.5;
+                
+                const scaleSize = 1.5 + distFromCenter * 5 + wave1 + wave2 + plasma;
+                
+                ctx.save();
+                ctx.translate(x, y);
+                ctx.rotate(angle + Math.PI / 2 + Math.sin(animTime + i * 0.05) * 0.2);
+                
+                ctx.beginPath();
+                ctx.ellipse(0, 0, scaleSize * 0.7, scaleSize * 1.4, 0, 0, Math.PI * 2);
+                
+                const hueShift = Math.sin(animTime * 0.5 + i * 0.02) * 30;
+                const opacity = 0.2 + distFromCenter * 0.5 + Math.sin(animTime * 3 + i * 0.1) * 0.2;
+                
+                const baseHue = colorTheme.base + hueShift;
+                ctx.fillStyle = `hsla(${baseHue}, 100%, 75%, ${Math.max(0, Math.min(1, opacity))})`;
+                ctx.fill();
+                
+                ctx.strokeStyle = `hsla(${baseHue + 20}, 100%, 85%, ${opacity * 0.5})`;
+                ctx.lineWidth = 0.4;
+                ctx.stroke();
+                
+                ctx.restore();
+            }
+            
+            const eyeSpots = [
+                { x: sign * 180, y: -80, size: 45 },
+                { x: sign * 120, y: 120, size: 30 }
+            ];
+            
+            eyeSpots.forEach((spot, idx) => {
+                const ex = centerX + spot.x;
+                const ey = centerY + spot.y;
+                
+                for (let r = 0; r < eyeCfg.ringCount; r++) {
+                    const baseRadius = spot.size * (1 - r / eyeCfg.ringCount);
+                    const alpha = 0.3 - r * (0.3 / eyeCfg.ringCount);
+                    const hueShift = r * 15;
+                    
+                    ctx.beginPath();
+                    for (let a = 0; a < Math.PI * 2; a += 0.15) {
+                        const wobble = Math.sin(a * 3 + eyeCfg.wobblePhase + idx + r) * baseRadius * 0.08;
+                        const wobble2 = Math.cos(a * 5 + eyeCfg.wobblePhase + idx * 2) * baseRadius * 0.04;
+                        const radius = baseRadius + wobble + wobble2;
+                        const x = ex + Math.cos(a) * radius;
+                        const y = ey + Math.sin(a) * radius;
+                        
+                        if (a === 0) ctx.moveTo(x, y);
+                        else ctx.lineTo(x, y);
+                    }
+                    ctx.closePath();
+                    
+                    if (r % 2 === 0) {
+                        ctx.fillStyle = `hsla(${eyeCfg.hue + hueShift}, 90%, 80%, ${alpha})`;
+                    } else {
+                        ctx.fillStyle = `hsla(${eyeCfg.hue + hueShift + 20}, 70%, 40%, ${alpha})`;
+                    }
+                    ctx.fill();
+                }
+                
+                const coreRadius = spot.size * 0.15;
+                
+                ctx.beginPath();
+                for (let a = 0; a < Math.PI * 2; a += 0.2) {
+                    const wobble = Math.sin(a * 4 + eyeCfg.wobblePhase + idx) * coreRadius * 0.15;
+                    const radius = coreRadius + wobble;
+                    const x = ex + Math.cos(a) * radius;
+                    const y = ey + Math.sin(a) * radius;
+                    
+                    if (a === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                ctx.closePath();
+                
+                ctx.fillStyle = `hsla(${eyeCfg.hue}, 100%, 90%, 0.9)`;
+                ctx.fill();
+                
+                const glowGrad = ctx.createRadialGradient(ex, ey, 0, ex, ey, spot.size * 0.4);
+                glowGrad.addColorStop(0, `hsla(${eyeCfg.hue}, 100%, 80%, 0.5)`);
+                glowGrad.addColorStop(1, `hsla(${eyeCfg.hue}, 100%, 80%, 0)`);
+                ctx.fillStyle = glowGrad;
+                ctx.beginPath();
+                ctx.arc(ex, ey, spot.size * 0.4, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            
+            ctx.restore();
+        }
+
+        function drawAntennae(animTime, colorTheme) {
+            const centerX = size / 2;
+            const centerY = size / 2;
+            const headTop = centerY - 50;
+            
+            // Antenne gauche
+            ctx.save();
+            ctx.strokeStyle = '#000000';
+            ctx.lineWidth = 2;
+            ctx.lineCap = 'round';
+            
+            const wobble1 = Math.sin(animTime * 2) * 0.1;
+            const wobble2 = Math.sin(animTime * 2.5 + 0.5) * 0.1;
+            
+            ctx.beginPath();
+            ctx.moveTo(centerX - 6, headTop);
+            ctx.bezierCurveTo(
+                centerX - 20 + wobble1 * 10, headTop - 40,
+                centerX - 35 + wobble1 * 15, headTop - 70,
+                centerX - 45 + wobble1 * 20, headTop - 90
+            );
+            ctx.stroke();
+            
+            // Massue de l'antenne gauche
+            ctx.beginPath();
+            ctx.arc(centerX - 45 + wobble1 * 20, headTop - 90, 3, 0, Math.PI * 2);
+            ctx.fillStyle = '#000000';
+            ctx.fill();
+            
+            // Antenne droite
+            ctx.beginPath();
+            ctx.moveTo(centerX + 6, headTop);
+            ctx.bezierCurveTo(
+                centerX + 20 + wobble2 * 10, headTop - 40,
+                centerX + 35 + wobble2 * 15, headTop - 70,
+                centerX + 45 + wobble2 * 20, headTop - 90
+            );
+            ctx.stroke();
+            
+            // Massue de l'antenne droite
+            ctx.beginPath();
+            ctx.arc(centerX + 45 + wobble2 * 20, headTop - 90, 3, 0, Math.PI * 2);
+            ctx.fillStyle = '#000000';
+            ctx.fill();
+            
+            ctx.restore();
+        }
+
+        let time = 0;
+        let wingAngle = 0;
+        let targetAngle = 0;
+        let flapTimer = 0;
+        let nextFlapTime = 4 + Math.random() * 4;
+        let colorTheme = { base: 200, glow: 200 };
+        let eyeConfig = { hue: 200, wobblePhase: 0, ringCount: 4 };
+        
+        function animate() {
+            time += 0.05;
+            flapTimer += 0.05;
+            
+            if (flapTimer >= nextFlapTime) {
+                targetAngle = 1;
+                flapTimer = 0;
+                nextFlapTime = 3 + Math.random() * 5;
+                
+                const colorPalettes = [
+                    { base: 200, glow: 190 },
+                    { base: 280, glow: 290 },
+                    { base: 120, glow: 110 },
+                    { base: 30, glow: 20 },
+                    { base: 340, glow: 330 },
+                    { base: 180, glow: 170 },
+                    { base: 60, glow: 50 },
+                    { base: 260, glow: 270 }
+                ];
+                
+                colorTheme = colorPalettes[Math.floor(Math.random() * colorPalettes.length)];
+                
+                eyeConfig = {
+                    hue: colorTheme.base + (Math.random() - 0.5) * 40,
+                    wobblePhase: Math.random() * Math.PI * 2,
+                    ringCount: 3 + Math.floor(Math.random() * 3)
+                };
+                
+                setTimeout(() => {
+                    targetAngle = 0;
+                }, 80);
+            }
+            
+            if (targetAngle > wingAngle) {
+                wingAngle = Math.min(targetAngle, wingAngle + 0.4);
+            } else {
+                wingAngle = Math.max(targetAngle, wingAngle - 0.2);
+            }
+            
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, size, size);
+            
+            const glowIntensity = 0.6;
+            const glowSize = 450;
+            const glowHue = colorTheme.glow;
+            
+            const glowGradient = ctx.createRadialGradient(
+                size / 2, size / 2, 0,
+                size / 2, size / 2, glowSize
+            );
+            glowGradient.addColorStop(0, `hsla(${glowHue}, 100%, 70%, ${glowIntensity})`);
+            glowGradient.addColorStop(0.3, `hsla(${glowHue + 20}, 95%, 60%, ${glowIntensity * 0.7})`);
+            glowGradient.addColorStop(0.6, `hsla(${glowHue + 40}, 90%, 50%, ${glowIntensity * 0.4})`);
+            glowGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            
+            ctx.fillStyle = glowGradient;
+            ctx.fillRect(0, 0, size, size);
+            
+            const maxAngle = Math.PI / 2;
+            const currentAngle = wingAngle * maxAngle;
+            
+            // Aile gauche
+            ctx.save();
+            ctx.translate(size / 2, size / 2);
+            ctx.scale(Math.cos(currentAngle), 1);
+            ctx.translate(-size / 2, -size / 2);
+            drawWing(true, time, eyeConfig, colorTheme);
+            ctx.restore();
+            
+            // Aile droite
+            ctx.save();
+            ctx.translate(size / 2, size / 2);
+            ctx.scale(Math.cos(currentAngle), 1);
+            ctx.translate(-size / 2, -size / 2);
+            drawWing(false, time, eyeConfig, colorTheme);
+            ctx.restore();
+            
+            // Corps
+            ctx.fillStyle = '#1a1a2a';
+            ctx.beginPath();
+            ctx.ellipse(size / 2, size / 2 + 10, 8, 50, 0, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Tête
+            ctx.beginPath();
+            ctx.arc(size / 2, size / 2 - 45, 8, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Antennes
+            drawAntennae(time, colorTheme);
+            
+            requestAnimationFrame(animate);
+        }
+        
+        animate();
+    </script>
+</body>
+</html>

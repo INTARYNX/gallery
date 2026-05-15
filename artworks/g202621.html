@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Genuary 2026 #21</title>
+
+<style>
+body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: #FFFFFF;
+    padding: 40px;
+}
+
+canvas {
+    box-shadow: 0 8px 30px rgba(0,0,0,0.12);
+    max-width: 95vw;
+    max-height: 95vh;
+}
+</style>
+</head>
+
+<body>
+<canvas id="canvas"></canvas>
+
+<script>
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+const BASE_WIDTH = 700;
+const RATIO = 1.35;
+const DPR = window.devicePixelRatio || 1;
+
+let animTime = 0;
+let screenCanvas = null;
+let sctx = null;
+
+const C = {
+    bg: "#F7F3E9",
+    red: "#D94A54",
+    blue: "#4A8BA8",
+    yellow: "#F4C430",
+    black: "#000000",
+    white: "#F7F3E9"
+};
+
+function resizeCanvas() {
+    const w = Math.min(window.innerWidth * 0.9, BASE_WIDTH);
+    const h = w * RATIO;
+
+    canvas.style.width = w + "px";
+    canvas.style.height = h + "px";
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+
+function initScreenCanvas(w, h) {
+    if (!screenCanvas || screenCanvas.width !== w || screenCanvas.height !== h) {
+        screenCanvas = document.createElement('canvas');
+        screenCanvas.width = w;
+        screenCanvas.height = h;
+        sctx = screenCanvas.getContext('2d');
+    }
+}
+
+function draw() {
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    const s = w / BASE_WIDTH;
+
+    ctx.fillStyle = C.bg;
+    ctx.fillRect(0, 0, w, h);
+
+    drawSideBars(w, h, s);
+    drawPixelBars(w, h, s);
+    drawCurvedScreen(w, h, s);
+    drawBottomWaves(w, h, s);
+    drawText(w, h, s);
+}
+
+function drawSideBars(w, h, s) {
+    const sideW = w * 0.11;
+    const baseSemicircleSize = sideW * 1.8;
+    
+    // Demi-cercle géant rouge qui déborde - asymétrie forte
+    const giantSize = baseSemicircleSize * 3.5;
+    const giantY = h * 0.35;
+    ctx.fillStyle = C.red;
+    ctx.beginPath();
+    ctx.arc(w, giantY, giantSize / 2, Math.PI / 2, Math.PI * 1.5);
+    ctx.fill();
+    
+    // Demi-cercle du bas seulement (avec 2026)
+    const bottomSize = baseSemicircleSize * 1.2;
+    const bottomY = h * 0.9;
+    ctx.fillStyle = C.red;
+    ctx.beginPath();
+    ctx.arc(w, bottomY, bottomSize / 2, Math.PI / 2, Math.PI * 1.5);
+    ctx.fill();
+    
+    // Ajouter "2026" dans le demi-cercle rouge
+    ctx.fillStyle = C.white;
+    ctx.font = `bold ${24 * s}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('2026', w - bottomSize * 0.2, bottomY);
+}
+
+function drawPixelBars(w, h, s) {
+    const sideW = w * 0.11;
+    const barY = h * 0.08; // Plus haut
+    const barH = h * 0.15; // Plus grand
+    const barCount = 5;
+    const barSpacing = 18 * s; // Plus espacé
+    const sideMargin = 30 * s;
+    const totalSpacing = barSpacing * (barCount - 1);
+    const availableWidth = (w - sideW) - (sideMargin * 2);
+    const barW = (availableWidth - totalSpacing) / barCount;
+    const colors = [C.red, C.blue, C.yellow, C.black, C.red];
+    
+    for (let i = 0; i < barCount; i++) {
+        const offset = Math.sin(i * 0.8) * 20 * s; // Plus de variation
+        const xPos = sideMargin + i * (barW + barSpacing);
+        
+        const squareSize = 18 * s; // Plus gros
+        const squareSpacing = 4 * s;
+        const cols = Math.floor(barW / (squareSize + squareSpacing));
+        const rows = Math.floor(barH / (squareSize + squareSpacing));
+        
+        ctx.fillStyle = colors[i];
+        for (let row = 0; row < rows; row++) {
+            for (let col = 0; col < cols; col++) {
+                ctx.fillRect(
+                    xPos + col * (squareSize + squareSpacing),
+                    barY + offset + row * (squareSize + squareSpacing),
+                    squareSize,
+                    squareSize
+                );
+            }
+        }
+    }
+}
+
+function drawCurvedScreen(w, h, s) {
+    const centerY = h / 2;
+    const screenH = h * 0.32;
+    const screenW = screenH * (4 / 3);
+    
+    // Aligner avec le centre des pixels C64
+    const barCount = 5;
+    const barSpacing = 12 * s;
+    const sideMargin = 40 * s;
+    const sideW = w * 0.11;
+    const totalSpacing = barSpacing * (barCount - 1);
+    const availableWidth = (w - sideW) - (sideMargin * 2);
+    const barW = (availableWidth - totalSpacing) / barCount;
+    const pixelsCenterX = sideMargin + (availableWidth / 2);
+    
+    const screenX = pixelsCenterX - screenW / 2;
+    const screenY = centerY - screenH / 2;
+
+    initScreenCanvas(screenW, screenH);
+    
+    sctx.fillStyle = C.yellow;
+    sctx.fillRect(0, 0, screenW, screenH);
+
+    // Animations selon le temps
+    if (animTime > 35 * 60) {
+        // C64 loading bars après 35 secondes
+        drawLoadingBars(screenW, screenH, s);
+    } else if (animTime > 5 * 60) {
+        // Sine scroll de 5 à 35 secondes
+        drawSineScroll(screenW, screenH, s);
+    }
+    // Sinon écran jaune pur (0-5 secondes)
+
+    // Effet CRT
+    drawCRTEffect(screenW, screenH, screenX, screenY);
+}
+
+function drawSineScroll(screenW, screenH, s) {
+    const scrollY = screenH / 2;
+    const amplitude = 35 * s;
+    const frequency = 0.025;
+    const shapeSize = 32 * s;
+    const spacing = shapeSize * 2;
+    const scrollSpeed = 0.5;
+    
+    // Temps de scroll depuis le début (t=5s)
+    const scrollTime = (animTime - 5 * 60) * scrollSpeed;
+    
+    // Dessiner les formes qui scrollent de droite à gauche
+    for (let i = 0; i < 50; i++) {
+        const x = screenW - scrollTime + (i * spacing);
+        
+        // Optimisation : ne dessiner que ce qui est visible
+        if (x < -shapeSize) continue;
+        if (x > screenW + shapeSize) break;
+        
+        const y = scrollY + Math.sin((screenW - x) * frequency) * amplitude;
+        
+        if (i % 2 === 0) {
+            sctx.fillStyle = C.white;
+            sctx.beginPath();
+            sctx.arc(x, y, shapeSize / 2, 0, Math.PI * 2);
+            sctx.fill();
+        } else {
+            sctx.fillStyle = C.blue;
+            sctx.fillRect(x - shapeSize / 2, y - shapeSize / 2, shapeSize, shapeSize);
+        }
+    }
+}
+
+function drawLoadingBars(screenW, screenH, s) {
+    const loadColors = ['#6C5EB5', '#4A8BA8', '#A1683C', '#588D43', '#50459B', '#9F4E44', '#B8C76F', '#433900'];
+    const changeSpeed = Math.floor(animTime * 0.5);
+    
+    let currentY = 0;
+    while (currentY < screenH) {
+        const randomHeight = (Math.sin(currentY * 0.1 + changeSpeed) * 0.5 + 0.5) * 20 * s + 5 * s;
+        const colorIndex = Math.floor((Math.sin(currentY * 0.2 + changeSpeed * 1.5) * 0.5 + 0.5) * loadColors.length);
+        
+        sctx.fillStyle = loadColors[colorIndex];
+        sctx.fillRect(0, currentY, screenW, randomHeight);
+        currentY += randomHeight;
+    }
+}
+
+function drawCRTEffect(screenW, screenH, screenX, screenY) {
+    const curvature = 0.08;
+    const bulge = curvature * screenW;
+    const sliceCount = 60;
+    
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    
+    for (let slice = 0; slice < sliceCount; slice++) {
+        const y = (slice / sliceCount) * screenH;
+        const sliceH = Math.ceil(screenH / sliceCount) + 1; // +1 pour éviter les gaps
+        const distY = (y / screenH) * 2 - 1;
+        const offsetX = Math.pow(Math.abs(distY), 2) * bulge;
+        
+        ctx.drawImage(
+            screenCanvas,
+            0, y, screenW, sliceH,
+            screenX + offsetX, screenY + y, screenW - offsetX * 2, sliceH
+        );
+    }
+    
+    ctx.restore();
+}
+
+function drawBottomWaves(w, h, s) {
+    const sideW = w * 0.11;
+    const sineStartY = h - h * 0.18; // Plus haut
+    const sineAmplitude = 25 * s; // Plus subtil
+    const sineFrequency = 0.01 / s;
+    const sineColors = [C.red]; // Une seule vague rouge soumise
+    
+    ctx.strokeStyle = C.red;
+    ctx.lineWidth = 20 * s;
+    ctx.lineCap = 'butt';
+    ctx.lineJoin = 'miter';
+    
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(sideW, sineStartY - 50 * s, w - sideW, h);
+    ctx.clip();
+    
+    ctx.beginPath();
+    
+    ctx.moveTo(sideW - 10, sineStartY + Math.sin((sideW - 10) * sineFrequency) * sineAmplitude);
+    
+    for (let x = sideW - 10; x <= w + 10; x += 1) {
+        ctx.lineTo(x, sineStartY + Math.sin(x * sineFrequency) * sineAmplitude);
+    }
+    
+    ctx.stroke();
+    ctx.restore();
+}
+
+function drawText(w, h, s) {
+    const sideW = w * 0.11;
+    
+    // INTARYNX suit la courbe sinusoïdale rouge
+    ctx.save();
+    ctx.fillStyle = C.white;
+    ctx.font = `bold ${32 * s}px sans-serif`;
+    ctx.textAlign = 'left';
+    
+    const text = 'INTARYNX';
+    const startX = sideW + 20 * s;
+    const sineStartY = h - h * 0.18; // Ajusté à la nouvelle position
+    const baseY = sineStartY + 2 * s;
+    const sineFrequency = 0.01 / s;
+    const sineAmplitude = 25 * s;
+    
+    let xOffset = 0;
+    for (let i = 0; i < text.length; i++) {
+        const char = text[i];
+        const charWidth = ctx.measureText(char).width;
+        const currentX = startX + xOffset + charWidth / 2;
+        const yOffset = Math.sin(currentX * sineFrequency) * sineAmplitude;
+        
+        // Calculer l'angle de la tangente
+        const dx = 1;
+        const dy = Math.cos(currentX * sineFrequency) * sineAmplitude * sineFrequency;
+        const angle = Math.atan2(dy, dx);
+        
+        ctx.save();
+        ctx.translate(currentX, baseY + yOffset);
+        ctx.rotate(angle);
+        ctx.fillText(char, -charWidth / 2, 0);
+        ctx.restore();
+        
+        xOffset += charWidth;
+    }
+    
+    ctx.restore();
+}
+
+resizeCanvas();
+draw();
+
+function animate() {
+    animTime++;
+    draw();
+    requestAnimationFrame(animate);
+}
+
+animate();
+
+window.addEventListener("resize", () => {
+    resizeCanvas();
+    draw();
+});
+</script>
+</body>
+</html>

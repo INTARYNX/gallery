@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Genuary 2026 #30</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: #0a0a0a;
+            overflow: hidden;
+        }
+        canvas {
+            border-radius: 50%;
+            border: 2px solid #333;
+            max-width: 100%;
+            max-height: 100vh;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        function resizeCanvas() {
+            const size = Math.min(window.innerWidth, window.innerHeight) - 20;
+            canvas.width = size;
+            canvas.height = size;
+        }
+        
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        class Particle {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.size = Math.random() * 0.8 + 0.3;
+                this.speedX = Math.random() * 3 - 1.5;
+                this.speedY = Math.random() * 3 - 1.5;
+            }
+
+            update() {
+                this.x += this.speedX;
+                this.y += this.speedY;
+                if (this.size > 0.2) this.size -= 0.01;
+            }
+
+            draw() {
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        const particles = [];
+        let hue = 0;
+        let time = 0;
+        let glitchAmount = 0;
+
+        function createParticles(x, y) {
+            for (let i = 0; i < 5; i++) {
+                particles.push(new Particle(x, y));
+            }
+        }
+
+        function drawCircle() {
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            
+            // Start as a simple circle, gradually add chaos
+            ctx.beginPath();
+            for (let i = 0; i < 360; i++) {
+                const angle = (i * Math.PI) / 180;
+                const radius = 100;
+                
+                // "Bug": accumulating rotation offset
+                const offsetAngle = angle + time * 0.01 * i * 0.001;
+                
+                // "Bug": wave interference that wasn't supposed to compound
+                const wave1 = Math.sin(time * 0.5 + i * 0.1) * glitchAmount * 2;
+                const wave2 = Math.sin(time * 0.3 + i * 0.15) * glitchAmount * 1.5;
+                const wave3 = Math.cos(time * 0.7 + i * 0.08) * glitchAmount;
+                
+                const r = radius + wave1 + wave2 + wave3;
+                const x = centerX + Math.cos(offsetAngle) * r;
+                const y = centerY + Math.sin(offsetAngle) * r;
+
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            }
+            ctx.closePath();
+            
+            const gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, 150);
+            gradient.addColorStop(0, `hsl(${hue}, 70%, 40%)`);
+            gradient.addColorStop(1, `hsl(${(hue + 60) % 360}, 70%, 30%)`);
+            ctx.strokeStyle = gradient;
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        function animate() {
+            ctx.fillStyle = 'rgba(10, 10, 10, 0.1)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            drawCircle();
+
+            for (let i = particles.length - 1; i >= 0; i--) {
+                particles[i].update();
+                particles[i].draw();
+
+                if (particles[i].size <= 0.2) {
+                    particles.splice(i, 1);
+                }
+            }
+
+            // Gradually increase the "bug" effect
+            time += 1;
+            if (glitchAmount < 20) {
+                glitchAmount += 0.02;
+            }
+            hue += 0.2;
+            
+            requestAnimationFrame(animate);
+        }
+
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            createParticles(x, y);
+        });
+
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            const rect = canvas.getBoundingClientRect();
+            const touch = e.touches[0];
+            const x = touch.clientX - rect.left;
+            const y = touch.clientY - rect.top;
+            createParticles(x, y);
+        });
+
+        animate();
+    </script>
+</body>
+</html>

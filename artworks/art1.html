@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<base href="/upstride/">
+    <title>16bits Nostalgia</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #000;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        canvas {
+            border: 2px solid #333;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <canvas id="buffer" style="display:none;"></canvas>
+    <script>
+        const CONFIG = {
+            starSpeed: 15,
+            starDepth: 1000,
+            starCount: 200,
+            cubeSize: 80,
+            cubeDistance: 400,
+            ribbonAmplitude: 80,
+            ribbonFreq: 0.01,
+            ribbonSpeed: 0.05,
+            morphSpeed: 0.01,
+            rotationSpeed: { x: 0.01, y: 0.015, z: 0.02 }
+        };
+        
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const buffer = document.getElementById('buffer');
+        const bufCtx = buffer.getContext('2d');
+        
+        canvas.width = 800;
+        canvas.height = 400;
+        buffer.width = 2000;
+        buffer.height = 120;
+        
+        const text = " *** Nostalgia is the prettiest lie we tell ourselves *** ";
+        let time = 0;
+        
+        // Pre-render text buffer once
+        bufCtx.font = 'bold 50px monospace';
+        const gradient = bufCtx.createLinearGradient(0, 0, 0, buffer.height);
+        gradient.addColorStop(0, '#ff0000');
+        gradient.addColorStop(0.5, '#ff8800');
+        gradient.addColorStop(1, '#ffff00');
+        bufCtx.fillStyle = gradient;
+        bufCtx.textBaseline = 'middle';
+        
+        const spacing = 35;
+        for (let i = 0; i < text.length + 30; i++) {
+            const x = i * spacing;
+            const idx = i % text.length;
+            bufCtx.fillText(text[idx], x, buffer.height / 2);
+        }
+        
+        // Stars
+        const stars = [];
+        for (let i = 0; i < CONFIG.starCount; i++) {
+            stars.push({
+                x: Math.random() * canvas.width - canvas.width / 2,
+                y: Math.random() * canvas.height - canvas.height / 2,
+                z: Math.random() * CONFIG.starDepth
+            });
+        }
+        
+        // 3D shapes
+        const cubeVertices = [
+            [-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1],
+            [-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]
+        ].map(v => [v[0] * CONFIG.cubeSize, v[1] * CONFIG.cubeSize, v[2] * CONFIG.cubeSize]);
+        
+        const pyramidVertices = [
+            [-1, 0, -1], [1, 0, -1], [1, 0, 1], [-1, 0, 1],
+            [0, -1.5, 0], [0, -1.5, 0], [0, -1.5, 0], [0, -1.5, 0]
+        ].map(v => [v[0] * 100, v[1] * 100, v[2] * 100]);
+        
+        const diamondVertices = [
+            [0, 0, -1.2], [1.2, 0, 0], [0, 0, 1.2], [-1.2, 0, 0],
+            [0, -1.5, 0], [0, -1.5, 0], [0, -1.5, 0], [0, -1.5, 0]
+        ].map(v => [v[0] * CONFIG.cubeSize, v[1] * CONFIG.cubeSize, v[2] * CONFIG.cubeSize]);
+        
+        const cubeEdges = [
+            [0, 1], [1, 2], [2, 3], [3, 0],
+            [4, 5], [5, 6], [6, 7], [7, 4],
+            [0, 4], [1, 5], [2, 6], [3, 7]
+        ];
+        
+        function rotateCube(vertices, angleX, angleY, angleZ) {
+            const cosX = Math.cos(angleX), sinX = Math.sin(angleX);
+            const cosY = Math.cos(angleY), sinY = Math.sin(angleY);
+            const cosZ = Math.cos(angleZ), sinZ = Math.sin(angleZ);
+            
+            return vertices.map(vertex => {
+                let [x, y, z] = vertex;
+                
+                let y1 = y * cosX - z * sinX;
+                let z1 = y * sinX + z * cosX;
+                y = y1; z = z1;
+                
+                let x1 = x * cosY + z * sinY;
+                z1 = -x * sinY + z * cosY;
+                x = x1; z = z1;
+                
+                x1 = x * cosZ - y * sinZ;
+                y1 = x * sinZ + y * cosZ;
+                
+                return [x1, y1, z1];
+            });
+        }
+        
+        function lerp(a, b, t) {
+            return [
+                a[0] * (1 - t) + b[0] * t,
+                a[1] * (1 - t) + b[1] * t,
+                a[2] * (1 - t) + b[2] * t
+            ];
+        }
+        
+        function smoothstep(t) {
+            return t * t * (3 - 2 * t);
+        }
+        
+        function draw() {
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            const cx = canvas.width / 2;
+            const cy = canvas.height / 2;
+            
+            // Morph between shapes
+            const morphTime = time * CONFIG.morphSpeed;
+            const morphPhase = morphTime % 3;
+            
+            let morphedVertices;
+            if (morphPhase < 1) {
+                const t = smoothstep(morphPhase);
+                morphedVertices = cubeVertices.map((v, i) => lerp(v, pyramidVertices[i], t));
+            } else if (morphPhase < 2) {
+                const t = smoothstep(morphPhase - 1);
+                morphedVertices = pyramidVertices.map((v, i) => lerp(v, diamondVertices[i], t));
+            } else {
+                const t = smoothstep(morphPhase - 2);
+                morphedVertices = diamondVertices.map((v, i) => lerp(v, cubeVertices[i], t));
+            }
+            
+            const rotated = rotateCube(morphedVertices, 
+                time * CONFIG.rotationSpeed.x, 
+                time * CONFIG.rotationSpeed.y, 
+                time * CONFIG.rotationSpeed.z
+            );
+            
+            // Draw cube
+            ctx.strokeStyle = '#0088ff';
+            ctx.lineWidth = 2;
+            
+            for (let edge of cubeEdges) {
+                const v1 = rotated[edge[0]];
+                const v2 = rotated[edge[1]];
+                
+                const scale1 = CONFIG.cubeDistance / (CONFIG.cubeDistance + v1[2]);
+                const scale2 = CONFIG.cubeDistance / (CONFIG.cubeDistance + v2[2]);
+                
+                const x1 = v1[0] * scale1 + cx;
+                const y1 = v1[1] * scale1 + cy;
+                const x2 = v2[0] * scale2 + cx;
+                const y2 = v2[1] * scale2 + cy;
+                
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+                ctx.stroke();
+            }
+            
+            // Starfield
+            for (let star of stars) {
+                star.z -= CONFIG.starSpeed;
+                
+                if (star.z <= 0) {
+                    star.x = Math.random() * canvas.width - canvas.width / 2;
+                    star.y = Math.random() * canvas.height - canvas.height / 2;
+                    star.z = CONFIG.starDepth;
+                }
+                
+                const k = 200 / star.z;
+                const sx = star.x * k + cx;
+                const sy = star.y * k + cy;
+                
+                if (sx >= 0 && sx < canvas.width && sy >= 0 && sy < canvas.height) {
+                    const size = (1 - star.z / CONFIG.starDepth) * 4;
+                    const brightness = Math.floor((1 - star.z / CONFIG.starDepth) * 255);
+                    ctx.fillStyle = `rgb(${brightness},${brightness},${brightness})`;
+                    ctx.fillRect(sx - size / 2, sy - size / 2, size, size);
+                }
+            }
+            
+            // Ribbon effect
+            for (let x = 0; x < canvas.width; x++) {
+                const sinePhase = x * CONFIG.ribbonFreq + time * CONFIG.ribbonSpeed;
+                const rotationAngle = sinePhase * 2;
+                const scale = Math.cos(rotationAngle);
+                
+                const sourceX = (x + time) % buffer.width;
+                const destHeight = buffer.height * Math.abs(scale);
+                const wave = Math.sin(sinePhase) * CONFIG.ribbonAmplitude;
+                
+                const brightness = Math.abs(scale);
+                ctx.globalAlpha = 0.7 + brightness * 0.3;
+                
+                if (scale < 0) {
+                    const destY = cy + wave - destHeight / 2;
+                    ctx.save();
+                    ctx.translate(x, destY + destHeight / 2);
+                    ctx.scale(1, -1);
+                    ctx.drawImage(buffer, sourceX, 0, 1, buffer.height, 0, -destHeight / 2, 1, destHeight);
+                    ctx.restore();
+                } else {
+                    const destY = cy + wave - destHeight / 2;
+                    ctx.drawImage(buffer, sourceX, 0, 1, buffer.height, x, destY, 1, destHeight);
+                }
+            }
+            
+            ctx.globalAlpha = 1.0;
+            time += 1;
+            requestAnimationFrame(draw);
+        }
+        
+        draw();
+    </script>
+</body>
+</html>

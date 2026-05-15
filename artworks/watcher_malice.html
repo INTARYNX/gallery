@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Œil démoniaque</title>
+    <style>
+        * { margin:0; padding:0; }
+        body { background:#000; display:flex; justify-content:center; align-items:center; min-height:100vh; overflow:hidden; }
+        canvas { display:block; width:90vmin; height:90vmin; max-width:800px; max-height:800px; }
+    </style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+var c = document.getElementById('c');
+var $ = c.getContext('2d');
+var W, H, CX, CY, t = 0;
+var hole = [], wood = null, veins = [], drips = [];
+var blinkP = 0, blinkS = 0, blinkT = 0, nextB = 4000;
+
+function init() {
+    W = H = Math.max(200, Math.min(800, c.parentElement.clientWidth * 0.9 | 0));
+    c.width = W; c.height = H;
+    CX = W / 2; CY = H / 2;
+
+    hole = [];
+    for (var i = 0; i < 40; i++) {
+        var a = i / 40 * Math.PI * 2;
+        hole.push({
+            x: CX + Math.cos(a) * (W * 0.12 + Math.random() * W * 0.036),
+            y: CY + Math.sin(a) * (W * 0.18 + Math.random() * W * 0.045)
+        });
+    }
+
+    var tc = document.createElement('canvas');
+    tc.width = W; tc.height = H;
+    var g = tc.getContext('2d');
+    g.fillStyle = '#1a1310'; g.fillRect(0, 0, W, H);
+    for (var i = 0; i < 15; i++) {
+        var y = i / 15 * H;
+        g.fillStyle = 'rgba(' + (30 + Math.random() * 15 | 0) + ',' + (18 + Math.random() * 10 | 0) + ',' + (10 + Math.random() * 8 | 0) + ',0.15)';
+        g.fillRect(0, y, W, H / 15);
+    }
+    for (var i = 0; i < 400; i++) {
+        g.fillStyle = 'rgba(20,15,10,' + (Math.random() * 0.2) + ')';
+        g.fillRect(Math.random() * W, Math.random() * H, Math.random() * 4, Math.random() * 2);
+    }
+    for (var i = 0; i < 10; i++) {
+        var x = Math.random() * W, y = Math.random() * H, s = 15 + Math.random() * 40;
+        var rg = g.createRadialGradient(x, y, 0, x, y, s);
+        rg.addColorStop(0, 'rgba(10,5,2,0.4)'); rg.addColorStop(1, 'rgba(10,5,2,0)');
+        g.fillStyle = rg; g.beginPath(); g.arc(x, y, s, 0, Math.PI * 2); g.fill();
+    }
+    var sg = g.createRadialGradient(CX, CY + 20, 10, CX, CY + 25, 90);
+    sg.addColorStop(0, 'rgba(60,8,4,0.2)'); sg.addColorStop(1, 'rgba(20,3,2,0)');
+    g.fillStyle = sg; g.beginPath(); g.arc(CX, CY + 20, 90, 0, Math.PI * 2); g.fill();
+    wood = tc;
+
+    veins = [];
+    for (var i = 0; i < 20; i++) veins.push({ a: Math.PI * 2 * i / 20, l: 25 + Math.random() * 25, w: 0.3 + Math.random() * 1.2 });
+
+    drips = [];
+    for (var i = 0; i < 4; i++) {
+        var p = hole[Math.random() * hole.length | 0];
+        drips.push({ x: p.x, y: p.y, len: 15 + Math.random() * 40, w: 1 + Math.random() * 2, p: Math.random() });
+    }
+}
+
+function holePath() {
+    $.beginPath();
+    $.moveTo(hole[0].x, hole[0].y);
+    for (var i = 0; i < hole.length; i++) {
+        var a = hole[i], b = hole[(i + 1) % hole.length];
+        $.quadraticCurveTo(a.x, a.y, (a.x + b.x) / 2, (a.y + b.y) / 2);
+    }
+    $.closePath();
+}
+
+function eyePath(x, y, w, h) {
+    var hh = Math.max(0.1, h);
+    $.beginPath();
+    $.moveTo(x - w, y + hh * 0.1);
+    $.bezierCurveTo(
+        x - w * 0.5,  y - hh * 1.8,
+        x + w * 0.6,  y - hh * 1.6,
+        x + w * 1.05, y - hh * 0.2
+    );
+    $.bezierCurveTo(
+        x + w * 1.15, y,
+        x + w * 1.05, y + hh * 0.2,
+        x + w * 0.95, y + hh * 0.25
+    );
+    $.bezierCurveTo(
+        x + w * 0.5,  y + hh * 0.6,
+        x - w * 0.4,  y + hh * 0.55,
+        x - w,        y + hh * 0.1
+    );
+    $.closePath();
+}
+
+function frame() {
+    if (W < 1) { requestAnimationFrame(frame); return; }
+    t += 0.016;
+
+    blinkT += 16;
+    if (blinkS === 0 && blinkT > nextB) { blinkS = 1; blinkT = 0; blinkP = 0; }
+    if (blinkS === 1) { blinkP = Math.min(1, blinkP + 0.13); if (blinkP >= 1) { blinkS = 2; blinkT = 0; } }
+    if (blinkS === 2 && blinkT > 80) blinkS = 3;
+    if (blinkS === 3) { blinkP = Math.max(0, blinkP - 0.07); if (blinkP <= 0) { blinkP = 0; blinkS = 0; blinkT = 0; nextB = 3000 + Math.random() * 5000; } }
+
+    var openAmt = Math.max(0, Math.min(1, 1 - blinkP));
+    var EW = 58;
+    var EH_MAX = 20;
+    var EH = EH_MAX * openAmt;
+    var IR = 24;
+
+    // === WOOD ===
+    if (wood && wood.width > 0) $.drawImage(wood, 0, 0);
+    $.fillStyle = 'rgba(0,0,0,' + (0.05 + Math.sin(t * 0.5) * 0.03) + ')';
+    $.fillRect(0, 0, W, H);
+    var vg = $.createRadialGradient(CX, CY, W * 0.2, CX, CY, W * 0.7);
+    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(0.6, 'rgba(0,0,0,0.35)'); vg.addColorStop(1, 'rgba(0,0,0,0.75)');
+    $.fillStyle = vg; $.fillRect(0, 0, W, H);
+
+    // === PENTAGRAM ===
+    $.save();
+    var pgX = CX, pgY = CY;
+    var pgR = W * 0.38;
+    var pgRot = t * 0.2;
+    var pgAlpha = 0.3 + Math.sin(t * 0.5) * 0.1;
+    $.strokeStyle = 'rgba(140,25,15,' + pgAlpha + ')';
+    $.lineWidth = 1.5;
+    $.beginPath(); $.arc(pgX, pgY, pgR, 0, Math.PI * 2); $.stroke();
+    $.beginPath();
+    for (var i = 0; i < 5; i++) {
+        var a = pgRot + i * Math.PI * 2 / 5 - Math.PI / 2;
+        var ni = (i + 2) % 5;
+        var na = pgRot + ni * Math.PI * 2 / 5 - Math.PI / 2;
+        $.moveTo(pgX + Math.cos(a) * pgR, pgY + Math.sin(a) * pgR);
+        $.lineTo(pgX + Math.cos(na) * pgR, pgY + Math.sin(na) * pgR);
+    }
+    $.strokeStyle = 'rgba(160,30,15,' + pgAlpha + ')'; $.lineWidth = 2; $.stroke();
+    $.save(); $.filter = 'blur(4px)';
+    $.strokeStyle = 'rgba(200,40,10,' + (pgAlpha * 0.4) + ')'; $.lineWidth = 4; $.stroke();
+    $.restore();
+    $.restore();
+
+    // === SPIRAL ===
+    $.save();
+    var spX = CX, spY = CY;
+    var spiralRot = t * 0.5;
+    var spiralGrow = Math.sin(t * 0.3) * 0.08;
+    for (var i = 1; i < 260; i++) {
+        var a0 = (i - 1) * 0.12 + spiralRot, r0 = (i - 1) * (0.5 + spiralGrow);
+        var a1 = i * 0.12 + spiralRot, r1 = i * (0.5 + spiralGrow);
+        $.strokeStyle = 'rgba(140,30,20,' + (0.35 + Math.sin(t * 0.4) * 0.1) + ')';
+        $.lineWidth = 0.5 + (i / 260) * 5;
+        $.beginPath();
+        $.moveTo(spX + Math.cos(a0) * r0, spY + Math.sin(a0) * r0);
+        $.lineTo(spX + Math.cos(a1) * r1, spY + Math.sin(a1) * r1);
+        $.stroke();
+    }
+    for (var i = 1; i < 200; i++) {
+        var a0 = (i - 1) * 0.12 + 0.4 - spiralRot * 0.7, r0 = (i - 1) * (0.42 + spiralGrow * 0.6);
+        var a1 = i * 0.12 + 0.4 - spiralRot * 0.7, r1 = i * (0.42 + spiralGrow * 0.6);
+        $.strokeStyle = 'rgba(100,20,12,' + (0.2 + Math.sin(t * 0.6) * 0.06) + ')';
+        $.lineWidth = 0.3 + (i / 200) * 3;
+        $.beginPath();
+        $.moveTo(spX + Math.cos(a0) * r0, spY + Math.sin(a0) * r0);
+        $.lineTo(spX + Math.cos(a1) * r1, spY + Math.sin(a1) * r1);
+        $.stroke();
+    }
+    $.restore();
+
+    // === HOLE ===
+    $.save(); holePath();
+    for (var i = 0; i < 10; i++) { $.fillStyle = 'rgba(0,0,0,' + (0.95 - i * 0.07) + ')'; $.fill(); $.translate(0.3, 0.3); }
+    $.restore();
+    holePath(); $.lineWidth = 5; $.strokeStyle = 'rgba(80,15,5,' + (0.2 + Math.sin(t * 0.8) * 0.1) + ')'; $.stroke();
+    holePath(); $.lineWidth = 2; $.strokeStyle = 'rgba(20,10,5,0.9)'; $.stroke();
+
+    for (var i = 0; i < hole.length; i++) {
+        if (Math.random() > 0.5) {
+            var p = hole[i], ang = Math.atan2(p.y - CY, p.x - CX) + (Math.random() - 0.5) * 0.5;
+            $.strokeStyle = 'rgba(50,30,18,' + (0.3 + Math.random() * 0.4) + ')';
+            $.lineWidth = 0.5 + Math.random() * 1.5;
+            $.beginPath(); $.moveTo(p.x, p.y); $.lineTo(p.x + Math.cos(ang) * (3 + Math.random() * 8), p.y + Math.sin(ang) * (3 + Math.random() * 8)); $.stroke();
+        }
+    }
+
+    for (var d of drips) {
+        d.p = (d.p + 0.002) % 1;
+        var l = d.len * d.p;
+        var bg = $.createLinearGradient(d.x, d.y, d.x, d.y + l);
+        bg.addColorStop(0, 'rgba(90,8,4,0.5)'); bg.addColorStop(1, 'rgba(50,2,1,0)');
+        $.strokeStyle = bg; $.lineWidth = d.w; $.lineCap = 'round';
+        $.beginPath(); $.moveTo(d.x, d.y); $.lineTo(d.x + Math.sin(t + d.x) * 1.5, d.y + l); $.stroke();
+    }
+
+    // === EYE ===
+    $.save(); holePath(); $.clip();
+
+    // Black scaly skin
+    var sk = $.createRadialGradient(CX, CY, 10, CX, CY, 120);
+    sk.addColorStop(0, '#1a1012'); sk.addColorStop(0.3, '#0f0a0a'); sk.addColorStop(1, '#050305');
+    $.fillStyle = sk; $.fillRect(CX - 200, CY - 200, 400, 400);
+
+    // Scales
+    for (var row = -7; row < 7; row++) for (var col = -9; col < 9; col++) {
+        var sx = CX + col * 16 + (row % 2) * 8, sy = CY + row * 13;
+        var dd = Math.sqrt((sx - CX) * (sx - CX) + (sy - CY) * (sy - CY));
+        if (dd < 8 || dd > 130) continue;
+        var al = 0.12 + Math.sin(t * 0.25 + col + row) * 0.04;
+        $.beginPath(); $.moveTo(sx, sy - 5);
+        $.bezierCurveTo(sx + 7, sy - 2, sx + 7, sy + 3, sx, sy + 5);
+        $.bezierCurveTo(sx - 7, sy + 3, sx - 7, sy - 2, sx, sy - 5); $.closePath();
+        $.strokeStyle = 'rgba(40,15,20,' + al + ')'; $.lineWidth = 0.7; $.stroke();
+        $.fillStyle = 'rgba(50,20,25,' + (al * 0.3) + ')'; $.fill();
+    }
+
+    // Veiny cracks
+    for (var i = 0; i < 8; i++) {
+        var a = Math.PI * 2 * i / 8, len = 50 + Math.random() * 30;
+        $.strokeStyle = 'rgba(120,18,8,' + (0.12 + Math.sin(t * 0.5 + i) * 0.06) + ')';
+        $.lineWidth = 0.8; $.beginPath();
+        $.moveTo(CX + Math.cos(a) * 30, CY + Math.sin(a) * 25);
+        $.quadraticCurveTo(CX + Math.cos(a) * len * 0.6, CY + Math.sin(a) * len * 0.6, CX + Math.cos(a) * len, CY + Math.sin(a) * len);
+        $.stroke();
+        $.strokeStyle = 'rgba(160,30,10,0.04)'; $.lineWidth = 3; $.stroke();
+    }
+
+    // Bruise
+    var br = $.createRadialGradient(CX, CY, 20, CX, CY, 68);
+    br.addColorStop(0, 'rgba(40,5,10,0)'); br.addColorStop(0.5, 'rgba(55,8,12,0.3)'); br.addColorStop(1, 'rgba(8,2,4,0.6)');
+    $.fillStyle = br; $.beginPath(); $.arc(CX, CY, 68, 0, Math.PI * 2); $.fill();
+
+    // Closed lid base
+    var lg = $.createLinearGradient(CX, CY - 45, CX, CY + 35);
+    lg.addColorStop(0, '#0a0608'); lg.addColorStop(0.5, '#120c0e'); lg.addColorStop(1, '#0d0809');
+    $.fillStyle = lg; eyePath(CX, CY, EW, EH_MAX); $.fill();
+
+    if (openAmt > 0.05) {
+        // Sclera
+        var wg = $.createRadialGradient(CX, CY - 5, 2, CX, CY - 5, 56);
+        wg.addColorStop(0, '#d8cfc0'); wg.addColorStop(0.2, '#c8baa8');
+        wg.addColorStop(0.4, '#a89880'); wg.addColorStop(0.6, '#887060');
+        wg.addColorStop(0.8, '#604838'); wg.addColorStop(1, '#3a2820');
+        $.fillStyle = wg; eyePath(CX, CY, EW, EH); $.fill();
+
+        // Eerie reddish haze
+        $.save(); $.filter = 'blur(8px)';
+        var rg = $.createRadialGradient(CX, CY - 5, 5, CX, CY - 5, 50);
+        rg.addColorStop(0, 'rgba(180,30,10,0.12)'); rg.addColorStop(0.3, 'rgba(120,15,8,0.18)');
+        rg.addColorStop(0.6, 'rgba(80,10,5,0.25)'); rg.addColorStop(1, 'rgba(30,5,3,0.4)');
+        $.fillStyle = rg; eyePath(CX, CY, EW, EH); $.fill();
+        $.restore();
+
+        // Dark fog
+        $.save(); $.filter = 'blur(12px)';
+        $.fillStyle = 'rgba(20,5,8,' + (0.15 + Math.sin(t * 0.7) * 0.08) + ')';
+        eyePath(CX, CY, EW, EH); $.fill();
+        $.restore();
+
+        // Ectoplasmic border
+        $.save(); $.filter = 'blur(6px)';
+        $.strokeStyle = 'rgba(90,190,70,' + (0.2 + Math.sin(t * 0.9) * 0.08) + ')';
+        $.lineWidth = 10;
+        eyePath(CX, CY, EW, EH); $.stroke();
+        $.restore();
+
+        // Clip to eye
+        $.save(); eyePath(CX, CY, EW, EH); $.clip();
+
+        // Yellow tint
+        var yg = $.createRadialGradient(CX, CY, 12, CX, CY, 55);
+        yg.addColorStop(0, 'rgba(0,0,0,0)'); yg.addColorStop(0.6, 'rgba(110,90,30,0.06)'); yg.addColorStop(1, 'rgba(90,70,15,0.12)');
+        $.fillStyle = yg; eyePath(CX, CY, EW, EH); $.fill();
+
+        // Veins
+        for (var v of veins) {
+            var vi = 0.15 + Math.sin(t * 0.3 + v.a) * 0.08;
+            $.strokeStyle = 'rgba(170,35,25,' + vi + ')'; $.lineWidth = v.w;
+            $.beginPath();
+            $.moveTo(CX + Math.cos(v.a) * 20, CY + Math.sin(v.a) * 14);
+            $.quadraticCurveTo(
+                CX + Math.cos(v.a) * v.l * 0.6 + Math.sin(t * 2 + v.a) * 2,
+                CY + Math.sin(v.a) * v.l * 0.6,
+                CX + Math.cos(v.a) * v.l * 1.1,
+                CY + Math.sin(v.a) * v.l * 1.1
+            ); $.stroke();
+        }
+
+        // Iris
+        var IX = CX;
+        var IY = CY - 5;
+
+        var ig = $.createRadialGradient(IX, IY, 2, IX, IY, IR);
+        ig.addColorStop(0, '#ffcc30'); ig.addColorStop(0.15, '#ff8800');
+        ig.addColorStop(0.35, '#cc3300'); ig.addColorStop(0.55, '#881100');
+        ig.addColorStop(0.75, '#440800'); ig.addColorStop(1, '#1a0400');
+        $.fillStyle = ig; $.beginPath(); $.arc(IX, IY, IR, 0, Math.PI * 2); $.fill();
+
+        for (var i = 0; i < 36; i++) {
+            var la = Math.PI * 2 * i / 36;
+            $.strokeStyle = 'rgba(200,80,10,' + (0.2 + Math.sin(t * 0.6 + la) * 0.1) + ')';
+            $.lineWidth = 0.6; $.beginPath();
+            $.moveTo(IX + Math.cos(la) * 7, IY + Math.sin(la) * 7);
+            $.lineTo(IX + Math.cos(la) * IR, IY + Math.sin(la) * IR); $.stroke();
+        }
+
+        $.strokeStyle = 'rgba(30,5,0,0.6)'; $.lineWidth = 1.8;
+        $.beginPath(); $.arc(IX, IY, IR, 0, Math.PI * 2); $.stroke();
+
+        $.strokeStyle = 'rgba(255,150,20,' + (0.08 + Math.sin(t * 1.2) * 0.04) + ')'; $.lineWidth = 3;
+        $.beginPath(); $.arc(IX, IY, 12, 0, Math.PI * 2); $.stroke();
+
+        // Slit pupil
+        var slitH = 10 + Math.sin(t * 0.8) * 2;
+        var slitW = 3.2;
+        $.fillStyle = '#000'; $.beginPath();
+        $.moveTo(IX, IY - slitH);
+        $.bezierCurveTo(IX + slitW, IY - slitH * 0.3, IX + slitW, IY + slitH * 0.3, IX, IY + slitH);
+        $.bezierCurveTo(IX - slitW, IY + slitH * 0.3, IX - slitW, IY - slitH * 0.3, IX, IY - slitH);
+        $.closePath(); $.fill();
+
+        // Ember glow
+        var eg = $.createRadialGradient(IX, IY, 0, IX, IY, 8);
+        eg.addColorStop(0, 'rgba(255,100,0,' + (0.06 + Math.sin(t * 2) * 0.03) + ')');
+        eg.addColorStop(1, 'rgba(255,50,0,0)');
+        $.fillStyle = eg; $.beginPath(); $.arc(IX, IY, 8, 0, Math.PI * 2); $.fill();
+
+        // Reflections
+        var fa = 0.35 + Math.sin(t * 3) * 0.15;
+        $.fillStyle = 'rgba(255,220,180,' + (fa * 0.5) + ')';
+        $.beginPath(); $.arc(IX - 5, IY - 5, 3.5, 0, Math.PI * 2); $.fill();
+        $.fillStyle = 'rgba(255,200,150,' + (fa * 0.2) + ')';
+        $.beginPath(); $.arc(IX + 6, IY - 2, 2, 0, Math.PI * 2); $.fill();
+
+        $.restore(); // eye clip
+    }
+
+    // Eye outline
+    $.strokeStyle = 'rgba(25,10,8,0.5)'; $.lineWidth = 2.5;
+    eyePath(CX, CY, EW, Math.max(0.1, EH)); $.stroke();
+
+    // === FLASH ===
+    var flashCycle = t % 12;
+    if (flashCycle > 10.8 && flashCycle < 11.0) {
+        $.save(); holePath(); $.clip();
+        var flashI = Math.sin((flashCycle - 10.8) / 0.2 * Math.PI);
+        $.fillStyle = 'rgba(200,180,140,' + (flashI * 0.7) + ')';
+        $.fillRect(0, 0, W, H);
+        $.fillStyle = 'rgba(220,200,170,' + (flashI * 0.9) + ')';
+        $.beginPath(); $.arc(CX, CY, 50, 0, Math.PI * 2); $.fill();
+        $.restore();
+    }
+    if (Math.random() < 0.008) {
+        $.save(); holePath(); $.clip();
+        $.fillStyle = 'rgba(150,20,10,0.25)';
+        $.fillRect(0, 0, W, H);
+        $.restore();
+    }
+
+    $.restore(); // hole clip
+
+    // Scanlines
+    $.fillStyle = 'rgba(0,0,0,0.03)';
+    for (var y = 0; y < H; y += 3) $.fillRect(0, y, W, 1);
+
+    if (Math.random() < 0.015) { $.fillStyle = 'rgba(0,0,0,' + (0.05 + Math.random() * 0.1) + ')'; $.fillRect(0, 0, W, H); }
+
+    requestAnimationFrame(frame);
+}
+
+window.addEventListener('resize', init);
+init();
+frame();
+</script>
+</body>
+</html>

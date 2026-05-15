@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Genuary 2026 #24</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        canvas {
+            border: 1px solid #333;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 800;
+        canvas.height = 600;
+
+        const dots = [];
+        const radius = 150;
+        const rings = 20;
+        const dotsPerRing = 40;
+        let angleX = 0;
+        let angleY = 0;
+        let zoomFactor = 1;
+        let flashAlpha = 0;
+        let isZooming = false;
+        let zoomProgress = 0;
+
+        for (let i = 0; i <= rings; i++) {
+            const theta = (i / rings) * Math.PI;
+            const ringRadius = Math.sin(theta) * radius;
+            const y = Math.cos(theta) * radius;
+            
+            const numDots = Math.max(3, Math.floor(dotsPerRing * Math.sin(theta)));
+            
+            if (i === 0) {
+                dots.push({ x: 0, y: radius, z: 0, isSquare: true });
+            } else {
+                for (let j = 0; j < numDots; j++) {
+                    const phi = (j / numDots) * Math.PI * 2;
+                    const x = ringRadius * Math.cos(phi);
+                    const z = ringRadius * Math.sin(phi);
+                    
+                    dots.push({ x, y, z, isSquare: false });
+                }
+            }
+        }
+
+        function rotateX(x, y, z, angle) {
+            const cos = Math.cos(angle);
+            const sin = Math.sin(angle);
+            return {
+                x: x,
+                y: y * cos - z * sin,
+                z: y * sin + z * cos
+            };
+        }
+
+        function rotateY(x, y, z, angle) {
+            const cos = Math.cos(angle);
+            const sin = Math.sin(angle);
+            return {
+                x: x * cos + z * sin,
+                y: y,
+                z: -x * sin + z * cos
+            };
+        }
+
+        function project(x, y, z) {
+            const scale = (300 / (300 + z)) * zoomFactor;
+            return {
+                x: x * scale + canvas.width / 2,
+                y: y * scale + canvas.height / 2,
+                scale: scale
+            };
+        }
+
+        function draw() {
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            const projected = dots.map(dot => {
+                let rotated = rotateY(dot.x, dot.y, dot.z, angleY);
+                rotated = rotateX(rotated.x, rotated.y, rotated.z, angleX);
+                const proj = project(rotated.x, rotated.y, rotated.z);
+                return { ...proj, z: rotated.z, isSquare: dot.isSquare };
+            });
+
+            projected.sort((a, b) => a.z - b.z);
+
+            const squareDot = projected.find(d => d.isSquare);
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            const distFromCenter = Math.sqrt(Math.pow(squareDot.x - centerX, 2) + Math.pow(squareDot.y - centerY, 2));
+            
+            if (squareDot.z < 0 && distFromCenter < 20 && !isZooming) {
+                isZooming = true;
+                zoomProgress = 0;
+            }
+            
+            if (isZooming) {
+                zoomProgress += 0.03;
+                
+                if (zoomProgress < 0.5) {
+                    zoomFactor = 1 + zoomProgress * 4;
+                    flashAlpha = zoomProgress * 2;
+                } else {
+                    zoomFactor = 3 - (zoomProgress - 0.5) * 4;
+                    flashAlpha = 2 - zoomProgress * 2;
+                }
+                
+                if (zoomProgress >= 1) {
+                    isZooming = false;
+                    zoomFactor = 1;
+                    flashAlpha = 0;
+                }
+            }
+
+            projected.forEach(dot => {
+                const size = dot.scale * 2;
+                const brightness = Math.floor((dot.scale - 0.5) * 255);
+                ctx.fillStyle = `rgb(${brightness}, ${brightness}, ${brightness})`;
+                
+                if (dot.isSquare) {
+                    ctx.fillRect(dot.x - size, dot.y - size, size * 2, size * 2);
+                } else {
+                    ctx.beginPath();
+                    ctx.arc(dot.x, dot.y, size, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            });
+
+            if (flashAlpha > 0) {
+                ctx.fillStyle = `rgba(255, 0, 0, ${flashAlpha * 0.3})`;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+
+            angleX += 0.005;
+            angleY += 0.007;
+
+            requestAnimationFrame(draw);
+        }
+
+        draw();
+    </script>
+</body>
+</html>

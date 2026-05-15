@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0a; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; }
+  canvas { display: block; filter: blur(0.6px); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d', { alpha: false });
+ctx.imageSmoothingEnabled = true;
+ctx.imageSmoothingQuality = 'high';
+const DPR = Math.min(window.devicePixelRatio || 1, 1.5);
+let W, H, CX, CY;
+
+function resize() {
+  const size = Math.min(window.innerWidth, window.innerHeight);
+  canvas.style.width = size + 'px';
+  canvas.style.height = size + 'px';
+  canvas.width = Math.floor(size * DPR);
+  canvas.height = Math.floor(size * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  W = size;
+  H = size;
+  CX = W / 2;
+  CY = H / 2;
+}
+resize();
+window.addEventListener('resize', resize);
+
+const NUM_POINTS = 300;
+
+// === Pre-rendered white glow sprite ===
+const GLOW_SIZE = 128;
+const glowSprite = document.createElement('canvas');
+glowSprite.width = glowSprite.height = GLOW_SIZE;
+{
+  const g = glowSprite.getContext('2d');
+  const grad = g.createRadialGradient(GLOW_SIZE / 2, GLOW_SIZE / 2, 0, GLOW_SIZE / 2, GLOW_SIZE / 2, GLOW_SIZE / 2);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.7, 'rgba(255,255,255,0.8)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, GLOW_SIZE, GLOW_SIZE);
+}
+
+// Per-color tinted glow sprite cache (key = "r,g,b")
+const tintedSpriteCache = new Map();
+function getTintedSprite(r, g, b) {
+  const key = (r << 16) | (g << 8) | b;
+  let s = tintedSpriteCache.get(key);
+  if (s) return s;
+  s = document.createElement('canvas');
+  s.width = s.height = GLOW_SIZE;
+  const c = s.getContext('2d');
+  c.drawImage(glowSprite, 0, 0);
+  c.globalCompositeOperation = 'source-in';
+  c.fillStyle = `rgb(${r},${g},${b})`;
+  c.fillRect(0, 0, GLOW_SIZE, GLOW_SIZE);
+  tintedSpriteCache.set(key, s);
+  // Cap cache to avoid unbounded growth
+  if (tintedSpriteCache.size > 256) {
+    const firstKey = tintedSpriteCache.keys().next().value;
+    tintedSpriteCache.delete(firstKey);
+  }
+  return s;
+}
+
+// === Shape generators ===
+function genClusterShape() {
+  const clusters = [];
+  for (let i = 0; i < 8; i++) {
+    clusters.push({
+      x: -Math.random() * 180 - 20,
+      y: (Math.random() - 0.5) * 300,
+      z: (Math.random() - 0.5) * 200,
+      r: 40 + Math.random() * 80
+    });
+  }
+  const pts = [];
+  for (let i = 0; i < NUM_POINTS; i++) {
+    const c = clusters[i % clusters.length];
+    let dx = 0, dy = 0, dz = 0;
+    for (let j = 0; j < 3; j++) { dx += Math.random() - 0.5; dy += Math.random() - 0.5; dz += Math.random() - 0.5; }
+    pts.push({ x: c.x + dx * c.r * 0.5, y: c.y + dy * c.r * 0.5, z: c.z + dz * c.r * 0.5 });
+  }
+  return pts;
+}
+function genButterflyShape() {
+  const pts = [];
+  for (let i = 0; i < NUM_POINTS; i++) {
+    const t = Math.random() * Math.PI * 2, r = Math.random();
+    const wing = Math.sin(t * 2) * 150 + Math.cos(t) * 80;
+    const x = -Math.abs(Math.cos(t)) * (120 + wing * 0.3) - 20;
+    const y = Math.sin(t) * 180 * Math.pow(r, 0.5);
+    const z = (Math.random() - 0.5) * 100;
+    pts.push({ x: x + (Math.random() - 0.5) * 30, y: y + (Math.random() - 0.5) * 30, z: z + (Math.random() - 0.5) * 30 });
+  }
+  return pts;
+}
+function genSkullShape() {
+  const pts = [];
+  for (let i = 0; i < NUM_POINTS; i++) {
+    const u = Math.random() * Math.PI, v = Math.random() * Math.PI - Math.PI / 2;
+    const r = 120 + Math.random() * 20;
+    let x = -Math.abs(Math.cos(v) * Math.sin(u)) * r - 30;
+    let y = Math.sin(v) * r * 1.1;
+    let z = Math.cos(v) * Math.cos(u) * r;
+    const dEye = Math.hypot(x - (-80), y - (-30));
+    if (dEye < 25) { x *= 0.6; y *= 0.6; }
+    if (y > 60) x *= 0.7;
+    pts.push({ x: x + (Math.random() - 0.5) * 15, y: y + (Math.random() - 0.5) * 15, z: z + (Math.random() - 0.5) * 15 });
+  }
+  return pts;
+}
+function genBatShape() {
+  const pts = [];
+  for (let i = 0; i < NUM_POINTS; i++) {
+    if (Math.random() < 0.25) {
+      pts.push({ x: -Math.random() * 30 - 10, y: (Math.random() - 0.5) * 120, z: (Math.random() - 0.5) * 40 });
+    } else {
+      const wt = Math.random();
+      const x = -20 - wt * 220;
+      const yEnv = Math.sin(wt * Math.PI) * 80 + Math.sin(wt * Math.PI * 5) * 30;
+      pts.push({
+        x: x + (Math.random() - 0.5) * 10,
+        y: (Math.random() - 0.5) * yEnv * 2 + (Math.random() - 0.5) * 10,
+        z: (Math.random() - 0.5) * 60 + (Math.random() - 0.5) * 10
+      });
+    }
+  }
+  return pts;
+}
+function genSpiderShape() {
+  const pts = [];
+  for (let i = 0; i < NUM_POINTS; i++) {
+    if (Math.random() < 0.3) {
+      const r = 40 + Math.random() * 30;
+      const t = Math.random() * Math.PI * 2;
+      const ph = Math.random() * Math.PI - Math.PI / 2;
+      pts.push({ x: -Math.abs(Math.cos(t) * Math.cos(ph)) * r - 10, y: Math.sin(ph) * r, z: Math.sin(t) * Math.cos(ph) * r });
+    } else {
+      const legAng = (Math.floor(Math.random() * 4) / 4) * Math.PI - Math.PI / 2;
+      const t = Math.random();
+      const bend = Math.sin(t * Math.PI) * 40;
+      pts.push({
+        x: -50 - t * 200 * Math.abs(Math.cos(legAng)) - 10,
+        y: Math.sin(legAng) * 200 * t + bend * Math.sign(legAng),
+        z: (Math.random() - 0.5) * 20
+      });
+    }
+  }
+  return pts;
+}
+
+function shapeToFlat(arr) {
+  const out = new Float32Array(NUM_POINTS * 3);
+  for (let i = 0; i < NUM_POINTS; i++) {
+    const p = arr[i] || { x: 0, y: 0, z: 0 };
+    out[i * 3] = p.x; out[i * 3 + 1] = p.y; out[i * 3 + 2] = p.z;
+  }
+  return out;
+}
+
+const shapeGenerators = [genClusterShape, genButterflyShape, genSkullShape, genBatShape, genSpiderShape];
+function randomShape() { return shapeToFlat(shapeGenerators[Math.floor(Math.random() * shapeGenerators.length)]()); }
+
+const palettes = [
+  { wire: [120, 200, 255], glow: [40, 60, 90] },
+  { wire: [255, 120, 180], glow: [80, 30, 60] },
+  { wire: [180, 255, 140], glow: [40, 80, 30] },
+  { wire: [255, 180, 80], glow: [80, 50, 20] },
+  { wire: [200, 140, 255], glow: [60, 40, 90] }
+];
+
+const sizes = new Float32Array(NUM_POINTS);
+for (let i = 0; i < NUM_POINTS; i++) sizes[i] = 14 + Math.random() * 32;
+
+// Precompute edges (K=2, sufficient for visual coherence and ~half the cost of K=4)
+const refShape = shapeToFlat(genClusterShape());
+const K = 4;
+let edgesArr;
+{
+  const edgeSet = new Set();
+  const list = [];
+  for (let i = 0; i < NUM_POINTS; i++) {
+    const ax = refShape[i * 3], ay = refShape[i * 3 + 1], az = refShape[i * 3 + 2];
+    const dists = [];
+    for (let j = 0; j < NUM_POINTS; j++) {
+      if (i === j) continue;
+      const dx = ax - refShape[j * 3], dy = ay - refShape[j * 3 + 1], dz = az - refShape[j * 3 + 2];
+      dists.push({ j, d: dx * dx + dy * dy + dz * dz });
+    }
+    dists.sort((u, v) => u.d - v.d);
+    for (let k = 0; k < K; k++) {
+      const j = dists[k].j;
+      const key = i < j ? i * NUM_POINTS + j : j * NUM_POINTS + i;
+      if (!edgeSet.has(key)) { edgeSet.add(key); list.push(i, j); }
+    }
+  }
+  edgesArr = new Int32Array(list);
+}
+const NUM_EDGES = edgesArr.length / 2;
+
+function makeLayer(offset) {
+  return {
+    shapeA: randomShape(), shapeB: randomShape(),
+    paletteA: Math.floor(Math.random() * palettes.length),
+    paletteB: Math.floor(Math.random() * palettes.length),
+    lifeDur: 6 + Math.random() * 4, age: offset,
+    // rotSpeed in radians per second
+    rotSpeed: (0.012 + Math.random() * 0.012) * 60,
+    rotPhase: Math.random() * Math.PI * 2,
+    breathPhase: Math.random() * Math.PI * 2,
+    scale: 1.0 + Math.random() * 0.4,
+    offsetX: (Math.random() - 0.5) * 200,
+    offsetY: (Math.random() - 0.5) * 200,
+    pts: new Float32Array(NUM_POINTS * 3),
+    proj: new Float32Array(NUM_POINTS * 4),
+    sortedIdx: new Array(NUM_POINTS),
+    ownAngle: Math.random() * Math.PI * 2
+  };
+}
+function recycleLayer(layer) {
+  layer.shapeA = layer.shapeB;
+  layer.paletteA = layer.paletteB;
+  layer.shapeB = randomShape();
+  layer.paletteB = Math.floor(Math.random() * palettes.length);
+  layer.lifeDur = 6 + Math.random() * 4;
+  layer.age = 0;
+  layer.rotSpeed = (0.012 + Math.random() * 0.012) * 60;
+  layer.scale = 1.0 + Math.random() * 0.4;
+  layer.offsetX = (Math.random() - 0.5) * 200;
+  layer.offsetY = (Math.random() - 0.5) * 200;
+}
+
+const layers = [makeLayer(0), makeLayer(-3)];
+// Initialize sortedIdx once
+for (const l of layers) for (let i = 0; i < NUM_POINTS; i++) l.sortedIdx[i] = i;
+
+let globalAngle = 0, globalTime = 0;
+
+function smoothstep(t) { return t * t * (3 - 2 * t); }
+function envelopeFor(lifeT) {
+  let env;
+  if (lifeT < 0.4) env = lifeT / 0.4;
+  else if (lifeT > 0.6) env = (1 - lifeT) / 0.4;
+  else env = 1;
+  if (env < 0) env = 0; else if (env > 1) env = 1;
+  return env * env * (3 - 2 * env);
+}
+
+function drawLayer(layer) {
+  const lifeT = layer.age / layer.lifeDur;
+  const envelope = envelopeFor(lifeT);
+  if (envelope <= 0.01) return;
+  const t = smoothstep(lifeT < 0 ? 0 : lifeT > 1 ? 1 : lifeT);
+
+  // Outward spreading scale: starts compressed, expands outward when fading
+  // - At fade-in (lifeT < 0.4): grows from 0.6 to 1.0
+  // - At full life (0.4-0.6): stays at 1.0
+  // - At fade-out (lifeT > 0.6): expands from 1.0 to 1.8
+  let spreadScale;
+  if (lifeT < 0.4) {
+    spreadScale = 0.6 + (lifeT / 0.4) * 0.4;
+  } else if (lifeT > 0.6) {
+    const ft = (lifeT - 0.6) / 0.4;
+    spreadScale = 1.0 + smoothstep(ft) * 0.8;
+  } else {
+    spreadScale = 1.0;
+  }
+
+  const a = layer.shapeA, b = layer.shapeB, pts = layer.pts;
+  const scl = layer.scale * spreadScale;
+  const len3 = NUM_POINTS * 3;
+  for (let i = 0; i < len3; i++) pts[i] = (a[i] + (b[i] - a[i]) * t) * scl;
+
+  const pa = palettes[layer.paletteA], pb = palettes[layer.paletteB];
+  const wr = (pa.wire[0] + (pb.wire[0] - pa.wire[0]) * t) | 0;
+  const wg = (pa.wire[1] + (pb.wire[1] - pa.wire[1]) * t) | 0;
+  const wb = (pa.wire[2] + (pb.wire[2] - pa.wire[2]) * t) | 0;
+  const gr = pa.glow[0] + (pb.glow[0] - pa.glow[0]) * t;
+  const gg = pa.glow[1] + (pb.glow[1] - pa.glow[1]) * t;
+  const gb = pa.glow[2] + (pb.glow[2] - pa.glow[2]) * t;
+
+  const ang = layer.ownAngle + layer.rotPhase;
+  const breath = 1 + Math.sin(globalTime * BREATH_FREQ + layer.breathPhase) * 0.1;
+  const offX = layer.offsetX, offY = layer.offsetY;
+
+  const tiltX = Math.sin(ang * 0.7) * 0.15;
+  const cosTilt = Math.cos(tiltX), sinTilt = Math.sin(tiltX);
+  const cosAng = Math.cos(ang), sinAng = Math.sin(ang);
+  const s = W / 800;
+
+  const proj = layer.proj;
+  for (let i = 0; i < NUM_POINTS; i++) {
+    const i3 = i * 3, i4 = i * 4;
+    const x = pts[i3] * breath, y = pts[i3 + 1] * breath, z = pts[i3 + 2] * breath;
+    const y1 = y * cosTilt - z * sinTilt;
+    const z1 = y * sinTilt + z * cosTilt;
+    const x2 = x * cosAng + z1 * sinAng;
+    const z2 = -x * sinAng + z1 * cosAng;
+    const persp = 500 / (500 + z2);
+    proj[i4] = CX + (x2 * persp + offX) * s;
+    proj[i4 + 1] = CY + (y1 * persp + offY) * s;
+    proj[i4 + 2] = persp * s;
+    proj[i4 + 3] = z2;
+  }
+
+  // Skip depth sort — glow sprites composite well enough without it,
+  // and sorting 500 indices per layer per frame is expensive.
+
+  // === Glow blobs via pre-rendered sprite ===
+  for (let i = 0; i < NUM_POINTS; i++) {
+    const i4 = i * 4;
+    const sc = proj[i4 + 2];
+    const r = sizes[i] * sc;
+    if (r < 0.5) continue;
+    const sx = proj[i4], sy = proj[i4 + 1];
+    // Cull off-screen points (with margin for blob radius)
+    if (sx < -r || sx > W + r || sy < -r || sy > H + r) {
+      // still need to check mirror
+      const mx = W - sx;
+      if (mx < -r || mx > W + r) continue;
+    }
+    let alpha = sc < 0.3 ? 0.3 : sc > 1 ? 1 : sc;
+    alpha *= envelope;
+    const tint = (1 - sc) * 0.5 + 0.5;
+    // Quantize tint to 4 levels for sprite cache hits
+    const qTint = Math.round(tint * 4) / 4;
+    const cr = (gr * qTint + 15) | 0;
+    const cg = (gg * qTint + 15) | 0;
+    const cb = (gb * qTint + 15) | 0;
+    const sprite = getTintedSprite(cr, cg, cb);
+
+    ctx.globalAlpha = alpha;
+    const r2 = r * 2;
+    ctx.drawImage(sprite, sx - r, sy - r, r2, r2);
+    ctx.drawImage(sprite, (W - sx) - r, sy - r, r2, r2);
+  }
+  ctx.globalAlpha = 1;
+
+  // === Wireframe — batch by alpha bucket ===
+  const BUCKETS = 12;
+  // Reset bucket arrays (reused across frames via closure-scoped storage)
+  const bucketStorage = drawLayer._buckets || (drawLayer._buckets = []);
+  for (let i = 0; i < BUCKETS; i++) {
+    if (!bucketStorage[i]) bucketStorage[i] = [];
+    bucketStorage[i].length = 0;
+  }
+
+  for (let e = 0; e < NUM_EDGES; e++) {
+    const i = edgesArr[e * 2], j = edgesArr[e * 2 + 1];
+    const i3 = i * 3, j3 = j * 3;
+    const dx = pts[i3] - pts[j3], dy = pts[i3 + 1] - pts[j3 + 1], dz = pts[i3 + 2] - pts[j3 + 2];
+    if (dx * dx + dy * dy + dz * dz > 8000) continue;
+
+    const i4 = i * 4, j4 = j * 4;
+    const avgDepth = (proj[i4 + 3] + proj[j4 + 3]) * 0.5;
+    let alpha = 0.4 - avgDepth * 0.001;
+    if (alpha < 0.05) alpha = 0.05; else if (alpha > 0.4) alpha = 0.4;
+
+    const bIdx = Math.min(BUCKETS - 1, Math.floor((alpha / 0.4) * BUCKETS));
+    bucketStorage[bIdx].push(i4, j4);
+  }
+
+  ctx.lineWidth = 0.8;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  for (let bi = 0; bi < BUCKETS; bi++) {
+    const bucket = bucketStorage[bi];
+    if (bucket.length === 0) continue;
+    const alpha = ((bi + 0.5) / BUCKETS) * 0.4 * envelope;
+    ctx.strokeStyle = `rgba(${wr},${wg},${wb},${alpha})`;
+    ctx.beginPath();
+    for (let n = 0; n < bucket.length; n += 2) {
+      const ai4 = bucket[n], bj4 = bucket[n + 1];
+      const ax = proj[ai4], ay = proj[ai4 + 1];
+      const bx = proj[bj4], by = proj[bj4 + 1];
+      ctx.moveTo(ax, ay); ctx.lineTo(bx, by);
+      ctx.moveTo(W - ax, ay); ctx.lineTo(W - bx, by);
+    }
+    ctx.stroke();
+  }
+}
+
+// === Typographic background ===
+const NUMBERS = [
+  '0','1','00','11','101','404','23','42','93','94','95','96',
+  '1994','1995','1996','2001','2046','666','777','808','909','303',
+  '0xDEAD','NUXX','MK1','MK2','TR-808','TR-909','TB-303',
+  '127.0.0.1','440Hz','120BPM','128BPM','174BPM',
+  'RPM','kHz','dB','CH1','CH2','V.01','V.02','#01','#42',
+  'RUN/01','TAKE 3','A1','B2','SIDE A','SIDE B',
+  '01001010','11010110','NULL','VOID','EOF',
+  'TRACK 04','1.21GW','CTRL','ESC','0xFF','500','200 OK'
+];
+function rndR(a, b) { return a + Math.random() * (b - a); }
+function riR(a, b) { return Math.floor(rndR(a, b)); }
+function pickR(arr) { return arr[riR(0, arr.length)]; }
+
+function makeOff() {
+  const oc = document.createElement('canvas');
+  oc.width = oc.height = W;
+  return oc.getContext('2d');
+}
+
+function renderTypoText(o) {
+  o.clearRect(0, 0, W, W);
+  const baseSz = rndR(8, 18);
+  const font = Math.random() < 0.5 ? 'monospace' : 'sans-serif';
+  const angle = Math.random() < 0.2 ? Math.PI / 2 : rndR(-0.05, 0.05);
+  o.save();
+  o.translate(W / 2, W / 2); o.rotate(angle); o.translate(-W / 2, -W / 2);
+  let y = rndR(-baseSz * 2, baseSz * 2);
+  while (y < W + baseSz * 3) {
+    let x = rndR(-baseSz * 6, 0);
+    const lineH = baseSz * rndR(0.9, 1.4);
+    while (x < W + baseSz * 6) {
+      const sz = rndR(7, 20);
+      o.font = `${Math.random() < 0.4 ? 'bold ' : ''}${sz}px ${font}`;
+      o.fillStyle = `rgba(255,255,255,${rndR(0.06, 0.18)})`;
+      const word = pickR(NUMBERS);
+      o.fillText(word, x, y);
+      x += o.measureText(word).width + sz * rndR(0.6, 2.2);
+    }
+    y += lineH;
+  }
+  o.restore();
+}
+
+function renderTypoDense(o) {
+  o.clearRect(0, 0, W, W);
+  const nb = riR(1, 3);
+  for (let b = 0; b < nb; b++) {
+    const cx = rndR(W * 0.05, W * 0.7), cy = rndR(W * 0.05, W * 0.7);
+    const sz = rndR(7, 14);
+    const lines = riR(5, 14);
+    const font = Math.random() < 0.5 ? 'monospace' : 'sans-serif';
+    for (let l = 0; l < lines; l++) {
+      const y = cy + l * sz * rndR(0.7, 0.9);
+      const targetW = rndR(W * 0.12, W * 0.4);
+      let line = '';
+      o.font = `bold ${sz}px ${font}`;
+      while (o.measureText(line).width < targetW) line += pickR(NUMBERS).replace(/ /g, '');
+      const chars = line.split('');
+      const spacing = targetW / chars.length;
+      o.fillStyle = `rgba(255,255,255,${rndR(0.08, 0.2)})`;
+      for (let i = 0; i < chars.length; i++) o.fillText(chars[i], cx + i * spacing, y);
+    }
+  }
+}
+
+let typoCirclePhase = 0;
+function renderTypoCircles(o) {
+  o.clearRect(0, 0, W, W);
+  const nb = riR(2, 5);
+  for (let ci = 0; ci < nb; ci++) {
+    const cx = rndR(W * 0.1, W * 0.9), cy = rndR(W * 0.1, W * 0.9);
+    const r = rndR(W * 0.05, W * 0.25);
+    const sz = rndR(7, 14);
+    const word = (pickR(NUMBERS) + ' ' + pickR(NUMBERS) + ' ').toUpperCase();
+    const rings = riR(1, 4);
+    for (let ring = 0; ring < rings; ring++) {
+      const rr = r + ring * sz * rndR(0.9, 1.6);
+      const charCount = Math.floor((2 * Math.PI * rr) / (sz * 0.58));
+      o.font = `${Math.random() < 0.5 ? 'bold ' : ''}${sz}px monospace`;
+      o.fillStyle = `rgba(255,255,255,${rndR(0.08, 0.18)})`;
+      for (let i = 0; i < charCount; i++) {
+        const a = (i / charCount) * Math.PI * 2 + typoCirclePhase;
+        o.save();
+        o.translate(cx, cy); o.rotate(a - Math.PI / 2);
+        o.fillText(word[i % word.length], 0, -rr);
+        o.restore();
+      }
+    }
+  }
+}
+
+const typoState = {
+  text:    { cur: null, prev: null, alpha: 0, blending: false },
+  dense:   { cur: null, prev: null, alpha: 0, blending: false },
+  circles: { cur: null, prev: null, alpha: 0, blending: false }
+};
+function initTypoState() {
+  typoState.text.cur = makeOff();    typoState.text.prev = makeOff();
+  typoState.dense.cur = makeOff();   typoState.dense.prev = makeOff();
+  typoState.circles.cur = makeOff(); typoState.circles.prev = makeOff();
+  renderTypoText(typoState.text.cur);
+  renderTypoDense(typoState.dense.cur);
+  renderTypoCircles(typoState.circles.cur);
+}
+initTypoState();
+
+function startTypoBlend(key, renderFn) {
+  const s = typoState[key];
+  if (s.blending) return;
+  s.prev.clearRect(0, 0, W, W);
+  s.prev.drawImage(s.cur.canvas, 0, 0);
+  renderFn(s.cur);
+  s.alpha = 0;
+  s.blending = true;
+}
+
+// Bake all 3 typo layers into one static canvas — only one drawImage per frame
+let bakedTypo = null;
+function bakeTypoBackground() {
+  bakedTypo = document.createElement('canvas');
+  bakedTypo.width = bakedTypo.height = W;
+  const bctx = bakedTypo.getContext('2d');
+  bctx.drawImage(typoState.text.cur.canvas, 0, 0);
+  bctx.drawImage(typoState.dense.cur.canvas, 0, 0);
+  bctx.drawImage(typoState.circles.cur.canvas, 0, 0);
+}
+bakeTypoBackground();
+
+function drawTypoBackground(dt) {
+  ctx.drawImage(bakedTypo, 0, 0);
+}
+
+let typoTimers = { text: 0, dense: 0, circles: 0 };
+
+function tickTypo(dt) {
+  // Static background — nothing animates
+}
+
+// Cached vignette + scanlines
+let vignetteGrad, vignetteSize = -1;
+function getVignette() {
+  if (vignetteSize !== W) {
+    vignetteGrad = ctx.createRadialGradient(CX, CY, W * 0.3, CX, CY, W * 0.7);
+    vignetteGrad.addColorStop(0, 'rgba(0,0,0,0)');
+    vignetteGrad.addColorStop(1, 'rgba(0,0,0,0.6)');
+    vignetteSize = W;
+  }
+  return vignetteGrad;
+}
+let scanlineCanvas, scanlineSize = -1;
+function getScanlines() {
+  if (scanlineSize !== W) {
+    // Pre-render full-size scanlines once into a canvas
+    const tile = document.createElement('canvas');
+    tile.width = 2; tile.height = 4;
+    const tctx = tile.getContext('2d');
+    tctx.fillStyle = 'rgba(0,0,0,0.25)'; tctx.fillRect(0, 0, 2, 2);
+    tctx.fillStyle = 'rgba(255,255,255,0.03)'; tctx.fillRect(0, 2, 2, 1);
+
+    scanlineCanvas = document.createElement('canvas');
+    scanlineCanvas.width = scanlineCanvas.height = W;
+    const sctx = scanlineCanvas.getContext('2d');
+    const pat = sctx.createPattern(tile, 'repeat');
+    sctx.fillStyle = pat;
+    sctx.fillRect(0, 0, W, W);
+    scanlineSize = W;
+  }
+  return scanlineCanvas;
+}
+
+const bgState = { r: 8, g: 8, b: 12 };
+let lastTime = performance.now();
+
+// FPS tracking
+const fpsState = {
+  frames: 0,
+  acc: 0,
+  current: 0,
+  worst: Infinity,
+  worstWindow: Infinity,
+  windowAcc: 0,
+  windowFrames: 0,
+  maxFrameMs: 0,
+  maxFrameWindowMs: 0
+};
+
+// Target speeds (per second, not per frame)
+const ROT_SPEED = 0.018 * 60;        // radians per second
+const BREATH_FREQ = 1.8;             // Hz
+
+function draw(now) {
+  const dt = (now - lastTime) / 1000;
+  lastTime = now;
+  const cdt = dt > 0.05 ? 0.05 : dt;
+  globalAngle += ROT_SPEED * cdt;
+  globalTime += cdt;
+
+  for (let i = 0; i < layers.length; i++) {
+    layers[i].age += cdt;
+    layers[i].ownAngle += layers[i].rotSpeed * cdt;
+    if (layers[i].age >= layers[i].lifeDur) recycleLayer(layers[i]);
+  }
+
+  let bgR = 0, bgG = 0, bgB = 0, bgW = 0;
+  for (let li = 0; li < layers.length; li++) {
+    const layer = layers[li];
+    const lifeT = layer.age / layer.lifeDur;
+    const env = envelopeFor(lifeT);
+    if (env <= 0.01) continue;
+    const t = smoothstep(lifeT < 0 ? 0 : lifeT > 1 ? 1 : lifeT);
+    const pa = palettes[layer.paletteA], pb = palettes[layer.paletteB];
+    bgR += (pa.glow[0] + (pb.glow[0] - pa.glow[0]) * t) * env;
+    bgG += (pa.glow[1] + (pb.glow[1] - pa.glow[1]) * t) * env;
+    bgB += (pa.glow[2] + (pb.glow[2] - pa.glow[2]) * t) * env;
+    bgW += env;
+  }
+  if (bgW > 0) { bgR /= bgW; bgG /= bgW; bgB /= bgW; }
+  const finalR = bgR * 0.35 + 8, finalG = bgG * 0.35 + 8, finalB = bgB * 0.35 + 12;
+  // Time-based smoothing: ~3% per frame at 60fps = ~1.8/s
+  const bgK = 1 - Math.exp(-1.8 * cdt);
+  bgState.r += (finalR - bgState.r) * bgK;
+  bgState.g += (finalG - bgState.g) * bgK;
+  bgState.b += (finalB - bgState.b) * bgK;
+
+  ctx.fillStyle = `rgb(${bgState.r|0},${bgState.g|0},${bgState.b|0})`;
+  ctx.fillRect(0, 0, W, H);
+
+  tickTypo(cdt);
+  drawTypoBackground(cdt);
+
+  for (let i = 0; i < layers.length; i++) drawLayer(layers[i]);
+
+  ctx.fillStyle = getVignette();
+  ctx.fillRect(0, 0, W, H);
+  ctx.drawImage(getScanlines(), 0, 0);
+
+  requestAnimationFrame(draw);
+}
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>

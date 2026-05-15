@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { margin:0; overflow:hidden; display:flex; justify-content:center; align-items:center; height:100vh; background:#000; }
+    canvas { display:block; border:1px solid #333; border-radius:4px; }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <script>
+    const c = document.getElementById('c');
+    const gl = c.getContext('webgl');
+    const {cos,sin,sqrt,PI} = Math;
+    const N = 30000;
+
+    let W;
+    function resize() {
+      W = Math.min(innerWidth, innerHeight);
+      c.width = c.height = W;
+      c.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)';
+    }
+    resize();
+    onresize = resize;
+
+    const vs = `
+    attribute float a_id;
+    uniform float u_t, u_sc, u_W;
+    uniform vec2 u_hd;
+    uniform float u_rot;
+    varying vec3 v_c;
+    void main(){
+      float id=floor(a_id/8.),sym=mod(a_id,8.);
+      float x=mod(id,100.),y=id/150.;
+      float k=x/4.-12.5,e=y/9.;
+      float o=sqrt(k*k+e*e)/9.;
+      float q=x+99.+cos(9./k)+o*k*(cos(e*9.)/3.+cos(y/9.)/0.7)*sin(o*4.-u_t);
+      float c=o*e/30.-u_t/8.;
+      float px=(q*0.7*sin(c)+200.)*u_sc;
+      float py=(200.+y/9.*cos(c*4.-u_t/2.)-q/2.*cos(c))*u_sc;
+      float dx=px-u_hd.x,dy=py-u_hd.y;
+      float cx=u_W/2.;
+      vec2 p;
+      if(sym<.5)p=vec2(cx+dx,cx+dy);
+      else if(sym<1.5)p=vec2(cx-dx,cx-dy);
+      else if(sym<2.5)p=vec2(cx+dy,cx-dx);
+      else if(sym<3.5)p=vec2(cx-dy,cx+dx);
+      else if(sym<4.5){float a=0.7071;p=vec2(cx+a*(dx+dy),cx+a*(-dx+dy));}
+      else if(sym<5.5){float a=0.7071;p=vec2(cx-a*(dx+dy),cx-a*(-dx+dy));}
+      else if(sym<6.5){float a=0.7071;p=vec2(cx+a*(dx-dy),cx+a*(dx+dy));}
+      else{float a=0.7071;p=vec2(cx-a*(dx-dy),cx-a*(dx+dy));}
+      gl_Position=vec4(p/u_W*2.-1.,0.,1.);
+      // Rotate around center
+      float cr2=cos(u_rot),sr2=sin(u_rot);
+      gl_Position.xy=vec2(-(gl_Position.x*cr2-gl_Position.y*sr2),gl_Position.x*sr2+gl_Position.y*cr2);
+      gl_Position.y=-gl_Position.y;
+      gl_PointSize=max(1.,u_sc);
+      float ang=atan(dy,dx);
+      float dist=sqrt(dx*dx+dy*dy)/(u_W*.35);
+      // Slow morphing base
+      float t1=ang*2.+u_t*.3+dist*4.;
+      float t2=ang*3.-u_t*.2+dist*6.+1.57;
+      float t3=ang*5.+u_t*.15-dist*8.+3.14;
+      // Deep layered color fields
+      float r=sin(t1)*.5+.5;
+      float g=sin(t2*.618)*.5+.5;
+      float b=sin(t3*.382)*.5+.5;
+      // Slow concentric breathing rings
+      float rings=sin(dist*20.-u_t*.6)*.5+.5;
+      // Slow fractal spiral overlay
+      float spiral=sin(ang*11.+dist*15.-u_t*.4)*.5+.5;
+      // Kaleidoscopic interference
+      float kale=sin(ang*7.-dist*12.+u_t*.25)*.5+.5;
+      // Hue rotation through distance
+      float hueShift=dist*3.+u_t*.15;
+      float r2=sin(hueShift)*.5+.5;
+      float g2=sin(hueShift+2.094)*.5+.5;
+      float b2=sin(hueShift+4.188)*.5+.5;
+      // Mix everything
+      r=r*.25+rings*.2+r2*.35+spiral*.2;
+      g=g*.2+kale*.3+g2*.35+.15;
+      b=b*.2+spiral*.25+b2*.35+rings*.2;
+      // Saturate & boost
+      float lum=(r+g+b)/3.;
+      r=lum+((r-lum)*2.2);
+      g=lum+((g-lum)*2.2);
+      b=lum+((b-lum)*2.2);
+      // Gentle slow pulse
+      float pulse=.85+sin(u_t*.2+dist*3.)*.15;
+      v_c=clamp(vec3(r,g,b)*pulse,0.,1.);
+    }`;
+
+    const fs = `
+    precision mediump float;
+    varying vec3 v_c;
+    void main(){gl_FragColor=vec4(v_c,1.);}`;
+
+    function mk(src,type){
+      const s=gl.createShader(type);
+      gl.shaderSource(s,src);gl.compileShader(s);
+      if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))console.error(gl.getShaderInfoLog(s));
+      return s;
+    }
+    const pg=gl.createProgram();
+    gl.attachShader(pg,mk(vs,gl.VERTEX_SHADER));
+    gl.attachShader(pg,mk(fs,gl.FRAGMENT_SHADER));
+    gl.linkProgram(pg);gl.useProgram(pg);
+
+    const ids=new Float32Array(N*8);
+    for(let i=0;i<N*8;i++)ids[i]=i;
+    const buf=gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+    gl.bufferData(gl.ARRAY_BUFFER,ids,gl.STATIC_DRAW);
+    const aId=gl.getAttribLocation(pg,'a_id');
+    gl.enableVertexAttribArray(aId);
+    gl.vertexAttribPointer(aId,1,gl.FLOAT,false,0,0);
+
+    const uT=gl.getUniformLocation(pg,'u_t');
+    const uSc=gl.getUniformLocation(pg,'u_sc');
+    const uHd=gl.getUniformLocation(pg,'u_hd');
+    const uW=gl.getUniformLocation(pg,'u_W');
+    const uRot=gl.getUniformLocation(pg,'u_rot');
+
+    // Precompute head particle index (min o, skip k≈0)
+    let hIdx=0,mO=Infinity;
+    for(let i=N;i--;){
+      const x=i%100,y=i/150,k=x/4-12.5,e=y/9;
+      if(Math.abs(k)<0.01)continue;
+      const o=sqrt(k*k+e*e)/9;
+      if(o<mO){mO=o;hIdx=i;}
+    }
+
+    let t=0;
+    function head(){
+      const sc=W/400,i=hIdx;
+      const x=i%100,y=i/150,k=x/4-12.5,e=y/9;
+      const o=sqrt(k*k+e*e)/9;
+      const q=x+99+cos(9/k)+o*k*(cos(e*9)/3+cos(y/9)/0.7)*sin(o*4-t);
+      const cc=o*e/30-t/8;
+      return[(q*0.7*sin(cc)+200)*sc,(200+y/9*cos(cc*4-t/2)-q/2*cos(cc))*sc];
+    }
+
+    function draw(){
+      t+=PI/60;
+      const sc=W/400;
+      const[hx,hy]=head();
+      gl.viewport(0,0,W,W);
+      gl.clearColor(2/255,0,4/255,1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.uniform1f(uT,t);
+      gl.uniform1f(uSc,sc);
+      gl.uniform2f(uHd,hx,hy);
+      gl.uniform1f(uW,W);
+      gl.uniform1f(uRot,t*0.15);
+      gl.drawArrays(gl.POINTS,0,N*8);
+      requestAnimationFrame(draw);
+    }
+    draw();
+  </script>
+</body>
+</html>

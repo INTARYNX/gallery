@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0a0000; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+  #container { position: relative; width: min(100vw, 100vh); height: min(100vw, 100vh); }
+  #c2d, #cgl, #cdust { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="container">
+  <canvas id="c2d"></canvas>
+  <canvas id="cgl"></canvas>
+  <canvas id="cdust"></canvas>
+</div>
+<script>
+const S = 800;
+
+// ── OFFSCREEN 2D ───────────────────────────────────────────────────────────
+const off = document.createElement('canvas');
+off.width = S; off.height = 1066;
+const ctx = off.getContext('2d');
+const H = off.height;
+
+const WOOD = '#1a0400';
+const FT = 14, PAD = 16;
+
+const bg = ctx.createRadialGradient(S/2,H/2,10,S/2,H/2,Math.max(S,H)*0.75);
+bg.addColorStop(0,'#f5a030'); bg.addColorStop(0.5,'#c05010'); bg.addColorStop(1,'#501800');
+ctx.fillStyle = bg; ctx.fillRect(0,0,S,H);
+
+function hexLattice(x,y,w,h,bw) {
+  const r=9, dx=r*Math.sqrt(3), dy=r*1.5;
+  ctx.save(); ctx.beginPath(); ctx.rect(x,y,w,h); ctx.clip();
+  ctx.strokeStyle=WOOD; ctx.lineWidth=bw;
+  for(let row=-2;row<h/dy+3;row++) for(let col=-2;col<w/dx+3;col++) {
+    const hx=x+col*dx+(row%2?dx/2:0), hy=y+row*dy;
+    ctx.beginPath();
+    for(let i=0;i<6;i++){const a=Math.PI/6+i*Math.PI/3; i===0?ctx.moveTo(hx+Math.cos(a)*r,hy+Math.sin(a)*r):ctx.lineTo(hx+Math.cos(a)*r,hy+Math.sin(a)*r);}
+    ctx.closePath(); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function starLattice(x,y,w,h,bw) {
+  const u=38;
+  ctx.save(); ctx.beginPath(); ctx.rect(x,y,w,h); ctx.clip();
+  ctx.strokeStyle=WOOD; ctx.lineWidth=bw;
+  for(let row=-2;row<h/u+3;row++) for(let col=-2;col<w/u+3;col++) {
+    const cx=x+col*u+u/2, cy=y+row*u+u/2, R=u*0.48, r2=u*0.20;
+    ctx.beginPath();
+    for(let i=0;i<16;i++){const a=i*Math.PI/8,rr=i%2===0?R:r2; i===0?ctx.moveTo(cx+Math.cos(a)*rr,cy+Math.sin(a)*rr):ctx.lineTo(cx+Math.cos(a)*rr,cy+Math.sin(a)*rr);}
+    ctx.closePath(); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function circleLattice(x,y,w,h,bw) {
+  const r=17, step=r*2;
+  ctx.save(); ctx.beginPath(); ctx.rect(x,y,w,h); ctx.clip();
+  ctx.strokeStyle=WOOD; ctx.lineWidth=bw;
+  for(let row=-2;row<h/step+3;row++) for(let col=-2;col<w/step+3;col++) {
+    ctx.beginPath(); ctx.arc(x+col*step,y+row*step,r,0,Math.PI*2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(x+col*step+r,y+row*step+r,r,0,Math.PI*2); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function crossLattice(x,y,w,h,bw) {
+  const s=28, hs=s/2;
+  ctx.save(); ctx.beginPath(); ctx.rect(x,y,w,h); ctx.clip();
+  ctx.strokeStyle=WOOD; ctx.lineWidth=bw;
+  for(let col=-1;col<w/s+2;col++){ctx.beginPath();ctx.moveTo(x+col*s,y-s);ctx.lineTo(x+col*s,y+h+s);ctx.stroke();}
+  for(let row=-1;row<h/s+2;row++){ctx.beginPath();ctx.moveTo(x-s,y+row*s);ctx.lineTo(x+w+s,y+row*s);ctx.stroke();}
+  ctx.lineWidth=bw*0.7;
+  for(let row=-1;row<h/s+2;row++) for(let col=-1;col<w/s+2;col++) {
+    const cx=x+col*s+hs, cy=y+row*s+hs;
+    ctx.beginPath(); ctx.moveTo(cx,cy-hs); ctx.lineTo(cx+hs,cy); ctx.lineTo(cx,cy+hs); ctx.lineTo(cx-hs,cy); ctx.closePath(); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function zellij(x,y,w,h,bw) {
+  const u=52;
+  ctx.save(); ctx.beginPath(); ctx.rect(x,y,w,h); ctx.clip();
+  ctx.strokeStyle=WOOD; ctx.lineWidth=bw;
+  for(let row=-2;row<h/u+3;row++) for(let col=-2;col<w/u+3;col++) {
+    const cx=x+col*u+u/2, cy=y+row*u+u/2, R=u*0.46, r2=u*0.18;
+    ctx.beginPath();
+    for(let i=0;i<24;i++){const a=i*Math.PI/12,rr=i%2===0?R:r2; i===0?ctx.moveTo(cx+Math.cos(a)*rr,cy+Math.sin(a)*rr):ctx.lineTo(cx+Math.cos(a)*rr,cy+Math.sin(a)*rr);}
+    ctx.closePath(); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+const colW=(S-PAD*2-FT*5)/4, rowH=(H-PAD*2-FT*5)/4;
+const bw=5;
+const cellX=c=>PAD+FT*(c+1)+colW*c;
+const cellY=r=>PAD+FT*(r+1)+rowH*r;
+
+const lattices=[
+  [hexLattice,   circleLattice, circleLattice, hexLattice   ],
+  [hexLattice,   starLattice,   starLattice,   circleLattice],
+  [crossLattice, starLattice,   starLattice,   hexLattice   ],
+  [circleLattice,zellij,        crossLattice,  zellij       ],
+];
+
+for(let r=0;r<4;r++) for(let c=0;c<4;c++) {
+  if((c===1||c===2)&&(r===1||r===2)) continue;
+  lattices[r][c](cellX(c),cellY(r),colW,rowH,bw);
+}
+
+const ax=cellX(1), ay=cellY(1), aw=colW*2+FT, ah=rowH*2+FT, archCy=ay+aw/2;
+
+// arch interior
+ctx.save(); ctx.beginPath();
+ctx.moveTo(ax,ay+ah); ctx.lineTo(ax,archCy);
+ctx.arc(ax+aw/2,archCy,aw/2,Math.PI,0,false);
+ctx.lineTo(ax+aw,ay+ah); ctx.closePath(); ctx.clip();
+starLattice(ax,ay,aw,ah,bw); ctx.restore();
+
+// left spandrel
+ctx.save(); ctx.beginPath();
+ctx.moveTo(ax,ay); ctx.lineTo(ax+aw/2,ay); ctx.lineTo(ax+aw/2,archCy);
+ctx.arc(ax+aw/2,archCy,aw/2,-Math.PI/2,Math.PI,true);
+ctx.closePath(); ctx.clip();
+hexLattice(ax,ay,aw/2,archCy-ay,bw); ctx.restore();
+
+// right spandrel
+ctx.save(); ctx.beginPath();
+ctx.moveTo(ax+aw/2,ay); ctx.lineTo(ax+aw,ay); ctx.lineTo(ax+aw,archCy);
+ctx.arc(ax+aw/2,archCy,aw/2,0,-Math.PI/2,true);
+ctx.closePath(); ctx.clip();
+hexLattice(ax+aw/2,ay,aw/2,archCy-ay,bw); ctx.restore();
+
+// frame
+ctx.fillStyle=WOOD;
+ctx.fillRect(0,0,S,PAD); ctx.fillRect(0,H-PAD,S,PAD);
+ctx.fillRect(0,0,PAD,H); ctx.fillRect(S-PAD,0,PAD,H);
+for(let c=0;c<=4;c++) ctx.fillRect(PAD+c*(colW+FT),PAD,FT,H-PAD*2);
+for(let r=0;r<=4;r++) ctx.fillRect(PAD,PAD+r*(rowH+FT),S-PAD*2,FT);
+
+// arch border repaint
+ctx.save(); ctx.beginPath();
+ctx.moveTo(ax,ay+ah); ctx.lineTo(ax,archCy);
+ctx.arc(ax+aw/2,archCy,aw/2,Math.PI,0,false);
+ctx.lineTo(ax+aw,ay+ah); ctx.closePath(); ctx.clip();
+starLattice(ax,ay,aw,ah,bw); ctx.restore();
+
+ctx.strokeStyle=WOOD; ctx.lineWidth=FT;
+ctx.beginPath();
+ctx.moveTo(ax,ay+ah); ctx.lineTo(ax,archCy);
+ctx.arc(ax+aw/2,archCy,aw/2,Math.PI,0,false);
+ctx.lineTo(ax+aw,ay+ah); ctx.stroke();
+
+// ── DISPLAY CANVAS (cropped) ───────────────────────────────────────────────
+const c2d = document.getElementById('c2d');
+c2d.width = c2d.height = S;
+const dctx = c2d.getContext('2d');
+const cropY = Math.round((H-S)/2);
+dctx.drawImage(off, 0, cropY, S, S, 0, 0, S, S);
+
+// ── WEBGL LIGHT ────────────────────────────────────────────────────────────
+const cgl = document.getElementById('cgl');
+cgl.width = cgl.height = S;
+const gl = cgl.getContext('webgl');
+
+const vs = `
+  attribute vec2 a;
+  varying vec2 v;
+  void main(){ v=a*0.5+0.5; gl_Position=vec4(a,0,1); }
+`;
+const fs = `
+  precision highp float;
+  varying vec2 v;
+  uniform sampler2D u_tex;
+  uniform float u_time;
+  uniform float u_flash;
+
+  float snoise(vec2 p){
+    vec2 i=floor(p), f=fract(p);
+    f=f*f*(3.0-2.0*f);
+    float a=fract(sin(dot(i,vec2(127.1,311.7)))*43758.5453);
+    float b=fract(sin(dot(i+vec2(1,0),vec2(127.1,311.7)))*43758.5453);
+    float c=fract(sin(dot(i+vec2(0,1),vec2(127.1,311.7)))*43758.5453);
+    float d=fract(sin(dot(i+vec2(1,1),vec2(127.1,311.7)))*43758.5453);
+    return mix(mix(a,b,f.x),mix(c,d,f.x),f.y);
+  }
+
+  void main(){
+    vec4 col=texture2D(u_tex,vec2(v.x,1.0-v.y));
+    float lum=dot(col.rgb,vec3(0.299,0.587,0.114));
+    float isOpen=smoothstep(0.35,0.60,lum);
+
+    float n=snoise(v*7.0+vec2(u_time*0.35,u_time*0.25));
+    n+=0.5*snoise(v*14.0-vec2(u_time*0.55,u_time*0.15));
+    n/=1.5;
+    float shimmer=pow(n,1.8);
+
+    // halo rays from top
+    vec2 src=vec2(0.5,-0.05);
+    vec2 d=v-src;
+    float angle=atan(d.y,d.x);
+    float dist=length(d);
+    float halo=0.0;
+    halo+=pow(max(0.0,sin(angle*7.0 +u_time*0.4)),8.0)*0.9;
+    halo+=pow(max(0.0,sin(angle*11.0-u_time*0.3)),6.0)*0.5;
+    halo+=pow(max(0.0,sin(angle*4.0 +u_time*0.6)),10.0)*0.7;
+    halo*=1.0-smoothstep(0.1,1.3,dist);
+
+    // projection rays — same source and angles as halo, propagate downward
+    float proj=0.0;
+    proj+=pow(max(0.0,sin(angle*7.0 +u_time*0.4)),8.0)*0.9;
+    proj+=pow(max(0.0,sin(angle*11.0-u_time*0.3)),6.0)*0.5;
+    proj+=pow(max(0.0,sin(angle*4.0 +u_time*0.6)),10.0)*0.7;
+    proj*=smoothstep(0.0,0.05,v.y-0.35);
+    proj*=1.0-smoothstep(0.1,1.3,dist);          // fade with distance from source
+
+    float pulse =0.5+0.5*sin(u_time*0.7);
+    float pulse2=0.5+0.5*sin(u_time*1.1+1.0);
+
+    vec3 lc=vec3(1.0,0.72,0.28);
+    vec3 glow=col.rgb;
+    glow+=isOpen*shimmer*lc*(0.2+0.15*pulse);
+    glow+=isOpen*halo*lc*(0.45+0.3*pulse2);
+    glow+=proj*lc*(0.45+0.3*pulse2);
+    glow+=isOpen*shimmer*lc*(0.08+0.06*pulse);
+    glow+=u_flash*vec3(1.0,0.9,0.7);
+    gl_FragColor=vec4(glow,1.0);
+  }
+`;
+
+function mkShader(type,src){const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);return s;}
+const prog=gl.createProgram();
+gl.attachShader(prog,mkShader(gl.VERTEX_SHADER,vs));
+gl.attachShader(prog,mkShader(gl.FRAGMENT_SHADER,fs));
+gl.linkProgram(prog); gl.useProgram(prog);
+
+const buf=gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,1,1]),gl.STATIC_DRAW);
+const aLoc=gl.getAttribLocation(prog,'a');
+gl.enableVertexAttribArray(aLoc);
+gl.vertexAttribPointer(aLoc,2,gl.FLOAT,false,0,0);
+
+const tex=gl.createTexture();
+gl.bindTexture(gl.TEXTURE_2D,tex);
+gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,c2d);
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+gl.uniform1i(gl.getUniformLocation(prog,'u_tex'),0);
+
+const uTime=gl.getUniformLocation(prog,'u_time');
+
+function render(t){
+  const sec = t * 0.001;
+  // flash: bright at start, fades out over 1.5s
+  const flash = Math.max(0.0, 1.0 - sec / 1.5);
+  gl.uniform1f(uTime, sec);
+  gl.uniform1f(gl.getUniformLocation(prog, 'u_flash'), flash);
+  gl.viewport(0,0,S,S);
+  gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
+  requestAnimationFrame(render);
+}
+requestAnimationFrame(render);
+
+// ── DUST PARTICLES ─────────────────────────────────────────────────────────
+const cdust=document.getElementById('cdust');
+cdust.width=cdust.height=S;
+const dc=cdust.getContext('2d');
+
+const particles=Array.from({length:600},()=>({
+  x:Math.random()*S,
+  y:Math.random()*S,
+  r:Math.random()*1.5+0.3,
+  vx:(Math.random()-0.5)*0.3,
+  vy:-Math.random()*0.4-0.05,
+  op:Math.random()*0.7+0.2,
+}));
+
+function animateDust(){
+  dc.clearRect(0,0,S,S);
+  const t=Date.now()*0.0005;
+  for(const p of particles){
+    p.x+=p.vx+Math.sin(t+p.y*0.01)*0.15;
+    p.y+=p.vy;
+    if(p.y<-4){p.y=S+4;p.x=Math.random()*S;}
+    dc.beginPath();
+    dc.arc(p.x,p.y,p.r,0,Math.PI*2);
+    dc.fillStyle=`rgba(180,160,140,${p.op})`;
+    dc.fill();
+  }
+  requestAnimationFrame(animateDust);
+}
+animateDust();
+</script>
+</body>
+</html>

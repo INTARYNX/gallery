@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Genuary 2026 #11</title>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: #0a1628;
+            overflow: hidden;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        resize();
+        window.addEventListener('resize', resize);
+
+        let time = 0;
+
+        function drawSquare(x, y, size, angle) {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(angle);
+            ctx.strokeStyle = '#4dd2ff';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(-size/2, -size/2, size, size);
+            ctx.restore();
+        }
+
+        function drawBox(x, y, width, height, angle) {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(angle);
+            ctx.strokeStyle = '#4dd2ff';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(-width/2, -height/2, width, height);
+            ctx.restore();
+        }
+
+        function animate() {
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            const scale = Math.min(canvas.width, canvas.height) / 800;
+            
+            ctx.fillStyle = '#0a1628';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw grid pattern
+            ctx.strokeStyle = '#1a2d45';
+            ctx.lineWidth = 1;
+            const gridSize = 40;
+            
+            for (let x = 0; x < canvas.width; x += gridSize) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, canvas.height);
+                ctx.stroke();
+            }
+            
+            for (let y = 0; y < canvas.height; y += gridSize) {
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(canvas.width, y);
+                ctx.stroke();
+            }
+
+            const numSquares = 12;
+            const numRings = 5;
+            
+            // Store positions for linking
+            const branches = [];
+            for (let i = 0; i < numSquares; i++) {
+                branches[i] = [];
+            }
+            
+            for (let ring = 1; ring <= numRings; ring++) {
+                for (let i = 0; i < numSquares; i++) {
+                    const angle = (i / numSquares) * Math.PI * 2 + time * 0.5;
+                    const sineOffset = Math.sin(time + i * 0.5 + ring * 0.3) * 40 * scale;
+                    const radius = ring * 60 * scale + sineOffset;
+                    const x = centerX + Math.cos(angle) * radius;
+                    const y = centerY + Math.sin(angle) * radius;
+                    const squareRotation = time + angle + Math.sin(time + i * 0.3) * Math.PI;
+                    
+                    branches[i].push({x, y, rotation: squareRotation});
+                    
+                    if ((i + ring) % 2 === 0) {
+                        const squareSize = (30 + Math.sin(time + i * 0.2 + ring * 0.5) * 10) * scale;
+                        drawSquare(x, y, squareSize, squareRotation);
+                    } else {
+                        const boxWidth = (40 + Math.sin(time + i * 0.3 + ring * 0.4) * 15) * scale;
+                        const boxHeight = (25 + Math.cos(time + i * 0.2 + ring * 0.6) * 10) * scale;
+                        drawBox(x, y, boxWidth, boxHeight, squareRotation);
+                    }
+                }
+            }
+            
+            // Draw connecting rectangles between boxes in each branch
+            ctx.strokeStyle = '#4dd2ff';
+            ctx.lineWidth = 1.5;
+            for (let i = 0; i < numSquares; i++) {
+                for (let j = 0; j < branches[i].length - 1; j++) {
+                    const pos1 = branches[i][j];
+                    const pos2 = branches[i][j + 1];
+                    const dx = pos2.x - pos1.x;
+                    const dy = pos2.y - pos1.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    const angle = Math.atan2(dy, dx);
+                    const sineRotation = Math.sin(time + i * 0.4 + j * 0.3) * 0.3;
+                    const width = dist;
+                    const height = 8 * scale;
+                    
+                    ctx.save();
+                    ctx.translate(pos1.x, pos1.y);
+                    ctx.rotate(angle + sineRotation);
+                    ctx.strokeRect(0, -height/2, width, height);
+                    ctx.restore();
+                }
+            }
+
+            time += 0.03;
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+    </script>
+</body>
+</html>

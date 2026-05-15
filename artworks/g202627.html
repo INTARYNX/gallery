@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Genuary 2026 #27</title>
+<style>
+  body { 
+    background: #000;
+    display: flex; 
+    justify-content: center; 
+    align-items: center; 
+    height: 100vh; 
+    margin: 0; 
+    overflow: hidden;
+    padding: 20px;
+    box-sizing: border-box;
+  }
+  .container {
+    width: 100%;
+    max-width: min(100vh - 40px, 100vw - 40px);
+    aspect-ratio: 1;
+    border-radius: 20px;
+    overflow: hidden;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  }
+  canvas { 
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <canvas id="canvas"></canvas>
+</div>
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+// Setup
+let startX, startY;
+function resizeCanvas() {
+  let size = Math.min(window.innerWidth, window.innerHeight);
+  canvas.width = size;
+  canvas.height = size;
+  startX = canvas.width / 2;
+  startY = canvas.height;
+}
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+// Constants
+const branchAngle = 25 * Math.PI / 180;
+const branchLength = 8;
+
+// State
+let branches = [];
+let activeTips = [];
+let trunkOffset = 0;
+let totalBranches = 0;
+let time = 0;
+let hue = 0;
+let cameraY = 0;
+let growthTimer = 0;
+let rainDrops = [];
+let isRaining = false;
+let rainTimer = 0;
+let windStrength = 0;
+let targetWindStrength = 0;
+
+// Branch tip class
+class BranchTip {
+  constructor(x, y, angle, depth) {
+    this.x = x;
+    this.y = y;
+    this.angle = angle;
+    this.depth = depth;
+    this.active = true;
+  }
+  
+  grow() {
+    if (!this.active || this.depth > 12) {
+      this.active = false;
+      return { branches: [], tips: [] };
+    }
+    
+    let segmentLength = this.depth < 3 ? branchLength * (3 - this.depth) : branchLength;
+    let x2 = this.x + segmentLength * Math.cos(this.angle);
+    let y2 = this.y + segmentLength * Math.sin(this.angle);
+    
+    let newBranches = [{
+      x1: this.x, y1: this.y,
+      x2: x2, y2: y2,
+      depth: this.depth,
+      age: 0,
+      growth: 0,
+      leafDelay: Math.random() * 100 + 50
+    }];
+    
+    let newTips = [];
+    if (Math.random() > 0.3) {
+      newTips.push(new BranchTip(x2, y2, this.angle - branchAngle, this.depth + 1));
+      newTips.push(new BranchTip(x2, y2, this.angle + branchAngle, this.depth + 1));
+    } else {
+      newTips.push(new BranchTip(x2, y2, this.angle, this.depth));
+    }
+    
+    this.active = false;
+    return { branches: newBranches, tips: newTips };
+  }
+}
+
+// Initialize
+activeTips = [new BranchTip(startX, startY, -Math.PI / 2, 0)];
+
+// Animation
+function animate() {
+  time += 1;
+  hue = (hue + 0.2) % 360;
+  
+  // Rain and wind logic
+  rainTimer++;
+  if (rainTimer > 500 && !isRaining) {
+    isRaining = true;
+    targetWindStrength = 0.5 + Math.random() * 0.5;
+    rainTimer = 0;
+  } else if (rainTimer > 300 && isRaining) {
+    isRaining = false;
+    targetWindStrength = 0;
+    rainTimer = 0;
+  }
+  
+  // Smooth wind transition
+  windStrength += (targetWindStrength - windStrength) * 0.02;
+  
+  // Create rain drops
+  if (isRaining && Math.random() < 0.4) {
+    rainDrops.push({
+      x: Math.random() * canvas.width,
+      y: -10,
+      speed: 6 + Math.random() * 4,
+      length: 15 + Math.random() * 15,
+      wind: windStrength
+    });
+  }
+  
+  // Update rain drops
+  for (let i = rainDrops.length - 1; i >= 0; i--) {
+    rainDrops[i].y += rainDrops[i].speed;
+    rainDrops[i].x += rainDrops[i].wind * 3;
+    if (rainDrops[i].y > canvas.height || rainDrops[i].x > canvas.width) {
+      rainDrops.splice(i, 1);
+    }
+  }
+  
+  // Grow branches
+  for (let branch of branches) {
+    branch.age++;
+    if (branch.growth < 1) {
+      branch.growth = Math.min(1, branch.growth + 0.05);
+    }
+  }
+  
+  // Add new branches
+  if (activeTips.length > 0) {
+    growthTimer++;
+    if (growthTimer > 20) {
+      growthTimer = 0;
+      
+      let activeTipsList = activeTips.filter(t => t.active);
+      let tipsToGrow = Math.min(3, activeTipsList.length);
+      
+      for (let i = 0; i < tipsToGrow; i++) {
+        let randomTip = activeTipsList[Math.floor(Math.random() * activeTipsList.length)];
+        let result = randomTip.grow();
+        branches.push(...result.branches);
+        activeTips.push(...result.tips);
+        totalBranches += result.branches.length;
+      }
+      
+      trunkOffset += 0.2;
+    }
+  }
+  
+  // Camera
+  let minY = startY;
+  for (let branch of branches) {
+    if (branch.growth > 0) {
+      minY = Math.min(minY, branch.y1 - trunkOffset, branch.y2 - trunkOffset);
+    }
+  }
+  
+  let targetY = canvas.height * 0.4 - minY;
+  cameraY += (targetY - cameraY) * 0.05;
+  
+  // Draw
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  
+  let bgGradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  bgGradient.addColorStop(0, '#0a0a1a');
+  bgGradient.addColorStop(1, '#1a1a2e');
+  ctx.fillStyle = bgGradient;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  
+  ctx.save();
+  ctx.translate(0, cameraY);
+  
+  // Trunk
+  if (trunkOffset > 0) {
+    let trunkWind = (Math.sin(time * 0.015) * 0.3 + windStrength * 0.5) * 2;
+    ctx.lineWidth = 1.5 + Math.log(trunkOffset / 20 + 1) * 1.5;
+    ctx.strokeStyle = `hsl(${hue}, 80%, 55%)`;
+    ctx.beginPath();
+    ctx.moveTo(startX + trunkWind, startY);
+    ctx.lineTo(startX + trunkWind, startY - trunkOffset);
+    ctx.stroke();
+  }
+  
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  
+  // Branches
+  for (let branch of branches) {
+    if (branch.growth === 0) continue;
+    
+    let offsetY = -trunkOffset;
+    let baseWind = Math.sin(time * 0.015) * 0.3;
+    let windX = (baseWind + windStrength) * Math.sin(time * 0.015 + (branch.y1 + offsetY) * 0.008 + branch.depth * 0.3) * branch.depth * 1.5;
+    let windY = Math.cos(time * 0.01 + (branch.y1 + offsetY) * 0.005) * branch.depth * 0.4;
+    
+    let currentX2 = branch.x1 + (branch.x2 - branch.x1) * branch.growth;
+    let currentY2 = branch.y1 + (branch.y2 - branch.y1) * branch.growth;
+    
+    let baseTrunkWidth = 1.5 + Math.log(totalBranches / 50 + 1) * 1;
+    ctx.lineWidth = Math.max(0.3, baseTrunkWidth - branch.depth * 0.15);
+    
+    let branchHue = (hue + branch.depth * 5) % 360;
+    ctx.strokeStyle = `hsl(${branchHue}, 80%, 55%)`;
+    
+    ctx.beginPath();
+    ctx.moveTo(branch.x1 + windX, branch.y1 + windY + offsetY);
+    ctx.lineTo(currentX2 + windX, currentY2 + windY + offsetY);
+    ctx.stroke();
+    
+    // Leaves
+    if (branch.depth > 4 && branch.age > branch.leafDelay && branch.growth === 1) {
+      let leafSize = Math.max(1, 2.5 - branch.depth * 0.1);
+      let leafHue = (hue + 40) % 360;
+      
+      ctx.fillStyle = `hsl(${leafHue}, 85%, 60%)`;
+      ctx.save();
+      ctx.translate(currentX2 + windX, currentY2 + windY + offsetY);
+      ctx.rotate(Math.sin(time * 0.025 + branch.depth) * 0.3);
+      ctx.beginPath();
+      ctx.ellipse(0, 0, leafSize * 0.6, leafSize * 1.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+  
+  // Ground
+  let groundStart = startY - trunkOffset;
+  let groundEnd = startY + canvas.height;
+  let groundGradient = ctx.createLinearGradient(0, groundStart, 0, groundEnd);
+  groundGradient.addColorStop(0, '#2a2a3e');
+  groundGradient.addColorStop(0.3, '#1f1f2e');
+  groundGradient.addColorStop(1, '#0a0a1a');
+  ctx.fillStyle = groundGradient;
+  ctx.fillRect(0, groundStart, canvas.width, groundEnd - groundStart);
+  
+  ctx.restore();
+  
+  // Rain (drawn outside camera transform)
+  if (rainDrops.length > 0) {
+    ctx.strokeStyle = 'rgba(150, 180, 220, 0.4)';
+    ctx.lineWidth = 1.5;
+    for (let drop of rainDrops) {
+      ctx.beginPath();
+      ctx.moveTo(drop.x, drop.y);
+      ctx.lineTo(drop.x + drop.wind * 3, drop.y + drop.length);
+      ctx.stroke();
+    }
+  }
+  
+  requestAnimationFrame(animate);
+}
+
+animate();
+</script>
+</body>
+</html>

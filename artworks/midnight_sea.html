@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body { margin:0; overflow:hidden; display:flex; justify-content:center; align-items:center; height:100vh; background:#000; }
+  canvas { display:block; border-radius:4px; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+const off=document.createElement('canvas'),octx=off.getContext('2d');
+let W;
+function resize(){
+  W=Math.min(window.innerWidth,window.innerHeight);
+  cv.width=cv.height=W;off.width=off.height=W;
+  cv.style.cssText='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)';
+}
+resize();window.addEventListener('resize',resize);
+
+const PERLIN_SIZE=4095,perlin=new Float64Array(PERLIN_SIZE+1);
+for(let i=0;i<=PERLIN_SIZE;i++)perlin[i]=Math.random();
+function noise(x,y=0){
+  if(x<0)x=-x;if(y<0)y=-y;
+  let xi=Math.floor(x),yi=Math.floor(y),xf=x-xi,yf=y-yi,r=0,ampl=0.5;
+  for(let o=0;o<4;o++){
+    let of_=xi+(yi<<16),rxf=0.5*(1-Math.cos(xf*Math.PI)),ryf=0.5*(1-Math.cos(yf*Math.PI));
+    let n1=perlin[of_%PERLIN_SIZE]+rxf*(perlin[(of_+1)%PERLIN_SIZE]-perlin[of_%PERLIN_SIZE]);
+    of_+=65536;
+    let n2=perlin[of_%PERLIN_SIZE]+rxf*(perlin[(of_+1)%PERLIN_SIZE]-perlin[of_%PERLIN_SIZE]);
+    r+=ampl*(n1+ryf*(n2-n1));ampl*=0.5;xi<<=1;xf*=2;yi<<=1;yf*=2;
+    if(xf>=1){xi++;xf--}if(yf>=1){yi++;yf--}
+  }
+  return r;
+}
+
+const w=400,s=3,third=w*2/3,FADE=0.92;
+const skyH=w-third+20;
+let t=0;
+
+function a(x,y){
+  const e=w/2-y,d=noise(t+x/190)/8+noise(x/30,y/40-t*3)/8+e*2e-3;
+  return[x,y/(6+d*9+2*Math.sin(t+e/49))-d*90+100];
+}
+
+function draw(){
+  const sc=W/400;
+
+  octx.clearRect(0,0,W,W);
+  octx.drawImage(cv,0,0);
+  ctx.clearRect(0,0,W,W);
+  ctx.globalAlpha=FADE;
+  ctx.drawImage(off,0,0);
+  ctx.globalAlpha=1;
+
+  ctx.save();
+  ctx.scale(sc,sc);
+
+  // --- Sea ---
+  const offsetY=w-third;
+  ctx.save();
+  ctx.beginPath();ctx.rect(0,offsetY,w,third);ctx.clip();
+  ctx.translate(0,offsetY);
+  for(let layer=0;layer<w;layer+=s*15){
+    for(let y=0;y<third;y+=s){
+      const alpha=Math.min(1,(y+40)/3/255);
+      const wave=Math.sin(y/15+t*2+layer/20)*0.5+0.5;
+      const cycle=Math.sin(t*1.5+y/25+layer/30)*0.5+0.5;
+      const cycle2=Math.sin(t*0.8-y/35+layer/40)*0.5+0.5;
+      const r=Math.floor(5+30*cycle2);
+      const g=Math.floor(20+60*cycle+40*cycle2);
+      const b=Math.floor(100+155*cycle);
+      const foam=Math.max(0,(wave-0.65)*3);
+      const fr=Math.min(255,Math.floor(r+foam*180));
+      const fg=Math.min(255,Math.floor(g+foam*200));
+      const fb=Math.min(255,Math.floor(b+foam*155));
+      ctx.strokeStyle=`rgba(${fr},${fg},${fb},${alpha*0.15})`;
+      ctx.lineWidth=1.2;
+      ctx.beginPath();
+      for(let x=0;x<=w;x+=s){
+        const[px,py]=a(x,y);
+        x===0?ctx.moveTo(px,py+layer):ctx.lineTo(px,py+layer);
+      }
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+
+  // --- Sky - generative noise lines ---
+  ctx.globalAlpha=0.08;
+  for(let sy=0;sy<skyH;sy+=2){
+    const n1=noise(sy/80+t*0.2,t*0.05);
+    const n2=noise(sy/50-t*0.15,0.5);
+    const b=Math.floor(60+195*n1);
+    const g=Math.floor(20+60*n2);
+    ctx.strokeStyle=`rgb(${Math.floor(5+15*n2)},${g},${b})`;
+    ctx.lineWidth=1.5;
+    ctx.beginPath();
+    for(let sx=0;sx<=w;sx+=3){
+      const nx=noise(sx/120+t*0.1,sy/100+t*0.03);
+      const drift=nx*8-4;
+      sx===0?ctx.moveTo(sx,sy+drift):ctx.lineTo(sx,sy+drift);
+    }
+    ctx.stroke();
+  }
+  ctx.globalAlpha=1;
+
+  // --- Gen art moon ---
+  const mx=w*0.65,my=skyH*0.35,mr=45;
+  ctx.globalAlpha=0.06;
+  for(let i=0;i<60;i++){
+    const rr=mr+noise(i*0.3,t*0.1)*20-10;
+    const off2=noise(i*0.5+t*0.2)*Math.PI*2;
+    const n=noise(i*0.7,t*0.15);
+    const b=Math.floor(150+105*n);
+    const g=Math.floor(120+80*n);
+    ctx.strokeStyle=`rgb(${Math.floor(100+50*n)},${g},${b})`;
+    ctx.lineWidth=1;
+    ctx.beginPath();
+    for(let ang=0;ang<Math.PI*2;ang+=0.05){
+      const nr=rr+noise(ang*2+i*0.2,t*0.08+i*0.1)*12;
+      const px=mx+Math.cos(ang+off2*0.3)*nr;
+      const py=my+Math.sin(ang+off2*0.3)*nr;
+      ang===0?ctx.moveTo(px,py):ctx.lineTo(px,py);
+    }
+    ctx.closePath();
+    ctx.stroke();
+  }
+  ctx.globalAlpha=1;
+
+  // --- Sea glow ---
+  const pulse=0.5+Math.sin(t*4)*0.3;
+  const glow=ctx.createRadialGradient(w/2,w*0.85,0,w/2,w*0.85,150);
+  glow.addColorStop(0,`rgba(30,80,220,${0.08*pulse})`);
+  glow.addColorStop(0.5,`rgba(10,40,180,${0.03*pulse})`);
+  glow.addColorStop(1,'transparent');
+  ctx.fillStyle=glow;
+  ctx.fillRect(0,0,w,w);
+
+  ctx.restore();
+  t+=0.01;
+  requestAnimationFrame(draw);
+}
+draw();
+</script>
+</body>
+</html>

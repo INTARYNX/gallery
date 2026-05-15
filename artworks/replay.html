@@ -1,0 +1,1168 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #wrap {
+    width: min(100vw, 100vh);
+    height: min(100vw, 100vh);
+    aspect-ratio: 1 / 1;
+  }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<div id="wrap" style="display:none"><canvas id="c"></canvas></div>
+<canvas id="startScreen" style="position:fixed;inset:0;width:100vw;height:100vh;cursor:pointer;background:#000;"></canvas>
+<script>
+// Start screen with LCD-style "START" using 7-segment digits
+const startScreen = document.getElementById('startScreen');
+const ssCtx = startScreen.getContext('2d');
+
+function resizeStart() {
+  const dpr = window.devicePixelRatio || 1;
+  startScreen.width = window.innerWidth * dpr;
+  startScreen.height = window.innerHeight * dpr;
+  ssCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+resizeStart();
+window.addEventListener('resize', resizeStart);
+
+// 14-segment-ish letter shapes via simple stroke paths
+function drawLcdLetter(c, x, y, w, h, letter, color) {
+  const t = Math.max(2, h * 0.13);
+  c.fillStyle = color;
+  c.shadowColor = color;
+  c.shadowBlur = 12;
+
+  function seg(sx, sy, sw, sh, horiz) {
+    const bevel = Math.min(sw, sh) * 0.4;
+    c.beginPath();
+    if (horiz) {
+      c.moveTo(sx + bevel, sy);
+      c.lineTo(sx + sw - bevel, sy);
+      c.lineTo(sx + sw, sy + sh / 2);
+      c.lineTo(sx + sw - bevel, sy + sh);
+      c.lineTo(sx + bevel, sy + sh);
+      c.lineTo(sx, sy + sh / 2);
+    } else {
+      c.moveTo(sx, sy + bevel);
+      c.lineTo(sx + sw / 2, sy);
+      c.lineTo(sx + sw, sy + bevel);
+      c.lineTo(sx + sw, sy + sh - bevel);
+      c.lineTo(sx + sw / 2, sy + sh);
+      c.lineTo(sx, sy + sh - bevel);
+    }
+    c.closePath();
+    c.fill();
+  }
+
+  // segments: a top, b top-right, c bot-right, d bottom, e bot-left, f top-left, g middle
+  const map = {
+    'S': [1,0,1,1,0,1,1],
+    'T': [1,1,1,0,0,0,0],
+    'A': [1,1,1,0,1,1,1],
+    'R': [1,0,0,0,1,1,1],
+    ' ': [0,0,0,0,0,0,0]
+  };
+  const arr = map[letter] || [0,0,0,0,0,0,0];
+  if (arr[0]) seg(x + t, y, w - t * 2, t, true);
+  if (arr[1]) seg(x + w - t, y + t, t, h / 2 - t, false);
+  if (arr[2]) seg(x + w - t, y + h / 2, t, h / 2 - t, false);
+  if (arr[3]) seg(x + t, y + h - t, w - t * 2, t, true);
+  if (arr[4]) seg(x, y + h / 2, t, h / 2 - t, false);
+  if (arr[5]) seg(x, y + t, t, h / 2 - t, false);
+  if (arr[6]) seg(x + t, y + h / 2 - t / 2, w - t * 2, t, true);
+
+  c.shadowBlur = 0;
+}
+
+let blinkOn = true;
+setInterval(() => { blinkOn = !blinkOn; }, 500);
+
+function drawStartScreen() {
+  const w = startScreen.clientWidth;
+  const h = startScreen.clientHeight;
+  ssCtx.fillStyle = '#000';
+  ssCtx.fillRect(0, 0, w, h);
+
+  if (!blinkOn) {
+    requestAnimationFrame(drawStartScreen);
+    return;
+  }
+
+  const text = 'START';
+  const digitH = Math.min(w / 8, h / 4);
+  const digitW = digitH * 0.55;
+  const gap = digitW * 0.3;
+  const totalW = text.length * digitW + (text.length - 1) * gap;
+  let dx = (w - totalW) / 2;
+  const dy = (h - digitH) / 2;
+
+  for (const ch of text) {
+    drawLcdLetter(ssCtx, dx, dy, digitW, digitH, ch, '#3aff70');
+    dx += digitW + gap;
+  }
+
+  requestAnimationFrame(drawStartScreen);
+}
+drawStartScreen();
+
+startScreen.addEventListener('click', () => {
+  startScreen.style.display = 'none';
+  document.getElementById('wrap').style.display = '';
+  window.dispatchEvent(new Event('resize'));
+  startAudio();
+});
+</script>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const wrap = document.getElementById('wrap');
+
+// === Audio setup ===
+let audioCtx = null;
+let analyser = null;
+let timeData = null;
+let freqData = null;
+let isPlaying = false;
+
+function startAudio() {
+  if (audioCtx) {
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    return;
+  }
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 1024;
+  timeData = new Uint8Array(analyser.fftSize);
+  freqData = new Uint8Array(analyser.frequencyBinCount);
+
+  const masterGain = audioCtx.createGain();
+  masterGain.gain.value = 0.25;
+  // Analyser taps the signal BEFORE the master gain so the waveform stays full-amplitude
+  // even if master volume is low
+  const analyserBus = audioCtx.createGain();
+  analyserBus.gain.value = 1.0;
+  analyserBus.connect(analyser);
+  analyserBus.connect(masterGain);
+  masterGain.connect(audioCtx.destination);
+
+  // Synthwave-style procedural loop
+  const bpm = 100;
+  const beat = 60 / bpm;
+  const startT = audioCtx.currentTime + 0.1;
+
+  // Reverb (simple convolver with synthetic impulse)
+  const reverb = audioCtx.createConvolver();
+  {
+    const len = audioCtx.sampleRate * 1.8;
+    const buf = audioCtx.createBuffer(2, len, audioCtx.sampleRate);
+    for (let ch = 0; ch < 2; ch++) {
+      const data = buf.getChannelData(ch);
+      for (let i = 0; i < len; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.5);
+      }
+    }
+    reverb.buffer = buf;
+  }
+  const reverbSend = audioCtx.createGain();
+  reverbSend.gain.value = 0.25;
+  reverbSend.connect(reverb);
+  reverb.connect(analyserBus);
+
+  // Chord progression: 8-bar phrase with variations
+  const progression = [
+    { root: 110.0, chord: [220, 261.6, 329.6] },     // Am
+    { root: 87.3,  chord: [174.6, 220, 261.6] },     // F
+    { root: 130.8, chord: [196, 246.9, 329.6] },     // C
+    { root: 98.0,  chord: [196, 246.9, 293.7] },     // G
+    { root: 110.0, chord: [220, 261.6, 329.6] },     // Am
+    { root: 130.8, chord: [196, 246.9, 329.6] },     // C
+    { root: 87.3,  chord: [174.6, 220, 261.6] },     // F
+    { root: 164.8, chord: [220, 277.2, 329.6] }      // E (V of i, tension)
+  ];
+  const barsPerChord = 1;
+  function chordAt(barIdx) {
+    return progression[Math.floor(barIdx / barsPerChord) % progression.length];
+  }
+  // Helper to seed pseudo-random per bar
+  function brand(seed) {
+    const x = Math.sin(seed * 9301 + 49297) * 233280;
+    return x - Math.floor(x);
+  }
+
+  // ============ BASS - varies per bar ============
+  const bassPattern = [];
+  for (let bar = 0; bar < 999; bar++) {
+    const ch = chordAt(bar);
+    const fifth = ch.root * 1.5;
+    // Different rhythm patterns rotate
+    const variant = bar % 4;
+    let seq;
+    if (variant === 0) seq = [ch.root, ch.root, ch.root * 2, ch.root, ch.root, ch.root * 2, ch.root, fifth];
+    else if (variant === 1) seq = [ch.root, ch.root * 2, ch.root, ch.root * 2, fifth, ch.root, ch.root * 2, ch.root];
+    else if (variant === 2) seq = [ch.root, ch.root, fifth, ch.root, ch.root * 2, ch.root, fifth, ch.root * 2];
+    else seq = [ch.root * 2, ch.root, ch.root, fifth, ch.root, ch.root * 2, ch.root, ch.root];
+    for (let i = 0; i < 8; i++) {
+      bassPattern.push({
+        freq: seq[i],
+        time: startT + (bar * 8 + i) * beat * 0.5,
+        dur: beat * 0.45
+      });
+    }
+  }
+  function scheduleBass() {
+    const now = audioCtx.currentTime;
+    for (const n of bassPattern) {
+      if (n.scheduled || n.time > now + 2) continue;
+      if (n.time < now - 0.5) { n.scheduled = true; continue; }
+      const osc = audioCtx.createOscillator();
+      osc.type = 'sawtooth';
+      osc.frequency.value = n.freq;
+      const filt = audioCtx.createBiquadFilter();
+      filt.type = 'lowpass';
+      filt.frequency.value = 700;
+      filt.Q.value = 8;
+      const g = audioCtx.createGain();
+      g.gain.setValueAtTime(0, n.time);
+      g.gain.linearRampToValueAtTime(0.5, n.time + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.001, n.time + n.dur);
+      osc.connect(filt);
+      filt.connect(g);
+      g.connect(analyserBus);
+      osc.start(n.time);
+      osc.stop(n.time + n.dur + 0.05);
+      n.scheduled = true;
+    }
+  }
+
+  // ============ PAD (chord sustained, slow attack/release) ============
+  const padPattern = [];
+  for (let bar = 0; bar < 999; bar++) {
+    const ch = chordAt(bar);
+    padPattern.push({
+      chord: ch.chord,
+      time: startT + bar * 4 * beat,
+      dur: 4 * beat
+    });
+  }
+  function schedulePad() {
+    const now = audioCtx.currentTime;
+    for (const n of padPattern) {
+      if (n.scheduled || n.time > now + 2) continue;
+      if (n.time < now - 0.5) { n.scheduled = true; continue; }
+      const padGain = audioCtx.createGain();
+      padGain.gain.setValueAtTime(0, n.time);
+      padGain.gain.linearRampToValueAtTime(0.08, n.time + 0.4);
+      padGain.gain.linearRampToValueAtTime(0.06, n.time + n.dur - 0.5);
+      padGain.gain.linearRampToValueAtTime(0, n.time + n.dur);
+      const filt = audioCtx.createBiquadFilter();
+      filt.type = 'lowpass';
+      filt.frequency.value = 1500;
+      padGain.connect(filt);
+      filt.connect(analyserBus);
+      filt.connect(reverbSend);
+      for (const f of n.chord) {
+        // Two detuned saws per note for thickness
+        for (const detune of [-7, 7]) {
+          const o = audioCtx.createOscillator();
+          o.type = 'sawtooth';
+          o.frequency.value = f;
+          o.detune.value = detune;
+          o.connect(padGain);
+          o.start(n.time);
+          o.stop(n.time + n.dur + 0.05);
+        }
+      }
+      n.scheduled = true;
+    }
+  }
+
+  // ============ LEAD ARPEGGIO - varies per bar ============
+  const leadPattern = [];
+  for (let bar = 0; bar < 999; bar++) {
+    const ch = chordAt(bar);
+    const c0 = ch.chord[0] * 2, c1 = ch.chord[1] * 2, c2 = ch.chord[2] * 2;
+    const c3 = ch.chord[2] * 4;
+    const variant = bar % 4;
+    let arp;
+    if (variant === 0) arp = [c0, c1, c2, c1, c0, c2, c1, c2, c0, c1, c2, c3, c2, c1, c0, c1];
+    else if (variant === 1) arp = [c2, c1, c0, c1, c2, c3, c2, c1, c0, c1, c2, c1, c0, c2, c1, c0];
+    else if (variant === 2) arp = [c0, c2, c1, c2, c0, c2, c1, c2, c0, c2, c1, c3, c2, c0, c1, c2];
+    else arp = [c3, c2, c1, c0, c1, c2, c3, c2, c1, c2, c0, c1, c2, c0, c1, c0];
+    for (let i = 0; i < 16; i++) {
+      // Occasionally drop a note (rest) for groove
+      if (brand(bar * 31 + i) < 0.08) continue;
+      leadPattern.push({
+        freq: arp[i],
+        time: startT + (bar * 16 + i) * beat * 0.25,
+        dur: beat * 0.22
+      });
+    }
+  }
+  function scheduleLead() {
+    const now = audioCtx.currentTime;
+    for (const n of leadPattern) {
+      if (n.scheduled || n.time > now + 2) continue;
+      if (n.time < now - 0.5) { n.scheduled = true; continue; }
+      const osc = audioCtx.createOscillator();
+      osc.type = 'square';
+      osc.frequency.value = n.freq;
+      const g = audioCtx.createGain();
+      g.gain.setValueAtTime(0, n.time);
+      g.gain.linearRampToValueAtTime(0.1, n.time + 0.005);
+      g.gain.exponentialRampToValueAtTime(0.001, n.time + n.dur);
+      const delay = audioCtx.createDelay();
+      delay.delayTime.value = beat * 0.375;
+      const fb = audioCtx.createGain();
+      fb.gain.value = 0.4;
+      osc.connect(g);
+      g.connect(analyserBus);
+      g.connect(delay);
+      delay.connect(fb);
+      fb.connect(delay);
+      delay.connect(analyserBus);
+      delay.connect(reverbSend);
+      osc.start(n.time);
+      osc.stop(n.time + n.dur + 0.05);
+      n.scheduled = true;
+    }
+  }
+
+  // ============ KICK - skip on bar 7 for break, double-kick on bar 3 ============
+  const kickPattern = [];
+  for (let bar = 0; bar < 999; bar++) {
+    const phraseBar = bar % 8;
+    if (phraseBar === 7) {
+      // Break: only kick on beat 1
+      kickPattern.push({ time: startT + bar * 4 * beat });
+    } else {
+      for (let beatIdx = 0; beatIdx < 4; beatIdx++) {
+        kickPattern.push({ time: startT + (bar * 4 + beatIdx) * beat });
+      }
+      if (phraseBar === 3) {
+        // Extra kick on the "and" of beat 4
+        kickPattern.push({ time: startT + (bar * 4 + 3.5) * beat });
+      }
+    }
+  }
+  function scheduleKick() {
+    const now = audioCtx.currentTime;
+    for (const n of kickPattern) {
+      if (n.scheduled || n.time > now + 2) continue;
+      if (n.time < now - 0.5) { n.scheduled = true; continue; }
+      const osc = audioCtx.createOscillator();
+      osc.frequency.setValueAtTime(150, n.time);
+      osc.frequency.exponentialRampToValueAtTime(40, n.time + 0.15);
+      const g = audioCtx.createGain();
+      g.gain.setValueAtTime(0.9, n.time);
+      g.gain.exponentialRampToValueAtTime(0.001, n.time + 0.18);
+      osc.connect(g);
+      g.connect(analyserBus);
+      osc.start(n.time);
+      osc.stop(n.time + 0.2);
+      n.scheduled = true;
+    }
+  }
+
+  // ============ SNARE (on beats 2 and 4) ============
+  const snarePattern = [];
+  for (let bar = 0; bar < 999; bar++) {
+    snarePattern.push({ time: startT + (bar * 4 + 1) * beat });
+    snarePattern.push({ time: startT + (bar * 4 + 3) * beat });
+  }
+  function scheduleSnare() {
+    const now = audioCtx.currentTime;
+    for (const n of snarePattern) {
+      if (n.scheduled || n.time > now + 2) continue;
+      if (n.time < now - 0.5) { n.scheduled = true; continue; }
+      // Tonal component
+      const osc = audioCtx.createOscillator();
+      osc.frequency.setValueAtTime(200, n.time);
+      osc.frequency.exponentialRampToValueAtTime(100, n.time + 0.08);
+      const og = audioCtx.createGain();
+      og.gain.setValueAtTime(0.3, n.time);
+      og.gain.exponentialRampToValueAtTime(0.001, n.time + 0.1);
+      osc.connect(og);
+      og.connect(analyserBus);
+      osc.start(n.time);
+      osc.stop(n.time + 0.12);
+      // Noise component
+      const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.15, audioCtx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+      const src = audioCtx.createBufferSource();
+      src.buffer = buf;
+      const filt = audioCtx.createBiquadFilter();
+      filt.type = 'highpass';
+      filt.frequency.value = 1500;
+      const ng = audioCtx.createGain();
+      ng.gain.setValueAtTime(0.4, n.time);
+      ng.gain.exponentialRampToValueAtTime(0.001, n.time + 0.12);
+      src.connect(filt);
+      filt.connect(ng);
+      ng.connect(analyserBus);
+      ng.connect(reverbSend);
+      src.start(n.time);
+      n.scheduled = true;
+    }
+  }
+
+  // ============ HI-HAT - varies pattern, ghost notes ============
+  const hatPattern = [];
+  for (let bar = 0; bar < 999; bar++) {
+    const phraseBar = bar % 8;
+    for (let i = 0; i < 16; i++) {
+      // 16th notes, varying density per bar
+      const seed = brand(bar * 17 + i);
+      let prob = 0.5;
+      if (i % 4 === 0) prob = 0.95;
+      else if (i % 2 === 0) prob = 0.7;
+      if (phraseBar === 7) prob *= 0.4; // sparse on break bar
+      if (seed > prob) continue;
+      hatPattern.push({
+        time: startT + (bar * 16 + i) * beat * 0.25,
+        open: i % 8 === 6,
+        ghost: seed > prob * 0.6
+      });
+    }
+  }
+  function scheduleHat() {
+    const now = audioCtx.currentTime;
+    for (const n of hatPattern) {
+      if (n.scheduled || n.time > now + 2) continue;
+      if (n.time < now - 0.5) { n.scheduled = true; continue; }
+      const dur = n.open ? 0.18 : 0.04;
+      const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * dur, audioCtx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * 0.5;
+      const src = audioCtx.createBufferSource();
+      src.buffer = buf;
+      const filt = audioCtx.createBiquadFilter();
+      filt.type = 'highpass';
+      filt.frequency.value = 7000;
+      const g = audioCtx.createGain();
+      const baseVol = n.open ? 0.18 : 0.12;
+      g.gain.setValueAtTime(n.ghost ? baseVol * 0.4 : baseVol, n.time);
+      g.gain.exponentialRampToValueAtTime(0.001, n.time + dur);
+      src.connect(filt);
+      filt.connect(g);
+      g.connect(analyserBus);
+      src.start(n.time);
+      n.scheduled = true;
+    }
+  }
+
+  setInterval(() => {
+    if (audioCtx.state !== 'running') return;
+    scheduleBass();
+    schedulePad();
+    scheduleLead();
+    scheduleKick();
+    scheduleSnare();
+    scheduleHat();
+  }, 100);
+}
+
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  const size = wrap.clientWidth;
+  canvas.width = size * dpr;
+  canvas.height = size * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+resize();
+window.addEventListener('resize', resize);
+
+// Pre-render a single blurred rainbow ray once
+const raySprite = document.createElement('canvas');
+const RAY_LEN = 320;
+const RAY_W = 140;
+raySprite.width = RAY_LEN;
+raySprite.height = RAY_W;
+(function buildRaySprite() {
+  const rc = raySprite.getContext('2d');
+  const rayBaseColors = [
+    [255, 40, 100],
+    [255, 140, 40],
+    [255, 230, 60],
+    [120, 255, 80],
+    [60, 200, 255],
+    [180, 80, 255]
+  ];
+  const bandsPerStep = 6;
+  const rayColors = [];
+  for (let k = 0; k < rayBaseColors.length - 1; k++) {
+    const [r1, g1, b1] = rayBaseColors[k];
+    const [r2, g2, b2] = rayBaseColors[k + 1];
+    for (let s = 0; s < bandsPerStep; s++) {
+      const tt = s / bandsPerStep;
+      const rr = Math.round(r1 + (r2 - r1) * tt);
+      const gg = Math.round(g1 + (g2 - g1) * tt);
+      const bb = Math.round(b1 + (b2 - b1) * tt);
+      const globalT = (k * bandsPerStep + s) / ((rayBaseColors.length - 1) * bandsPerStep);
+      const alpha = 0.55 * Math.pow(1 - globalT, 1.2);
+      rayColors.push(`rgba(${rr},${gg},${bb},${alpha.toFixed(3)})`);
+    }
+  }
+  rayColors.push('rgba(255,255,255,0.85)');
+  rayColors.push('rgba(255,255,255,0.95)');
+  rayColors.push('rgba(255,255,255,0.85)');
+  for (let k = rayBaseColors.length - 1; k > 0; k--) {
+    const [r1, g1, b1] = rayBaseColors[k];
+    const [r2, g2, b2] = rayBaseColors[k - 1];
+    for (let s = 0; s < bandsPerStep; s++) {
+      const tt = s / bandsPerStep;
+      const rr = Math.round(r1 + (r2 - r1) * tt);
+      const gg = Math.round(g1 + (g2 - g1) * tt);
+      const bb = Math.round(b1 + (b2 - b1) * tt);
+      const globalT = ((rayBaseColors.length - 1 - k) * bandsPerStep + s) / ((rayBaseColors.length - 1) * bandsPerStep);
+      const alpha = 0.55 * Math.pow(globalT, 1.2);
+      rayColors.push(`rgba(${rr},${gg},${bb},${alpha.toFixed(3)})`);
+    }
+  }
+
+  rc.filter = 'blur(6px)';
+  const bands = rayColors.length;
+  const tipX = 0, tipY = RAY_W / 2;
+  const halfW = RAY_W / 2 - 8;
+  for (let b = 0; b < bands; b++) {
+    const t1 = (b / bands) * 2 - 1;
+    const t2 = ((b + 1) / bands) * 2 - 1;
+    const o1 = t1 * halfW;
+    const o2 = t2 * halfW;
+    rc.fillStyle = rayColors[b];
+    rc.beginPath();
+    rc.moveTo(tipX, tipY);
+    rc.lineTo(RAY_LEN, tipY + o1);
+    rc.lineTo(RAY_LEN, tipY + o2);
+    rc.closePath();
+    rc.fill();
+  }
+})();
+
+// Spectrum (used for halo intensity)
+const SPECTRUM_BARS = 96;
+const spectrum = new Array(SPECTRUM_BARS).fill(0);
+
+function updateSpectrum(t) {
+  for (let i = 0; i < SPECTRUM_BARS; i++) {
+    const phase = (i / SPECTRUM_BARS) * Math.PI * 2;
+    const freqWeight = 1 - (i / SPECTRUM_BARS) * 0.5;
+    const amp =
+      0.4 * Math.abs(Math.sin(phase * 2 + t * 0.002)) +
+      0.3 * Math.abs(Math.sin(phase * 5 + t * 0.0017)) +
+      0.25 * Math.abs(Math.sin(phase * 11 + t * 0.0029)) +
+      Math.random() * 0.15;
+    const target = Math.max(0.05, Math.min(1, amp * freqWeight));
+    if (target > spectrum[i]) spectrum[i] += (target - spectrum[i]) * 0.5;
+    else spectrum[i] += (target - spectrum[i]) * 0.12;
+  }
+}
+
+// Waveform - long static buffer that scrolls
+const WAVE_BARS = 200;
+const WAVE_BUFFER_SIZE = 2000;
+const waveBuffer = new Array(WAVE_BUFFER_SIZE).fill(0).map((_, i) => {
+  const phase = i * 0.15;
+  const amp =
+    0.5 +
+    0.35 * Math.sin(phase) +
+    0.25 * Math.sin(phase * 2.3) +
+    0.15 * Math.sin(phase * 5.1) +
+    Math.sin(i * 12.9898) * 0.15;
+  const a = Math.max(0.05, Math.min(1, amp));
+  return {
+    top: a * (0.8 + Math.abs(Math.sin(i * 7.3)) * 0.2),
+    bot: a * (0.8 + Math.abs(Math.sin(i * 4.1)) * 0.2)
+  };
+});
+let waveScroll = 0;
+
+// Waveform - particle system
+const PARTICLE_COUNT = 400;
+const particles = [];
+for (let i = 0; i < PARTICLE_COUNT; i++) {
+  particles.push({
+    x: Math.random(),
+    y: 0.5,
+    vx: 0.0001 + Math.random() * 0.0003,
+    life: Math.random(),
+    size: 0.3 + Math.random() * 1.2,
+    hueOffset: Math.random() * 60 - 30
+  });
+}
+
+// FFT spectrum bars (Winamp-style) with peak holds
+const SPEC_BARS = 48;
+const specLevels = new Array(SPEC_BARS).fill(0);
+const specPeaks = new Array(SPEC_BARS).fill(0);
+const specPeakHold = new Array(SPEC_BARS).fill(0);
+
+function updateWaveform(t) {
+  if (!analyser || !freqData) return;
+  const useBins = freqData.length;
+  for (let i = 0; i < SPEC_BARS; i++) {
+    const t1 = i / SPEC_BARS;
+    const t2 = (i + 1) / SPEC_BARS;
+    const b1 = Math.floor(Math.pow(t1, 2.2) * useBins);
+    const b2 = Math.max(b1 + 1, Math.floor(Math.pow(t2, 2.2) * useBins));
+    let sum = 0, count = 0;
+    for (let b = b1; b < b2 && b < useBins; b++) { sum += freqData[b]; count++; }
+    let raw = (count > 0 ? sum / count : 0) / 255;
+    // Tilt: gentle high-frequency boost
+    const boost = 1 + (i / SPEC_BARS) * 1.2;
+    const target = Math.min(1, raw * boost * 0.85);
+
+    if (target > specLevels[i]) specLevels[i] += (target - specLevels[i]) * 0.6;
+    else specLevels[i] += (target - specLevels[i]) * 0.15;
+
+    if (specLevels[i] > specPeaks[i]) {
+      specPeaks[i] = specLevels[i];
+      specPeakHold[i] = 25;
+    } else if (specPeakHold[i] > 0) {
+      specPeakHold[i]--;
+    } else {
+      specPeaks[i] -= 0.012;
+      if (specPeaks[i] < specLevels[i]) specPeaks[i] = specLevels[i];
+    }
+  }
+}
+
+function drawWaveform(x, y, w, h) {
+  ctx.fillStyle = '#0a0e14';
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = '#1a1a1a';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+
+  const pad = 6;
+  const innerW = w - pad * 2;
+  const innerH = h - pad * 2;
+  const baselineY = y + h - pad;
+
+  // Use canvas transforms for clean perspective tilt (skew toward center)
+  ctx.save();
+  // Clip to panel
+  ctx.beginPath();
+  ctx.rect(x + pad, y + pad, innerW, innerH);
+  ctx.clip();
+
+  // Apply a vertical "lean back" perspective by skewing y based on x relative to center
+  const cxPanel = x + w / 2;
+
+  const segGap = 1;
+  const segH = 3;
+  const maxBarH = innerH * 0.95;
+  const segCount = Math.floor(maxBarH / (segH + segGap));
+  const totalGap = 2;
+  const barW = (innerW - totalGap * (SPEC_BARS - 1)) / SPEC_BARS;
+
+  for (let i = 0; i < SPEC_BARS; i++) {
+    const bx = x + pad + i * (barW + totalGap);
+    const level = specLevels[i];
+    const peak = specPeaks[i];
+    const activeSegs = Math.floor(level * segCount);
+    const peakSeg = Math.floor(peak * segCount);
+
+    // Tilt factor: bars on edges lean inward
+    const dx = (bx + barW / 2) - cxPanel;
+    const tiltX = -dx * 0.0006; // small skew toward center vanishing point
+
+    for (let s = 0; s < segCount; s++) {
+      const tDepth = s / segCount;
+      // Top of segment recedes: shrink width and pull toward center
+      const shrink = 1 - tDepth * 0.35;
+      const yOffset = -tDepth * innerH * 0.05; // slight perspective y lift
+
+      const segYBot = baselineY - s * (segH + segGap);
+      const segYTop = segYBot - segH;
+
+      const wTop = barW * (1 - (tDepth + segH / maxBarH) * 0.35);
+      const wBot = barW * shrink;
+      const xTopCenter = (bx + barW / 2) - dx * (tDepth + segH / maxBarH) * 0.1;
+      const xBotCenter = (bx + barW / 2) - dx * tDepth * 0.1;
+
+      const tlX = xTopCenter - wTop / 2;
+      const trX = xTopCenter + wTop / 2;
+      const blX = xBotCenter - wBot / 2;
+      const brX = xBotCenter + wBot / 2;
+      const tY = segYTop + yOffset;
+      const bY = segYBot + yOffset;
+
+      // Smooth gradient from green (bottom) to red (top)
+      const segT = s / segCount;
+      let baseR, baseG, baseB;
+      if (segT < 0.5) {
+        // green → yellow
+        const k = segT / 0.5;
+        baseR = 42 + k * 198;
+        baseG = 250 - k * 26;
+        baseB = 106 - k * 42;
+      } else {
+        // yellow → red
+        const k = (segT - 0.5) / 0.5;
+        baseR = 240 + k * 15;
+        baseG = 224 - k * 160;
+        baseB = 64 - k * 16;
+      }
+      const color = `rgb(${Math.round(baseR)},${Math.round(baseG)},${Math.round(baseB)})`;
+
+      const on = s < activeSegs;
+      const isPeak = s === peakSeg && peakSeg > 0;
+
+      ctx.fillStyle = color;
+      ctx.globalAlpha = (on || isPeak) ? 1 : 0.1;
+      ctx.beginPath();
+      ctx.moveTo(tlX, tY);
+      ctx.lineTo(trX, tY);
+      ctx.lineTo(brX, bY);
+      ctx.lineTo(blX, bY);
+      ctx.closePath();
+      ctx.fill();
+
+      if (on || isPeak) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(tlX, tY);
+        ctx.lineTo(trX, tY);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  ctx.restore();
+}
+
+// VU meters
+const vuChannels = [
+  { level: 0, peak: 0, peakHold: 0 },
+  { level: 0, peak: 0, peakHold: 0 }
+];
+const vuSegments = 24;
+
+function updateVU(t) {
+  if (analyser && freqData) {
+    analyser.getByteFrequencyData(freqData);
+    // Split into low and high half for L/R
+    const half = freqData.length / 2;
+    let lowSum = 0, highSum = 0;
+    for (let i = 0; i < half; i++) lowSum += freqData[i];
+    for (let i = half; i < freqData.length; i++) highSum += freqData[i];
+    const lowLevel = (lowSum / half) / 255;
+    const highLevel = (highSum / half) / 255;
+    const targets = [lowLevel, highLevel];
+    for (let ch = 0; ch < vuChannels.length; ch++) {
+      const v = vuChannels[ch];
+      const target = Math.min(1, targets[ch] * 1.5);
+      if (target > v.level) v.level += (target - v.level) * 0.5;
+      else v.level += (target - v.level) * 0.15;
+      if (v.level > v.peak) {
+        v.peak = v.level;
+        v.peakHold = 30;
+      } else if (v.peakHold > 0) {
+        v.peakHold--;
+      } else {
+        v.peak -= 0.008;
+        if (v.peak < v.level) v.peak = v.level;
+      }
+    }
+    return;
+  }
+  // Fallback fake VU
+  for (let ch = 0; ch < vuChannels.length; ch++) {
+    const v = vuChannels[ch];
+    const base =
+      0.5 +
+      0.3 * Math.sin(t * 0.003 + ch * 1.7) +
+      0.2 * Math.sin(t * 0.011 + ch * 0.4) +
+      0.15 * Math.sin(t * 0.027 + ch * 2.1);
+    const target = Math.max(0, Math.min(1, base + (Math.random() - 0.5) * 0.15));
+    if (target > v.level) v.level += (target - v.level) * 0.5;
+    else v.level += (target - v.level) * 0.15;
+    if (v.level > v.peak) {
+      v.peak = v.level;
+      v.peakHold = 30;
+    } else if (v.peakHold > 0) {
+      v.peakHold--;
+    } else {
+      v.peak -= 0.008;
+      if (v.peak < v.level) v.peak = v.level;
+    }
+  }
+}
+
+function drawVUMeter(x, y, w, h, channel) {
+  const v = vuChannels[channel];
+  // Channel 0 = left (tilts right), channel 1 = right (tilts left)
+  const tilt = channel === 0 ? 0.08 : -0.08;
+
+  ctx.save();
+  // Apply skew transform for perspective
+  ctx.transform(1, 0, tilt, 1, -tilt * (y + h / 2), 0);
+
+  ctx.fillStyle = '#080808';
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = '#1a1a1a';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+
+  const segGap = 2;
+  const segH = (h - segGap * (vuSegments + 1)) / vuSegments;
+  const segW = w - 8;
+  const activeSeg = Math.floor(v.level * vuSegments);
+  const peakSeg = Math.floor(v.peak * vuSegments);
+
+  for (let i = 0; i < vuSegments; i++) {
+    const segY = y + h - segGap - (i + 1) * (segH + segGap) + segGap;
+    let color;
+    if (i < vuSegments * 0.6) color = '#2a8a2a';
+    else if (i < vuSegments * 0.85) color = '#c8b820';
+    else color = '#d83020';
+
+    const isActive = i < activeSeg;
+    const isPeak = i === peakSeg && peakSeg > 0;
+
+    if (isActive || isPeak) {
+      ctx.fillStyle = color;
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 6;
+    } else {
+      ctx.fillStyle = color;
+      ctx.globalAlpha = 0.12;
+      ctx.shadowBlur = 0;
+    }
+    ctx.fillRect(x + 4, segY, segW, segH);
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
+  }
+
+  ctx.restore();
+}
+
+// 7-segment LCD
+const segMap = {
+  '0': [1,1,1,1,1,1,0],
+  '1': [0,1,1,0,0,0,0],
+  '2': [1,1,0,1,1,0,1],
+  '3': [1,1,1,1,0,0,1],
+  '4': [0,1,1,0,0,1,1],
+  '5': [1,0,1,1,0,1,1],
+  '6': [1,0,1,1,1,1,1],
+  '7': [1,1,1,0,0,0,0],
+  '8': [1,1,1,1,1,1,1],
+  '9': [1,1,1,1,0,1,1],
+  ':': null,
+  ' ': [0,0,0,0,0,0,0]
+};
+
+function drawSeg(x, y, w, h, horizontal) {
+  const bevel = Math.min(w, h) * 0.4;
+  ctx.beginPath();
+  if (horizontal) {
+    ctx.moveTo(x + bevel, y);
+    ctx.lineTo(x + w - bevel, y);
+    ctx.lineTo(x + w, y + h / 2);
+    ctx.lineTo(x + w - bevel, y + h);
+    ctx.lineTo(x + bevel, y + h);
+    ctx.lineTo(x, y + h / 2);
+  } else {
+    ctx.moveTo(x, y + bevel);
+    ctx.lineTo(x + w / 2, y);
+    ctx.lineTo(x + w, y + bevel);
+    ctx.lineTo(x + w, y + h - bevel);
+    ctx.lineTo(x + w / 2, y + h);
+    ctx.lineTo(x, y + h - bevel);
+  }
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawLCDDigit(x, y, w, h, ch, color) {
+  const segs = segMap[ch];
+  const t = Math.max(2, h * 0.13);
+  const off = '#1a2a1a';
+  const all = [1,1,1,1,1,1,1];
+  for (let pass = 0; pass < 2; pass++) {
+    const arr = pass === 0 ? all : segs;
+    if (!arr) continue;
+    const col = pass === 0 ? off : color;
+    ctx.fillStyle = col;
+    if (pass === 1) {
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 8;
+    }
+    if (arr[0]) drawSeg(x + t, y, w - t * 2, t, true);
+    if (arr[1]) drawSeg(x + w - t, y + t, t, h / 2 - t, false);
+    if (arr[2]) drawSeg(x + w - t, y + h / 2, t, h / 2 - t, false);
+    if (arr[3]) drawSeg(x + t, y + h - t, w - t * 2, t, true);
+    if (arr[4]) drawSeg(x, y + h / 2, t, h / 2 - t, false);
+    if (arr[5]) drawSeg(x, y + t, t, h / 2 - t, false);
+    if (arr[6]) drawSeg(x + t, y + h / 2 - t / 2, w - t * 2, t, true);
+    ctx.shadowBlur = 0;
+  }
+}
+
+function drawLCDDisplay(x, y, w, h, text, color) {
+  ctx.fillStyle = '#0a1a0a';
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+
+  const pad = h * 0.18;
+  const digitH = h - pad * 2;
+  const digitW = digitH * 0.55;
+  const gap = digitW * 0.18;
+  const totalW = text.length * digitW + (text.length - 1) * gap;
+  let dx = x + (w - totalW) / 2;
+  const dy = y + pad;
+
+  for (const ch of text) {
+    if (ch === ':') {
+      ctx.fillStyle = color;
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 6;
+      const dotR = digitW * 0.12;
+      ctx.beginPath();
+      ctx.arc(dx + digitW * 0.3, dy + digitH * 0.3, dotR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(dx + digitW * 0.3, dy + digitH * 0.7, dotR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      dx += digitW * 0.6 + gap;
+    } else {
+      drawLCDDigit(dx, dy, digitW, digitH, ch, color);
+      dx += digitW + gap;
+    }
+  }
+}
+
+let trackTime = 0;
+let lastFrameT = 0;
+
+// Offscreen CD
+const cdCanvas = document.createElement('canvas');
+const cdCtx = cdCanvas.getContext('2d');
+const CD_SIZE = 600;
+cdCanvas.width = CD_SIZE;
+cdCanvas.height = CD_SIZE;
+
+function drawRoundCD(angle, t) {
+  const c = cdCtx;
+  const r = CD_SIZE / 2;
+  c.clearRect(0, 0, CD_SIZE, CD_SIZE);
+  c.save();
+  c.translate(r, r);
+  c.rotate(angle);
+
+  const baseGrad = c.createRadialGradient(0, 0, r * 0.2, 0, 0, r);
+  baseGrad.addColorStop(0, '#e8e8f0');
+  baseGrad.addColorStop(0.5, '#c8c8d8');
+  baseGrad.addColorStop(1, '#a8a8b8');
+  c.fillStyle = baseGrad;
+  c.beginPath();
+  c.arc(0, 0, r, 0, Math.PI * 2);
+  c.fill();
+
+  // Clip to disc
+  c.save();
+  c.beginPath();
+  c.arc(0, 0, r, 0, Math.PI * 2);
+  c.clip();
+
+  // God rays - blit pre-rendered sprite at each angle
+  const rayCount = 6;
+  for (let i = 0; i < rayCount; i++) {
+    const speed = 0.0001 + (i * 0.00007);
+    const direction = i % 2 === 0 ? 1 : -1;
+    const extraAngle = t * speed * direction;
+    const a = (i * Math.PI * 2) / rayCount + i * 0.13 + extraAngle;
+    const widthMul = 0.7 + Math.abs(Math.sin(i * 2.3 + t * 0.0005)) * 0.6;
+
+    c.save();
+    c.rotate(a);
+    const scaleX = r / RAY_LEN;
+    const scaleY = (r * 0.36 * widthMul) / RAY_W;
+    c.scale(scaleX, scaleY);
+    c.drawImage(raySprite, 0, -RAY_W / 2);
+    c.restore();
+  }
+  c.restore();
+
+  const highlight = c.createRadialGradient(0, 0, 0, 0, 0, r);
+  highlight.addColorStop(0, 'rgba(255,255,255,0.6)');
+  highlight.addColorStop(0.3, 'rgba(255,255,255,0.15)');
+  highlight.addColorStop(1, 'rgba(255,255,255,0)');
+  c.fillStyle = highlight;
+  c.beginPath();
+  c.arc(0, 0, r, 0, Math.PI * 2);
+  c.fill();
+
+  c.strokeStyle = 'rgba(255,255,255,0.06)';
+  c.lineWidth = 0.8;
+  for (let rr = r * 0.3; rr < r; rr += 2) {
+    c.beginPath();
+    c.arc(0, 0, rr, 0, Math.PI * 2);
+    c.stroke();
+  }
+
+  c.strokeStyle = 'rgba(60,60,70,0.5)';
+  c.lineWidth = 1.5;
+  c.beginPath();
+  c.arc(0, 0, r * 0.32, 0, Math.PI * 2);
+  c.stroke();
+
+  const clearGrad = c.createRadialGradient(-r * 0.05, -r * 0.05, 0, 0, 0, r * 0.32);
+  clearGrad.addColorStop(0, '#b8b8c0');
+  clearGrad.addColorStop(0.6, '#a0a0a8');
+  clearGrad.addColorStop(1, '#888890');
+  c.fillStyle = clearGrad;
+  c.beginPath();
+  c.arc(0, 0, r * 0.32, 0, Math.PI * 2);
+  c.fill();
+
+  c.strokeStyle = 'rgba(255,255,255,0.25)';
+  c.lineWidth = 1;
+  c.beginPath();
+  c.arc(0, 0, r * 0.28, Math.PI * 1.1, Math.PI * 1.6);
+  c.stroke();
+
+  c.strokeStyle = 'rgba(80,80,90,0.4)';
+  c.lineWidth = 1;
+  c.beginPath();
+  c.arc(0, 0, r * 0.22, 0, Math.PI * 2);
+  c.stroke();
+
+  const hubGrad = c.createRadialGradient(0, 0, 0, 0, 0, r * 0.18);
+  hubGrad.addColorStop(0, '#9898a0');
+  hubGrad.addColorStop(1, '#787880');
+  c.fillStyle = hubGrad;
+  c.beginPath();
+  c.arc(0, 0, r * 0.18, 0, Math.PI * 2);
+  c.fill();
+
+  c.strokeStyle = 'rgba(0,0,0,0.6)';
+  c.lineWidth = 2;
+  c.beginPath();
+  c.arc(0, 0, r * 0.13, 0, Math.PI * 2);
+  c.stroke();
+
+  c.fillStyle = '#000';
+  c.beginPath();
+  c.arc(0, 0, r * 0.12, 0, Math.PI * 2);
+  c.fill();
+
+  c.strokeStyle = 'rgba(255,255,255,0.5)';
+  c.lineWidth = 0.8;
+  c.beginPath();
+  c.arc(0, 0, r * 0.12, Math.PI * 1.15, Math.PI * 1.55);
+  c.stroke();
+
+  c.restore();
+}
+
+function drawCD(cx, cy, radius, angle, hueShift, t) {
+  drawRoundCD(angle, t);
+  ctx.save();
+  ctx.translate(cx, cy);
+
+  const squash = 0.32;
+  const thickness = radius * 0.025;
+  const ry = radius * squash;
+
+  ctx.beginPath();
+  ctx.ellipse(0, thickness, radius, ry, 0, 0, Math.PI, false);
+  ctx.lineTo(-radius, 0);
+  ctx.ellipse(0, 0, radius, ry, 0, Math.PI, 0, true);
+  ctx.closePath();
+
+  const sideGrad = ctx.createLinearGradient(0, 0, 0, thickness);
+  sideGrad.addColorStop(0, '#f0f0f5');
+  sideGrad.addColorStop(0.5, '#c0c0c8');
+  sideGrad.addColorStop(1, '#909098');
+  ctx.fillStyle = sideGrad;
+  ctx.fill();
+
+  ctx.save();
+  ctx.scale(1, squash);
+  ctx.drawImage(cdCanvas, -radius, -radius, radius * 2, radius * 2);
+  ctx.restore();
+
+  ctx.restore();
+}
+
+let angle = 0;
+function animate(t) {
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+
+  ctx.clearRect(0, 0, w, h);
+
+  const bgHue = (t * 0.02) % 360;
+  const bgGrad = ctx.createLinearGradient(0, 0, 0, h);
+  bgGrad.addColorStop(0, '#000');
+  bgGrad.addColorStop(0.5, `hsl(${bgHue}, 70%, 12%)`);
+  bgGrad.addColorStop(1, '#000');
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, w, h);
+
+  updateSpectrum(t);
+  updateWaveform(t);
+  updateVU(t);
+
+  if (lastFrameT) trackTime += (t - lastFrameT) / 1000;
+  lastFrameT = t;
+  const totalSec = Math.floor(trackTime);
+  const mm = String(Math.floor(totalSec / 60) % 100).padStart(2, '0');
+  const ss = String(totalSec % 60).padStart(2, '0');
+  const lcdText = `${mm}:${ss}`;
+
+  const margin = w * 0.04;
+  const vuW = w * 0.07;
+  const vuH = h * 0.55;
+  const vuY = (h - vuH) / 2;
+  const lcdW = w * 0.22;
+  const lcdH = h * 0.09;
+
+  const waveH = h * 0.22;
+  drawWaveform(0, h - margin - waveH, w, waveH);
+
+  drawVUMeter(margin, vuY, vuW, vuH, 0);
+  drawVUMeter(w - margin - vuW, vuY, vuW, vuH, 1);
+
+  drawLCDDisplay(w / 2 - lcdW / 2, margin, lcdW, lcdH, lcdText, '#3aff70');
+
+  const cx = w / 2;
+  const cy = h / 2;
+  const radius = Math.min(w, h) * 0.32;
+
+  drawCD(cx, cy, radius, angle, bgHue, t);
+
+  // CRT scanlines
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  for (let y = 0; y < canvas.height; y += 4) {
+    ctx.fillRect(0, y, canvas.width, 2);
+  }
+  ctx.restore();
+
+  angle += 0.025;
+  requestAnimationFrame(animate);
+}
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>

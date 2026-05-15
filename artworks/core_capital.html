@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+  body { margin: 0; display: flex; justify-content: center; align-items: center; height: 100vh; background: #0a0a0a; }
+  .box {
+    width: min(90vw, 90vh);
+    height: min(90vw, 90vh);
+    max-width: 640px;
+    max-height: 640px;
+    background: #111;
+    border-radius: 16px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+  canvas { width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<div class="box">
+  <canvas id="c"></canvas>
+</div>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const S = 640;
+const dpr = window.devicePixelRatio || 1;
+canvas.width = S * dpr;
+canvas.height = S * dpr;
+ctx.scale(dpr, dpr);
+
+// Offscreen plasma canvas (created once)
+const pC = document.createElement('canvas');
+pC.width = S; pC.height = S;
+const pCtx = pC.getContext('2d');
+const plasmaData = pCtx.createImageData(S, S);
+
+const applePath = new Path2D();
+applePath.addPath(new Path2D("M494.782 340.02c-.803-81.025 66.084-119.907 69.072-121.832-37.595-54.993-96.167-62.552-117.037-63.402-49.843-5.032-97.242 29.362-122.565 29.362-25.253 0-64.277-28.607-105.604-27.85-54.32.803-104.4 31.594-132.403 80.245C29.81 334.457 71.81 479.58 126.816 558.976c26.87 38.882 58.914 82.56 100.997 81 40.512-1.594 55.843-26.244 104.848-26.244 48.993 0 62.753 26.245 105.64 25.406 43.606-.803 71.232-39.638 97.925-78.65 30.887-45.12 43.548-88.75 44.316-90.994-.969-.437-85.029-32.634-85.879-129.439l.118-.035z"));
+applePath.addPath(new Path2D("M414.23 102.178C436.553 75.095 451.636 37.5 447.514-.024c-32.162 1.311-71.163 21.437-94.253 48.485-20.729 24.012-38.836 62.28-33.993 99.036 35.918 2.8 72.591-18.248 94.926-45.272l.036-.047z"));
+
+function drawDollar(ctx) {
+  ctx.beginPath();
+  ctx.rect(0, 0, 122.88, 63.89);
+  ctx.moveTo(20.54, 9.73);
+  ctx.lineTo(102.24, 9.73);
+  ctx.bezierCurveTo(102.24, 14.93, 106.48, 19.17, 111.68, 19.17);
+  ctx.lineTo(111.68, 44.42);
+  ctx.bezierCurveTo(106.48, 44.42, 102.24, 48.66, 102.24, 53.86);
+  ctx.lineTo(20.54, 53.86);
+  ctx.bezierCurveTo(20.54, 48.66, 16.3, 44.42, 11.1, 44.42);
+  ctx.lineTo(11.1, 19.17);
+  ctx.bezierCurveTo(16.3, 19.17, 20.54, 14.93, 20.54, 9.73);
+  ctx.closePath();
+  ctx.moveTo(80.26, 31.96);
+  ctx.arc(61.46, 31.96, 18.8, 0, Math.PI * 2);
+  ctx.moveTo(63.78, 36.83);
+  ctx.bezierCurveTo(63.78, 36.09, 63.6, 35.5, 63.23, 35.1);
+  ctx.bezierCurveTo(62.86, 34.69, 62.23, 34.29, 61.31, 33.92);
+  ctx.bezierCurveTo(60.39, 33.55, 59.54, 33.18, 58.77, 32.78);
+  ctx.bezierCurveTo(58, 32.41, 57.33, 31.93, 56.74, 31.45);
+  ctx.bezierCurveTo(56.19, 30.93, 55.74, 30.34, 55.45, 29.68);
+  ctx.bezierCurveTo(55.16, 29.02, 55.01, 28.21, 55.01, 27.25);
+  ctx.bezierCurveTo(55.01, 25.66, 55.53, 24.37, 56.6, 23.34);
+  ctx.bezierCurveTo(57.67, 22.31, 59.11, 21.72, 60.88, 21.53);
+  ctx.lineTo(60.88, 19.39);
+  ctx.lineTo(63.13, 19.39);
+  ctx.lineTo(63.13, 21.57);
+  ctx.bezierCurveTo(64.83, 21.83, 66.19, 22.53, 67.19, 23.67);
+  ctx.bezierCurveTo(68.19, 24.81, 68.66, 26.19, 68.66, 27.96);
+  ctx.lineTo(63.9, 27.96);
+  ctx.bezierCurveTo(63.9, 27, 63.72, 26.23, 63.35, 25.71);
+  ctx.bezierCurveTo(62.98, 25.19, 62.43, 24.94, 61.76, 24.94);
+  ctx.bezierCurveTo(61.13, 24.94, 60.65, 25.12, 60.32, 25.53);
+  ctx.bezierCurveTo(59.99, 25.94, 59.8, 26.45, 59.8, 27.15);
+  ctx.bezierCurveTo(59.8, 27.85, 59.98, 28.4, 60.39, 28.81);
+  ctx.bezierCurveTo(60.8, 29.22, 61.42, 29.62, 62.27, 29.99);
+  ctx.bezierCurveTo(63.15, 30.36, 63.97, 30.73, 64.74, 31.13);
+  ctx.bezierCurveTo(65.51, 31.54, 66.18, 31.98, 66.73, 32.49);
+  ctx.bezierCurveTo(67.28, 33, 67.73, 33.6, 68.06, 34.26);
+  ctx.bezierCurveTo(68.39, 34.92, 68.54, 35.73, 68.54, 36.69);
+  ctx.bezierCurveTo(68.54, 38.28, 68.02, 39.6, 67.03, 40.6);
+  ctx.bezierCurveTo(66, 41.6, 64.63, 42.19, 62.86, 42.37);
+  ctx.lineTo(62.86, 44.36);
+  ctx.lineTo(60.61, 44.36);
+  ctx.lineTo(60.61, 42.37);
+  ctx.bezierCurveTo(58.58, 42.15, 57, 41.45, 55.89, 40.27);
+  ctx.bezierCurveTo(54.78, 39.09, 54.23, 37.5, 54.23, 35.69);
+  ctx.lineTo(58.99, 35.69);
+  ctx.bezierCurveTo(58.99, 36.76, 59.21, 37.57, 59.69, 38.12);
+  ctx.bezierCurveTo(60.17, 38.67, 60.83, 38.97, 61.72, 38.97);
+  ctx.bezierCurveTo(62.35, 38.97, 62.86, 38.79, 63.23, 38.42);
+  ctx.bezierCurveTo(63.6, 38.05, 63.78, 37.54, 63.78, 36.87);
+  ctx.closePath();
+  ctx.fill("evenodd");
+}
+
+const rand = (a, b) => a + Math.random() * (b - a);
+const NUM = 150;
+const bills = [];
+
+for (let i = 0; i < NUM; i++) {
+  bills.push({
+    x: rand(40, 600), y: rand(-200, 700),
+    scale: rand(0.3, 0.7),
+    rot: rand(-Math.PI, Math.PI),
+    speed: rand(0.3, 1.2),
+    drift: rand(-0.4, 0.4),
+    wobble: rand(0.5, 2),
+    wobbleOff: rand(0, Math.PI * 2),
+    hue: rand(90, 160),
+    sat: rand(50, 80),
+    light: rand(35, 60),
+    alpha: rand(0.4, 0.95),
+  });
+}
+
+function updatePlasma(t) {
+  const d = plasmaData.data;
+  const T = t * 0.0008;
+  for (let y = 0; y < S; y += 4) {
+    for (let x = 0; x < S; x += 4) {
+      const v = Math.sin(x * 0.02 + T)
+              + Math.sin(y * 0.015 - T * 1.3)
+              + Math.sin((x + y) * 0.01 + T * 0.7)
+              + Math.sin(Math.sqrt(x * x + y * y) * 0.01 - T);
+      const c = (v + 4) / 8;
+      const r = Math.floor(Math.sin(c * Math.PI * 2) * 30 + 10);
+      const g = Math.floor(Math.sin(c * Math.PI * 2 + 1) * 60 + 70);
+      const bl = Math.floor(Math.sin(c * Math.PI * 2 + 2) * 20 + 10);
+      for (let dy = 0; dy < 4 && y + dy < S; dy++) {
+        for (let dx = 0; dx < 4 && x + dx < S; dx++) {
+          const i = ((y + dy) * S + (x + dx)) * 4;
+          d[i] = r; d[i+1] = g; d[i+2] = bl; d[i+3] = 200;
+        }
+      }
+    }
+  }
+  pCtx.putImageData(plasmaData, 0, 0);
+}
+
+function draw(t) {
+  ctx.clearRect(0, 0, S, S);
+
+  // Plasma
+  updatePlasma(t);
+  ctx.save();
+  ctx.clip(applePath);
+  ctx.drawImage(pC, 0, 0);
+
+  // Bills
+  for (let b of bills) {
+    b.y -= b.speed;
+    b.x += b.drift + Math.sin(t * 0.0015 * b.wobble + b.wobbleOff) * 0.5;
+    b.rot += 0.003 * Math.sin(t * 0.001 + b.wobbleOff);
+    if (b.y < -80) { b.y = rand(680, 800); b.x = rand(60, 580); }
+
+    ctx.save();
+    ctx.translate(b.x, b.y);
+    ctx.rotate(b.rot);
+    ctx.scale(b.scale, b.scale);
+    ctx.translate(-61.44, -31.95);
+    ctx.globalAlpha = b.alpha + 0.15 * Math.sin(t * 0.002 + b.wobbleOff);
+    ctx.shadowColor = 'rgba(0,0,0,0.4)';
+    ctx.shadowBlur = 3;
+    ctx.shadowOffsetY = 2;
+    ctx.fillStyle = `hsla(${b.hue}, ${b.sat}%, ${b.light}%, 0.35)`;
+    ctx.fillRect(0, 0, 122.88, 63.89);
+    ctx.shadowColor = 'transparent';
+    ctx.fillStyle = `hsl(${b.hue}, ${b.sat}%, ${b.light}%)`;
+    drawDollar(ctx);
+    ctx.restore();
+  }
+
+  // Scanlines
+  ctx.fillStyle = 'rgba(0,0,0,0.15)';
+  for (let y = 0; y < S; y += 8) {
+    ctx.fillRect(0, y, S, 4);
+  }
+
+  ctx.restore();
+
+  // Vignette (outside clip, radial centered on apple)
+  ctx.save();
+  ctx.clip(applePath);
+  const vig = ctx.createRadialGradient(320, 320, 100, 320, 320, 380);
+  vig.addColorStop(0, 'rgba(0,0,0,0)');
+  vig.addColorStop(1, 'rgba(0,0,0,0.6)');
+  ctx.fillStyle = vig;
+  ctx.fillRect(0, 0, S, S);
+  ctx.restore();
+
+  // Chromatic aberration outline
+  ctx.save();
+  ctx.globalAlpha = 0.3;
+  ctx.strokeStyle = 'rgba(255,0,80,0.4)';
+  ctx.lineWidth = 1.5;
+  ctx.translate(-1.5, 0);
+  ctx.stroke(applePath);
+  ctx.restore();
+
+  ctx.save();
+  ctx.globalAlpha = 0.3;
+  ctx.strokeStyle = 'rgba(0,200,255,0.4)';
+  ctx.lineWidth = 1.5;
+  ctx.translate(1.5, 0);
+  ctx.stroke(applePath);
+  ctx.restore();
+
+  // Main outline
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,255,80,0.3)';
+  ctx.shadowBlur = 8;
+  ctx.strokeStyle = 'rgba(0,220,60,0.35)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke(applePath);
+  ctx.restore();
+
+  requestAnimationFrame(draw);
+}
+
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>

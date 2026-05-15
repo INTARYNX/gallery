@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Genuary 2026 #23</title>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: #ffffff;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        #container {
+            position: relative;
+            width: 100%;
+            max-width: 600px;
+            aspect-ratio: 1;
+            border: 8px solid #000;
+        }
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div id="container"></div>
+    
+    <script>
+        const container = document.getElementById('container');
+        const canvases = [];
+        const colors = ['#D40920', '#1356A2', '#F7D842'];
+        let time = 0;
+        let size = 600;
+
+        function updateSize() {
+            size = container.offsetWidth;
+            canvases.forEach(({ canvas }) => {
+                canvas.width = size;
+                canvas.height = size;
+            });
+        }
+
+        function generateRandomComposition() {
+            const shapes = [];
+            const divisions = 6 + Math.floor(Math.random() * 4);
+            
+            for (let i = 0; i < divisions; i++) {
+                shapes.push({
+                    x: Math.floor(Math.random() * size * 0.8),
+                    y: Math.floor(Math.random() * size * 0.8),
+                    width: size * 0.15 + Math.floor(Math.random() * size * 0.25),
+                    height: size * 0.15 + Math.floor(Math.random() * size * 0.25),
+                    color: colors[Math.floor(Math.random() * colors.length)],
+                    offset: Math.random() * Math.PI * 2
+                });
+            }
+            
+            return shapes;
+        }
+
+        function addNewCanvas() {
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            container.appendChild(canvas);
+            
+            const ctx = canvas.getContext('2d');
+            const composition = generateRandomComposition();
+            const offset = Math.random() * Math.PI * 2;
+            const rotationSpeed = (Math.random() - 0.5) * 0.0005;
+            let rotation = Math.random() * Math.PI * 2;
+            
+            canvases.push({ canvas, ctx, composition, offset, rotation, rotationSpeed });
+        }
+
+        function drawComposition(ctx, shapes, alpha, rotation) {
+            ctx.clearRect(0, 0, size, size);
+            
+            ctx.save();
+            ctx.translate(size / 2, size / 2);
+            ctx.rotate(rotation);
+            ctx.translate(-size / 2, -size / 2);
+            
+            shapes.forEach((shape, i) => {
+                const shapeAlpha = (Math.sin(time * 0.8 + shape.offset) + 1) / 2 * 0.7 + 0.3;
+                const breathe = Math.sin(time * 0.5 + i) * 0.03 + 1;
+                ctx.globalAlpha = alpha * shapeAlpha;
+                ctx.fillStyle = shape.color;
+                ctx.fillRect(
+                    shape.x, 
+                    shape.y, 
+                    shape.width * breathe, 
+                    shape.height * breathe
+                );
+            });
+            
+            ctx.restore();
+            
+            const gradientMix = Math.pow((Math.sin(time * 0.002) + 1) / 2, 0.3);
+            const r = Math.floor(gradientMix * 255);
+            const g = Math.floor(gradientMix * 255);
+            const b = Math.floor(gradientMix * 255);
+            
+            const gradient = ctx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size);
+            gradient.addColorStop(0, `rgba(${r},${g},${b},0)`);
+            gradient.addColorStop(1, `rgba(${r},${g},${b},0.3)`);
+            ctx.fillStyle = gradient;
+            ctx.globalAlpha = 1;
+            ctx.fillRect(0, 0, size, size);
+        }
+
+        function draw() {
+            canvases.forEach((item) => {
+                const alpha = (Math.sin(time + item.offset) + 1) / 2 * 0.6 + 0.2;
+                item.rotation += item.rotationSpeed;
+                drawComposition(item.ctx, item.composition, alpha, item.rotation);
+            });
+            
+            time += 0.015;
+            requestAnimationFrame(draw);
+        }
+
+        window.addEventListener('resize', updateSize);
+        updateSize();
+        addNewCanvas();
+
+        setInterval(() => {
+            addNewCanvas();
+        }, 5000);
+
+        draw();
+    </script>
+</body>
+</html>

@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Genuary 2026 #28b</title>
+    <style>
+        body {
+            background: #000;
+            font-family: 'Courier New', monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .canvas-box {
+            position: relative;
+            width: 100%;
+            max-width: 600px;
+            aspect-ratio: 1;
+            background: #0a0a0a;
+            overflow: hidden;
+            border-radius: 50%;
+            box-shadow: 0 0 40px rgba(0, 0, 0, 0.8);
+            animation: morphToSquare 2s 6.5s forwards;
+        }
+
+        @keyframes morphToSquare {
+            0% {
+                border-radius: 50%;
+            }
+            100% {
+                border-radius: 8px;
+            }
+        }
+
+        .flame-halo {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.4) 0%, rgba(240, 240, 255, 0.2) 15%, transparent 35%);
+            z-index: 0;
+            animation: fadeHalo 0.5s 2.5s forwards;
+        }
+
+        @keyframes fadeHalo {
+            to {
+                opacity: 0;
+            }
+        }
+
+        .canvas-box::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: 
+                radial-gradient(circle at 20% 50%, rgba(0, 127, 255, 0.3) 0%, transparent 50%),
+                radial-gradient(circle at 80% 80%, rgba(0, 191, 255, 0.3) 0%, transparent 50%),
+                radial-gradient(circle at 40% 20%, rgba(30, 144, 255, 0.3) 0%, transparent 50%),
+                radial-gradient(circle at 60% 70%, rgba(135, 206, 250, 0.3) 0%, transparent 50%);
+            animation: plasma 15s ease-in-out infinite, fadeOutPlasma 2s 9s forwards;
+            z-index: 0;
+        }
+
+        @keyframes plasma {
+            0%, 100% {
+                transform: translate(0, 0) scale(1);
+            }
+            33% {
+                transform: translate(30px, -50px) scale(1.1);
+            }
+            66% {
+                transform: translate(-40px, 30px) scale(0.9);
+            }
+        }
+
+        @keyframes fadeOutPlasma {
+            to {
+                opacity: 0;
+            }
+        }
+
+        .canvas-box::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: repeating-linear-gradient(
+                0deg,
+                rgba(0, 0, 0, 0.15) 0px,
+                rgba(0, 0, 0, 0.15) 1px,
+                transparent 1px,
+                transparent 2px
+            );
+            pointer-events: none;
+            z-index: 2;
+            animation: scanlines 8s linear infinite;
+        }
+
+        @keyframes scanlines {
+            0% {
+                transform: translateY(0);
+            }
+            100% {
+                transform: translateY(10px);
+            }
+        }
+
+        .flame {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 8px;
+            height: 20px;
+            background: radial-gradient(ellipse, rgba(255, 255, 255, 0.95) 0%, rgba(240, 240, 255, 0.7) 50%, rgba(200, 220, 255, 0.3) 80%, transparent 100%);
+            border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
+            z-index: 5;
+            animation: flicker 0.15s ease-in-out infinite, flameShrink 2.5s ease-out forwards, fadeFlame 0.5s 2.5s forwards;
+            filter: blur(0.5px);
+        }
+
+        @keyframes flameShrink {
+            0% {
+                width: 16px;
+                height: 40px;
+            }
+            100% {
+                width: 6px;
+                height: 15px;
+            }
+        }
+
+        @keyframes flicker {
+            0%, 100% {
+                opacity: 0.7;
+                transform: translate(-50%, -50%) scale(1);
+            }
+            25% {
+                opacity: 0.9;
+                transform: translate(-50%, -50%) scale(1.1) translateY(-1px);
+            }
+            50% {
+                opacity: 0.6;
+                transform: translate(-50%, -50%) scale(0.95);
+            }
+            75% {
+                opacity: 0.85;
+                transform: translate(-50%, -50%) scale(1.05) translateY(-0.5px);
+            }
+        }
+
+        @keyframes fadeFlame {
+            to {
+                opacity: 0;
+            }
+        }
+
+        .night-sky {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: 
+                radial-gradient(circle at 50% 50%, rgba(0, 20, 80, 0.5) 0%, transparent 50%),
+                radial-gradient(circle at 30% 70%, rgba(0, 10, 60, 0.4) 0%, transparent 50%),
+                radial-gradient(circle at 70% 30%, rgba(0, 30, 100, 0.3) 0%, transparent 50%);
+            opacity: 0;
+            z-index: 0;
+            animation: fadeInNight 2s 9s forwards, nightPlasma 20s 11s ease-in-out infinite;
+        }
+
+        @keyframes fadeInNight {
+            to {
+                opacity: 1;
+            }
+        }
+
+        @keyframes nightPlasma {
+            0%, 100% {
+                transform: translate(0, 0) scale(1);
+            }
+            33% {
+                transform: translate(20px, -30px) scale(1.05);
+            }
+            66% {
+                transform: translate(-25px, 20px) scale(0.95);
+            }
+        }
+
+        .content-wrapper {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1;
+            opacity: 0;
+            animation: showContent 0.3s 2.7s forwards;
+        }
+
+        @keyframes showContent {
+            to {
+                opacity: 1;
+            }
+        }
+
+        .poem {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            padding: 30px;
+            background: #111;
+            border: 2px solid #333;
+            border-radius: 8px;
+            position: relative;
+            z-index: 1;
+            animation: fadeOutContainer 1s 6.5s forwards;
+        }
+
+        @keyframes fadeOutContainer {
+            0% {
+                opacity: 1;
+                background: #111;
+                border-color: #333;
+            }
+            100% {
+                opacity: 1;
+                background: transparent;
+                border-color: transparent;
+            }
+        }
+
+        .line {
+            display: flex;
+            gap: 4px;
+            justify-content: center;
+        }
+
+        .card {
+            position: relative;
+            width: 24px;
+            height: 36px;
+            perspective: 300px;
+        }
+
+        .card:nth-child(1) { animation: fadeOutCard 0.3s 7.5s forwards; }
+        .card:nth-child(2) { animation: fadeOutCard 0.3s 7.7s forwards; }
+        .card:nth-child(3) { animation: fadeOutCard 0.3s 7.9s forwards; }
+        .card:nth-child(4) { animation: fadeOutCard 0.3s 8.1s forwards; }
+        .card:nth-child(5) { animation: fadeOutCard 0.3s 8.3s forwards; }
+        .card:nth-child(6) { animation: fadeOutCard 0.3s 8.5s forwards; }
+        .card:nth-child(7) { animation: fadeOutCard 0.3s 8.7s forwards; }
+        .card:nth-child(8) { animation: fadeOutCard 0.3s 8.9s forwards; }
+
+        @keyframes fadeOutCard {
+            0% {
+                opacity: 1;
+                transform: scale(1);
+            }
+            100% {
+                opacity: 0;
+                transform: scale(0.5);
+            }
+        }
+
+        .half {
+            position: absolute;
+            width: 100%;
+            height: 50%;
+            background: #1a1a1a;
+            border: 1px solid #333;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        .top {
+            top: 0;
+            border-bottom: 0.5px solid #000;
+            opacity: 0;
+        }
+
+        .bottom {
+            bottom: 0;
+            border-top: 0.5px solid #000;
+            opacity: 0;
+        }
+
+        .letter {
+            font-size: 20px;
+            font-weight: bold;
+        }
+
+        .top .letter {
+            position: absolute;
+            bottom: -2px;
+            color: #333;
+            transform: scaleY(-1);
+        }
+
+        .bottom .letter {
+            position: absolute;
+            top: -2px;
+            color: white;
+            text-shadow: 
+                0 0 10px rgba(255, 255, 255, 0.8),
+                0 0 20px rgba(0, 200, 255, 0.6),
+                0 0 30px rgba(0, 200, 255, 0.4),
+                0 0 40px rgba(0, 200, 255, 0.2);
+            animation: neonPulse 2s ease-in-out infinite;
+        }
+
+        .line:nth-child(3) .bottom .letter {
+            text-shadow: 
+                0 0 10px rgba(255, 255, 255, 0.8),
+                0 0 20px rgba(255, 50, 50, 0.7),
+                0 0 30px rgba(255, 0, 0, 0.5),
+                0 0 40px rgba(200, 0, 50, 0.3);
+            animation: neonPulseRed 2s ease-in-out infinite;
+        }
+
+        @keyframes neonPulse {
+            0%, 100% {
+                text-shadow: 
+                    0 0 10px rgba(255, 255, 255, 0.8),
+                    0 0 20px rgba(0, 200, 255, 0.6),
+                    0 0 30px rgba(0, 200, 255, 0.4),
+                    0 0 40px rgba(0, 200, 255, 0.2);
+            }
+            50% {
+                text-shadow: 
+                    0 0 15px rgba(255, 255, 255, 1),
+                    0 0 30px rgba(0, 200, 255, 0.8),
+                    0 0 45px rgba(0, 200, 255, 0.6),
+                    0 0 60px rgba(0, 200, 255, 0.4);
+            }
+        }
+
+        @keyframes neonPulseRed {
+            0%, 100% {
+                text-shadow: 
+                    0 0 10px rgba(255, 255, 255, 0.8),
+                    0 0 20px rgba(255, 50, 50, 0.7),
+                    0 0 30px rgba(255, 0, 0, 0.5),
+                    0 0 40px rgba(200, 0, 50, 0.3);
+            }
+            50% {
+                text-shadow: 
+                    0 0 15px rgba(255, 255, 255, 1),
+                    0 0 30px rgba(255, 50, 50, 0.9),
+                    0 0 45px rgba(255, 0, 0, 0.7),
+                    0 0 60px rgba(200, 0, 50, 0.5);
+            }
+        }
+
+        .flap {
+            position: absolute;
+            top: 0;
+            width: 100%;
+            height: 50%;
+            background: #2a2a2a;
+            border: 1px solid #333;
+            border-bottom: 0.5px solid #000;
+            transform-origin: bottom;
+            transform-style: preserve-3d;
+            backface-visibility: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            z-index: 5;
+            animation: flip 0.4s ease-in-out forwards;
+        }
+
+        .flap .letter {
+            position: absolute;
+            bottom: -2px;
+            color: white;
+            transform: scaleY(-1);
+        }
+
+        @keyframes flip {
+            0% { transform: rotateX(0deg); }
+            100% { transform: rotateX(-180deg); }
+        }
+        
+        @keyframes show {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .particle {
+            position: absolute;
+            width: 4px;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.8);
+            border-radius: 50%;
+            box-shadow: 0 0 10px rgba(0, 200, 255, 0.8);
+            opacity: 0;
+            z-index: 3;
+        }
+
+        .particle:nth-child(1) {
+            left: 10%;
+            animation: float1 4s 9s ease-in-out infinite, particleColor 2s 21s forwards;
+        }
+
+        .particle:nth-child(2) {
+            left: 25%;
+            animation: float2 5s 9.2s ease-in-out infinite, particleColor 2s 21s forwards;
+        }
+
+        .particle:nth-child(3) {
+            left: 40%;
+            animation: float3 4.5s 9.4s ease-in-out infinite, particleColor 2s 21s forwards;
+        }
+
+        .particle:nth-child(4) {
+            left: 55%;
+            animation: float1 5.5s 9.6s ease-in-out infinite, particleColor 2s 21s forwards;
+        }
+
+        .particle:nth-child(5) {
+            left: 70%;
+            animation: float2 4.2s 9.8s ease-in-out infinite, particleColor 2s 21s forwards;
+        }
+
+        .particle:nth-child(6) {
+            left: 85%;
+            animation: float3 5.8s 10s ease-in-out infinite, particleColor 2s 21s forwards;
+        }
+
+        .particle:nth-child(7) {
+            left: 15%;
+            animation: float2 4.8s 10.2s ease-in-out infinite, particleColor 2s 21s forwards;
+        }
+
+        .particle:nth-child(8) {
+            left: 60%;
+            animation: float1 5.2s 10.4s ease-in-out infinite, particleColor 2s 21s forwards;
+        }
+
+        @keyframes particleColor {
+            to {
+                background: rgba(139, 0, 0, 0.8);
+                box-shadow: 0 0 10px rgba(139, 0, 0, 0.8);
+            }
+        }
+
+        @keyframes float1 {
+            0% {
+                bottom: 0;
+                opacity: 0;
+                transform: translateX(0) scale(0.5);
+            }
+            10% {
+                opacity: 1;
+            }
+            90% {
+                opacity: 1;
+            }
+            100% {
+                bottom: 100%;
+                opacity: 0;
+                transform: translateX(30px) scale(1.5);
+            }
+        }
+
+        @keyframes float2 {
+            0% {
+                bottom: 0;
+                opacity: 0;
+                transform: translateX(0) scale(0.5);
+            }
+            10% {
+                opacity: 1;
+            }
+            90% {
+                opacity: 1;
+            }
+            100% {
+                bottom: 100%;
+                opacity: 0;
+                transform: translateX(-30px) scale(1.5);
+            }
+        }
+
+        @keyframes float3 {
+            0% {
+                bottom: 0;
+                opacity: 0;
+                transform: translateX(0) scale(0.5);
+            }
+            10% {
+                opacity: 1;
+            }
+            90% {
+                opacity: 1;
+            }
+            100% {
+                bottom: 100%;
+                opacity: 0;
+                transform: translateX(15px) scale(1.5);
+            }
+        }
+
+        .drifting-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            font-size: 48px;
+            font-weight: bold;
+            color: rgba(255, 255, 255, 0.8);
+            opacity: 0;
+            z-index: 4;
+            perspective: 1000px;
+            transform-style: preserve-3d;
+            animation: showDrifting 3s 9s forwards, floatSoft 8s 9s ease-in-out infinite, hideDrifting 2s 16s forwards;
+        }
+
+        @keyframes showDrifting {
+            to {
+                opacity: 1;
+            }
+        }
+
+        @keyframes hideDrifting {
+            to {
+                opacity: 0;
+            }
+        }
+
+        @keyframes floatSoft {
+            0% {
+                transform: translate(-50%, -50%) translateY(0) translateZ(0) rotateX(0deg) rotateY(0deg) rotateZ(0deg);
+            }
+            20% {
+                transform: translate(-50%, -50%) translateY(-8px) translateZ(5px) rotateX(2deg) rotateY(-3deg) rotateZ(0.5deg);
+            }
+            40% {
+                transform: translate(-50%, -50%) translateY(-12px) translateZ(10px) rotateX(3deg) rotateY(0deg) rotateZ(-0.5deg);
+            }
+            60% {
+                transform: translate(-50%, -50%) translateY(-8px) translateZ(5px) rotateX(2deg) rotateY(3deg) rotateZ(0.5deg);
+            }
+            80% {
+                transform: translate(-50%, -50%) translateY(-4px) translateZ(0px) rotateX(0deg) rotateY(-2deg) rotateZ(-0.3deg);
+            }
+            100% {
+                transform: translate(-50%, -50%) translateY(0) translateZ(0) rotateX(0deg) rotateY(0deg) rotateZ(0deg);
+            }
+        }
+
+        /* Animation timing for each card */
+        .card:nth-child(1) .bottom { animation: show 0.1s 3.3s forwards; }
+        .card:nth-child(1) .top { animation: show 0.1s 3.3s forwards; }
+        .card:nth-child(1) .flap { animation-delay: 3s; }
+
+        .card:nth-child(2) .bottom { animation: show 0.1s 3.6s forwards; }
+        .card:nth-child(2) .top { animation: show 0.1s 3.6s forwards; }
+        .card:nth-child(2) .flap { animation-delay: 3.3s; }
+
+        .card:nth-child(3) .bottom { animation: show 0.1s 3.9s forwards; }
+        .card:nth-child(3) .top { animation: show 0.1s 3.9s forwards; }
+        .card:nth-child(3) .flap { animation-delay: 3.6s; }
+
+        .card:nth-child(4) .bottom { animation: show 0.1s 4.2s forwards; }
+        .card:nth-child(4) .top { animation: show 0.1s 4.2s forwards; }
+        .card:nth-child(4) .flap { animation-delay: 3.9s; }
+
+        .card:nth-child(5) .bottom { animation: show 0.1s 4.5s forwards; }
+        .card:nth-child(5) .top { animation: show 0.1s 4.5s forwards; }
+        .card:nth-child(5) .flap { animation-delay: 4.2s; }
+
+        .card:nth-child(6) .bottom { animation: show 0.1s 4.8s forwards; }
+        .card:nth-child(6) .top { animation: show 0.1s 4.8s forwards; }
+        .card:nth-child(6) .flap { animation-delay: 4.5s; }
+
+        .card:nth-child(7) .bottom { animation: show 0.1s 5.1s forwards; }
+        .card:nth-child(7) .top { animation: show 0.1s 5.1s forwards; }
+        .card:nth-child(7) .flap { animation-delay: 4.8s; }
+
+        .card:nth-child(8) .bottom { animation: show 0.1s 5.4s forwards; }
+        .card:nth-child(8) .top { animation: show 0.1s 5.4s forwards; }
+        .card:nth-child(8) .flap { animation-delay: 5.1s; }
+    </style>
+</head>
+<body>
+    <div class="canvas-box">
+        <div class="flame-halo"></div>
+        <div class="night-sky"></div>
+        
+        <div class="flame"></div>
+        
+        <div class="particle"></div>
+        <div class="particle"></div>
+        <div class="particle"></div>
+        <div class="particle"></div>
+        <div class="particle"></div>
+        <div class="particle"></div>
+        <div class="particle"></div>
+        <div class="particle"></div>
+
+        <div class="drifting-text">Drifting</div>
+
+        <div class="content-wrapper">
+            <div class="poem">
+                <div class="line">
+                    <div class="card">
+                        <div class="half top"><span class="letter">N</span></div>
+                        <div class="half bottom"><span class="letter">N</span></div>
+                        <div class="flap"><span class="letter">N</span></div>
+                    </div>
+                    <div class="card">
+                        <div class="half top"><span class="letter">O</span></div>
+                        <div class="half bottom"><span class="letter">O</span></div>
+                        <div class="flap"><span class="letter">O</span></div>
+                    </div>
+                    <div class="card">
+                        <div class="half top"><span class="letter"> </span></div>
+                        <div class="half bottom"><span class="letter"> </span></div>
+                        <div class="flap"><span class="letter"> </span></div>
+                    </div>
+                    <div class="card">
+                        <div class="half top"><span class="letter">P</span></div>
+                        <div class="half bottom"><span class="letter">P</span></div>
+                        <div class="flap"><span class="letter">P</span></div>
+                    </div>
+                    <div class="card">
+                        <div class="half top"><span class="letter">L</span></div>
+                        <div class="half bottom"><span class="letter">L</span></div>
+                        <div class="flap"><span class="letter">L</span></div>
+                    </div>
+                    <div class="card">
+                        <div class="half top"><span class="letter">A</span></div>
+                        <div class="half bottom"><span class="letter">A</span></div>
+                        <div class="flap"><span class="letter">A</span></div>
+                    </div>
+                    <div class="card">
+                        <div class="half top"><span class="letter">C</span></div>
+                        <div class="half bottom"><span class="letter">C</span></div>
+                        <div class="flap"><span class="letter">C</span></div>
+                    </div>
+                    <div class="card">
+                        <div class="half top"><span class="letter">E</span></div>
+                        <div class="half bottom"><span class="letter">E</span></div>
+                        <div class="flap"><span class="letter">E</span></div>
+                    </div>
+                </div>
+
+                <div class="line">
+                    <div class="card">
+                        <div class="half top"><span class="letter">I</span></div>
+                        <div class="half bottom"><span class="letter">I</span></div>
+                        <div class="flap"><span class="letter">I</span></div>
+                    </div>
+                    <div class="card">
+                        <div class="half top"><span class="letter">N</span></div>
+                        <div class="half bottom"><span class="letter">N</span></div>
+                        <div class="flap"><span class="letter">N</span></div>
+                    </div>
+                    <div class="card">
+                        <div class="half top"><span class="letter"> </span></div>
+                        <div class="half bottom"><span class="letter"> </span></div>
+                        <div class="flap"><span class="letter"> </span></div>
+                    </div>
+                    <div class="card">
+                        <div class="half top"><span class="letter">T</span></div>
+                        <div class="half bottom"><span class="letter">T</span></div>
+                        <div class="flap"><span class="letter">T</span></div>
+                    </div>
+                    <div class="card">
+                        <div class="half top"><span class="letter">H</span></div>
+                        <div class="half bottom"><span class="letter">H</span></div>
+                        <div class="flap"><span class="letter">H</span></div>
+                    </div>
+                    <div class="card">
+                        <div class="half top"><span class="letter">E</span></div>
+                        <div class="half bottom"><span class="letter">E</span></div>
+                        <div class="flap"><span class="letter">E</span></div>
+                    </div>
+                </div>
+
+                <div class="line">
+                    <div class="card">
+                        <div class="half top"><span class="letter">W</span></div>
+                        <div class="half bottom"><span class="letter">W</span></div>
+                        <div class="flap"><span class="letter">W</span></div>
+                    </div>
+                    <div class="card">
+                        <div class="half top"><span class="letter">O</span></div>
+                        <div class="half bottom"><span class="letter">O</span></div>
+                        <div class="flap"><span class="letter">O</span></div>
+                    </div>
+                    <div class="card">
+                        <div class="half top"><span class="letter">R</span></div>
+                        <div class="half bottom"><span class="letter">R</span></div>
+                        <div class="flap"><span class="letter">R</span></div>
+                    </div>
+                    <div class="card">
+                        <div class="half top"><span class="letter">L</span></div>
+                        <div class="half bottom"><span class="letter">L</span></div>
+                        <div class="flap"><span class="letter">L</span></div>
+                    </div>
+                    <div class="card">
+                        <div class="half top"><span class="letter">D</span></div>
+                        <div class="half bottom"><span class="letter">D</span></div>
+                        <div class="flap"><span class="letter">D</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Genuary 2026 #10</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background: #1a1a2e;
+            font-family: Arial, sans-serif;
+            color: #eee;
+        }
+        #canvasContainer {
+            width: 95vmin;
+            height: 95vmin;
+            position: relative;
+        }
+        canvas {
+            width: 100%;
+            height: 100%;
+            border: 2px solid #16213e;
+            background: #0f3460;
+            border-radius: 8px;
+            display: block;
+            box-sizing: border-box;
+        }
+    </style>
+</head>
+<body>
+    <div id="canvasContainer">
+        <canvas id="canvas" width="800" height="800"></canvas>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        let centerX = 400;
+        let centerY = 400;
+
+        function resizeCanvas() {
+            const container = document.getElementById('canvasContainer');
+            const size = Math.min(container.clientWidth, container.clientHeight);
+            
+            canvas.width = size;
+            canvas.height = size;
+            canvas.style.width = size + 'px';
+            canvas.style.height = size + 'px';
+
+            centerX = size / 2;
+            centerY = size / 2;
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        let R = 150;
+        let r = 75;
+        let d = 50;
+        let speed = 5;
+        let angle = 0;
+        let trail = [];
+
+        let time = 0;
+        const baseR = 150;
+        const baseRSmall = 75;
+        const baseD = 50;
+        
+        let colorPhase = 0;
+
+        function updateParams() {
+            time += 0.005;
+            
+            R = baseR + Math.sin(time * 0.7) * 100;
+            r = baseRSmall + Math.sin(time * 1.2) * 50;
+            d = baseD + Math.sin(time * 0.9) * 80;
+            
+            speed = 3 + Math.sin(time * 0.3) * 2;
+            
+            colorPhase = (colorPhase + 0.002) % 1;
+        }
+        
+        function getColor(phase) {
+            const hue = 220 + Math.sin(phase * Math.PI * 2) * 60;
+            return hue;
+        }
+
+        function polarToCartesian(theta, radius) {
+            return {
+                x: centerX + radius * Math.cos(theta),
+                y: centerY + radius * Math.sin(theta)
+            };
+        }
+
+        function spirograph(t) {
+            const ratio = (R - r) / r;
+            const x = (R - r) * Math.cos(t) + d * Math.cos(ratio * t);
+            const y = (R - r) * Math.sin(t) - d * Math.sin(ratio * t);
+            return { x: centerX + x, y: centerY + y };
+        }
+
+        function draw() {
+            ctx.fillStyle = 'rgba(15, 52, 96, 0.05)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            updateParams();
+
+            const point = spirograph(angle);
+            trail.push({ x: point.x, y: point.y, life: 1.0 });
+
+            if (trail.length > 2000) trail.shift();
+
+            trail = trail.filter(p => p.life > 0);
+            
+            trail.forEach(p => {
+                p.life -= 0.002;
+            });
+
+            for (let i = 0; i < trail.length - 1; i++) {
+                const alpha = trail[i].life;
+                const phase = (colorPhase + i * 0.001) % 1;
+                const hue = getColor(phase);
+                ctx.strokeStyle = `hsla(${hue}, 80%, 60%, ${alpha})`;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(trail[i].x, trail[i].y);
+                ctx.lineTo(trail[i + 1].x, trail[i + 1].y);
+                ctx.stroke();
+            }
+
+            const currentHue = getColor(colorPhase);
+            ctx.fillStyle = `hsl(${currentHue}, 80%, 70%)`;
+            ctx.beginPath();
+            ctx.arc(point.x, point.y, 4, 0, Math.PI * 2);
+            ctx.fill();
+
+            const bigCircle = polarToCartesian(angle, R - r);
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, R, 0, Math.PI * 2);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.arc(bigCircle.x, bigCircle.y, r, 0, Math.PI * 2);
+            ctx.stroke();
+
+            ctx.strokeStyle = 'rgba(233, 69, 96, 0.5)';
+            ctx.beginPath();
+            ctx.moveTo(bigCircle.x, bigCircle.y);
+            ctx.lineTo(point.x, point.y);
+            ctx.stroke();
+
+            angle += speed * 0.01;
+
+            requestAnimationFrame(draw);
+        }
+
+        draw();
+    </script>
+</body>
+</html>

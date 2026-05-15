@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shards</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        canvas {
+            border: 1px solid #111;
+            max-width: 100vmin;
+            max-height: 100vmin;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        function resize() {
+            const size = Math.min(window.innerWidth, window.innerHeight);
+            canvas.width = size;
+            canvas.height = size;
+        }
+        
+        resize();
+        window.addEventListener('resize', resize);
+
+        const gridSize = 20;
+        const cols = Math.floor(canvas.width / gridSize);
+        const rows = Math.floor(canvas.height / gridSize);
+        
+        let grid = [];
+        let nextGrid = [];
+        const shards = [];
+
+        for (let i = 0; i < rows; i++) {
+            grid[i] = [];
+            nextGrid[i] = [];
+            for (let j = 0; j < cols; j++) {
+                grid[i][j] = Math.random() > 0.7 ? 1 : 0;
+                nextGrid[i][j] = 0;
+            }
+        }
+
+        function countNeighbors(x, y) {
+            let count = 0;
+            for (let i = -1; i <= 1; i++) {
+                for (let j = -1; j <= 1; j++) {
+                    if (i === 0 && j === 0) continue;
+                    const row = (y + i + rows) % rows;
+                    const col = (x + j + cols) % cols;
+                    count += grid[row][col];
+                }
+            }
+            return count;
+        }
+
+        function update() {
+            for (let i = 0; i < rows; i++) {
+                for (let j = 0; j < cols; j++) {
+                    const neighbors = countNeighbors(j, i);
+                    const current = grid[i][j];
+                    
+                    if (current === 1 && (neighbors === 2 || neighbors === 3)) {
+                        nextGrid[i][j] = 1;
+                    } else if (current === 0 && neighbors === 3) {
+                        nextGrid[i][j] = 1;
+                    } else {
+                        nextGrid[i][j] = 0;
+                    }
+                }
+            }
+            
+            [grid, nextGrid] = [nextGrid, grid];
+        }
+
+        function drawShard(shard) {
+            ctx.save();
+            ctx.translate(shard.x, shard.y);
+            ctx.rotate(shard.rotation);
+            
+            const lightness = 30 + (shard.lightness % 40);
+            
+            ctx.strokeStyle = `hsla(0, 0%, ${lightness}%, ${shard.alpha})`;
+            ctx.fillStyle = `hsla(0, 0%, ${lightness * 0.3}%, ${shard.alpha * 0.6})`;
+            ctx.lineWidth = 2;
+            
+            ctx.beginPath();
+            for (let i = 0; i < shard.sides; i++) {
+                const angle = (Math.PI * 2 / shard.sides) * i;
+                const radiusVar = shard.size * (0.8 + Math.random() * 0.4);
+                const x = Math.cos(angle) * radiusVar;
+                const y = Math.sin(angle) * radiusVar;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            
+            ctx.restore();
+        }
+
+        let frame = 0;
+        let stuckCounter = 0;
+        let lastAliveCount = 0;
+        let spiralAngle = 0;
+        let spiralRadius = 0;
+        let spiralGrowing = true;
+        let spiralDirection = 1;
+        
+        let spiral2Angle = Math.PI * 2 / 3;
+        let spiral2Radius = 150;
+        let spiral2Growing = false;
+        let spiral2Direction = -1;
+        
+        let spiral3Angle = Math.PI * 4 / 3;
+        let spiral3Radius = 100;
+        let spiral3Growing = true;
+        let spiral3Direction = 1;
+        
+        let lightnessShift = 0;
+        
+        function animate() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            lightnessShift += 0.3;
+            
+            let aliveCount = 0;
+            for (let i = 0; i < rows; i++) {
+                for (let j = 0; j < cols; j++) {
+                    if (grid[i][j] === 1) {
+                        aliveCount++;
+                    }
+                }
+            }
+            
+            if (aliveCount === lastAliveCount) {
+                stuckCounter++;
+            } else {
+                stuckCounter = 0;
+            }
+            lastAliveCount = aliveCount;
+            
+            if (stuckCounter > 120 || aliveCount === 0) {
+                for (let i = 0; i < rows; i++) {
+                    for (let j = 0; j < cols; j++) {
+                        grid[i][j] = Math.random() > 0.7 ? 1 : 0;
+                    }
+                }
+                stuckCounter = 0;
+                spiralAngle = Math.random() * Math.PI * 2;
+                spiralRadius = Math.random() * 50;
+                spiralGrowing = Math.random() > 0.5;
+                spiralDirection = Math.random() > 0.5 ? 1 : -1;
+                spiral2Angle = Math.random() * Math.PI * 2;
+                spiral2Radius = Math.random() * 200;
+                spiral2Growing = Math.random() > 0.5;
+                spiral2Direction = Math.random() > 0.5 ? 1 : -1;
+                spiral3Angle = Math.random() * Math.PI * 2;
+                spiral3Radius = Math.random() * 150;
+                spiral3Growing = Math.random() > 0.5;
+                spiral3Direction = Math.random() > 0.5 ? 1 : -1;
+            }
+            
+            if (frame % 1 === 0 && aliveCount > 0) {
+                const maxRadius = Math.min(canvas.width, canvas.height) / 2 - 50;
+                const centerX = canvas.width / 2;
+                const centerY = canvas.height / 2;
+                
+                // Spiral 1
+                spiralAngle += (1.2 + Math.sin(frame * 0.01) * 0.3) * spiralDirection;
+                if (spiralGrowing) {
+                    spiralRadius += 1.5 + Math.cos(frame * 0.02) * 0.5;
+                    if (spiralRadius >= maxRadius) {
+                        spiralGrowing = false;
+                        spiralDirection *= -1;
+                    }
+                } else {
+                    spiralRadius -= 1.5 + Math.sin(frame * 0.02) * 0.5;
+                    if (spiralRadius <= 0) {
+                        spiralGrowing = true;
+                        spiralAngle += Math.random() * Math.PI / 2;
+                    }
+                }
+                
+                const x1 = centerX + Math.cos(spiralAngle) * spiralRadius;
+                const y1 = centerY + Math.sin(spiralAngle) * spiralRadius;
+                
+                for (let i = 0; i < 3; i++) {
+                    shards.push({
+                        x: x1 + (Math.random() - 0.5) * 15,
+                        y: y1 + (Math.random() - 0.5) * 15,
+                        angle: spiralAngle + Math.PI / 2 + (Math.random() - 0.5) * 0.5,
+                        speed: Math.random() * 3 + 1.5,
+                        rotation: Math.random() * Math.PI * 2,
+                        rotSpeed: (Math.random() - 0.5) * 0.2,
+                        size: Math.random() * 40 + 6,
+                        sides: Math.floor(Math.random() * 6) + 3,
+                        alpha: 1,
+                        lightness: Math.random() * 40 + lightnessShift
+                    });
+                }
+                
+                // Spiral 2
+                spiral2Angle += (1.0 + Math.sin(frame * 0.015) * 0.4) * spiral2Direction;
+                if (spiral2Growing) {
+                    spiral2Radius += 1.8 + Math.cos(frame * 0.025) * 0.6;
+                    if (spiral2Radius >= maxRadius) {
+                        spiral2Growing = false;
+                        spiral2Direction *= -1;
+                    }
+                } else {
+                    spiral2Radius -= 1.8 + Math.sin(frame * 0.025) * 0.6;
+                    if (spiral2Radius <= 0) {
+                        spiral2Growing = true;
+                        spiral2Angle += Math.random() * Math.PI / 3;
+                    }
+                }
+                
+                const x2 = centerX + Math.cos(spiral2Angle) * spiral2Radius;
+                const y2 = centerY + Math.sin(spiral2Angle) * spiral2Radius;
+                
+                for (let i = 0; i < 3; i++) {
+                    shards.push({
+                        x: x2 + (Math.random() - 0.5) * 15,
+                        y: y2 + (Math.random() - 0.5) * 15,
+                        angle: spiral2Angle + Math.PI / 2 + (Math.random() - 0.5) * 0.5,
+                        speed: Math.random() * 3 + 1.5,
+                        rotation: Math.random() * Math.PI * 2,
+                        rotSpeed: (Math.random() - 0.5) * 0.2,
+                        size: Math.random() * 40 + 6,
+                        sides: Math.floor(Math.random() * 6) + 3,
+                        alpha: 1,
+                        lightness: Math.random() * 40 + lightnessShift + 15
+                    });
+                }
+                
+                // Spiral 3
+                spiral3Angle += (1.4 + Math.sin(frame * 0.012) * 0.5) * spiral3Direction;
+                if (spiral3Growing) {
+                    spiral3Radius += 1.2 + Math.cos(frame * 0.018) * 0.4;
+                    if (spiral3Radius >= maxRadius) {
+                        spiral3Growing = false;
+                        spiral3Direction *= -1;
+                    }
+                } else {
+                    spiral3Radius -= 1.2 + Math.sin(frame * 0.018) * 0.4;
+                    if (spiral3Radius <= 0) {
+                        spiral3Growing = true;
+                        spiral3Angle += Math.random() * Math.PI / 4;
+                    }
+                }
+                
+                const x3 = centerX + Math.cos(spiral3Angle) * spiral3Radius;
+                const y3 = centerY + Math.sin(spiral3Angle) * spiral3Radius;
+                
+                for (let i = 0; i < 3; i++) {
+                    shards.push({
+                        x: x3 + (Math.random() - 0.5) * 15,
+                        y: y3 + (Math.random() - 0.5) * 15,
+                        angle: spiral3Angle + Math.PI / 2 + (Math.random() - 0.5) * 0.5,
+                        speed: Math.random() * 3 + 1.5,
+                        rotation: Math.random() * Math.PI * 2,
+                        rotSpeed: (Math.random() - 0.5) * 0.2,
+                        size: Math.random() * 40 + 6,
+                        sides: Math.floor(Math.random() * 6) + 3,
+                        alpha: 1,
+                        lightness: Math.random() * 40 + lightnessShift + 5
+                    });
+                }
+            }
+            
+            for (let i = shards.length - 1; i >= 0; i--) {
+                const s = shards[i];
+                s.x += Math.cos(s.angle) * s.speed;
+                s.y += Math.sin(s.angle) * s.speed;
+                s.rotation += s.rotSpeed;
+                s.alpha -= 0.015 + Math.random() * 0.005;
+                
+                drawShard(s);
+                
+                if (s.alpha <= 0) {
+                    shards.splice(i, 1);
+                }
+            }
+            
+            if (frame % 3 === 0) {
+                update();
+            }
+            
+            frame++;
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+    </script>
+</body>
+</html>

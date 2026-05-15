@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; height: 100%; display: flex; align-items: center; justify-content: center; }
+  #wrap { width: min(100vw, 100vh); height: min(100vw, 100vh); position: relative; }
+  canvas { display: block; width: 100%; height: 100%; background: #000; }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c"></canvas></div>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d', { alpha: false });
+
+// offscreen buffer for smoke (transparent so we can use its alpha as a mask)
+const smokeCanvas = document.createElement('canvas');
+const sctx = smokeCanvas.getContext('2d');
+
+// offscreen buffer for glyphs so we can mask them with the smoke
+const glyphCanvas = document.createElement('canvas');
+const gctx = glyphCanvas.getContext('2d');
+
+let W, H, sourceX, sourceY;
+function resize() {
+  const wrap = document.getElementById('wrap');
+  const size = wrap.clientWidth;
+  W = canvas.width = size;
+  H = canvas.height = size;
+  smokeCanvas.width = size;
+  smokeCanvas.height = size;
+  glyphCanvas.width = size;
+  glyphCanvas.height = size;
+  sourceX = W * 0.5;
+  sourceY = H * 0.85;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// Simplex-ish noise (value noise with smoothing) — fast and good enough for curl
+const PERM = new Uint8Array(512);
+(() => {
+  const p = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) p[i] = i;
+  for (let i = 255; i > 0; i--) {
+    const j = (Math.random() * (i + 1)) | 0;
+    [p[i], p[j]] = [p[j], p[i]];
+  }
+  for (let i = 0; i < 512; i++) PERM[i] = p[i & 255];
+})();
+
+function fade(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function grad(h, x, y) {
+  const g = h & 7;
+  const u = g < 4 ? x : y;
+  const v = g < 4 ? y : x;
+  return ((g & 1) ? -u : u) + ((g & 2) ? -2 * v : 2 * v);
+}
+function noise2D(x, y) {
+  const X = Math.floor(x) & 255, Y = Math.floor(y) & 255;
+  x -= Math.floor(x); y -= Math.floor(y);
+  const u = fade(x), v = fade(y);
+  const A = PERM[X] + Y, B = PERM[X + 1] + Y;
+  return lerp(
+    lerp(grad(PERM[A], x, y), grad(PERM[B], x - 1, y), u),
+    lerp(grad(PERM[A + 1], x, y - 1), grad(PERM[B + 1], x - 1, y - 1), u),
+    v
+  );
+}
+
+// Curl noise — divergence-free flow field
+function curl(x, y, t) {
+  const eps = 0.6;
+  const n1 = noise2D(x, y + eps + t);
+  const n2 = noise2D(x, y - eps + t);
+  const n3 = noise2D(x + eps, y + t);
+  const n4 = noise2D(x - eps, y + t);
+  return { x: (n1 - n2) / (2 * eps), y: -(n3 - n4) / (2 * eps) };
+}
+
+class Particle {
+  constructor() { this.reset(true); }
+  reset(initial) {
+    const spread = 3;
+    this.x = sourceX + (Math.random() - 0.5) * spread;
+    this.y = sourceY + (Math.random() - 0.5) * 2;
+    this.vx = (Math.random() - 0.5) * 0.02;
+    this.vy = -0.05 - Math.random() * 0.08;
+    this.life = 0;
+    this.maxLife = 600 + Math.random() * 400;
+    this.size = 5 + Math.random() * 10;
+    this.growth = 0.025 + Math.random() * 0.04;
+    this.rot = Math.random() * Math.PI * 2;
+    this.rotSpeed = (Math.random() - 0.5) * 0.01;
+    this.seed = Math.random() * 1000;
+    this.hueOffset = Math.random() * 360;
+    if (initial) this.life = Math.random() * this.maxLife * 0.5;
+  }
+  update(t) {
+    const ageRatio = this.life / this.maxLife;
+    // curl-noise field — scale & time evolve
+    const nScale = 0.0035;
+    const c = curl(this.x * nScale + this.seed, this.y * nScale, t * 0.025);
+    const turbulence = 0.15 + ageRatio * 0.35;
+    this.vx += c.x * turbulence * 0.15;
+    this.vy += c.y * turbulence * 0.15;
+    // buoyancy — hot smoke rises, weakens with age
+    this.vy -= 0.008 * (1 - ageRatio * 0.6);
+    // damping
+    this.vx *= 0.97;
+    this.vy *= 0.97;
+    // horizontal drift narrowing near source (simulates the column shape)
+    const distFromSource = this.y - sourceY;
+    if (distFromSource > -50 && distFromSource < 0) {
+      this.vx *= 0.7;
+    }
+    this.x += this.vx;
+    this.y += this.vy;
+    this.size += this.growth;
+    this.rot += this.rotSpeed;
+    this.life++;
+  }
+  draw(ctx, t) {
+    const ageRatio = this.life / this.maxLife;
+    if (ageRatio >= 1) return;
+    // alpha curve — fade in fast, fade out slow
+    let alpha;
+    if (ageRatio < 0.15) alpha = ageRatio / 0.15;
+    else alpha = 1 - (ageRatio - 0.15) / 0.85;
+    alpha *= 0.05;
+    // Sarawak-inspired smoke palette — warm earthy tones cycling slowly
+    // hue range 15-45 (deep amber → ochre → rust), shifting subtly
+    const hue = 25 + Math.sin(t * 0.003) * 20;
+    const hue2 = hue + 15;
+    const sat = 75 + Math.sin(t * 0.004) * 15;
+    const light = 35 + Math.sin(ageRatio * Math.PI) * 10;
+    const grad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.size);
+    grad.addColorStop(0, `hsla(${hue}, ${sat}%, ${light}%, ${alpha})`);
+    grad.addColorStop(0.5, `hsla(${hue2}, ${sat}%, ${light - 10}%, ${alpha * 0.6})`);
+    grad.addColorStop(1, `hsla(${hue}, ${sat}%, ${light}%, 0)`);
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+const particles = [];
+const MAX_PARTICLES = 600;
+for (let i = 0; i < MAX_PARTICLES; i++) particles.push(new Particle());
+
+// ---- Generative Sarawak tribal motifs (Iban / Orang Ulu kalong) ----
+// Built from authentic vocabulary: bunga terung (eggplant flower spiral), kelawit (curly tendril),
+// aso' (dragon-dog), tegulun (hooks), bungai (radiating petals). Strong S-curves, hooked spirals,
+// no straight lines. Bold filled forms with negative-space curls.
+function makeTribal() {
+  const choice = (Math.random() * 5) | 0;
+
+  // helper — log spiral from center, returns end point
+  const drawSpiral = (ctx, cx, cy, startR, growth, turns, dir) => {
+    ctx.beginPath();
+    let r = startR;
+    let a = 0;
+    ctx.moveTo(cx + r, cy);
+    const step = 0.15;
+    const total = Math.PI * 2 * turns;
+    for (a = 0; a <= total; a += step) {
+      r = startR + a * growth;
+      const sa = dir * a;
+      ctx.lineTo(cx + Math.cos(sa) * r, cy + Math.sin(sa) * r);
+    }
+    ctx.stroke();
+    return { x: cx + Math.cos(dir * a) * r, y: cy + Math.sin(dir * a) * r };
+  };
+
+  // helper — kelawit tendril: S-curve with curl at the end
+  const drawTendril = (ctx, x1, y1, x2, y2, bulge, curlDir) => {
+    const mx = (x1 + x2) / 2;
+    const my = (y1 + y2) / 2;
+    const dx = x2 - x1, dy = y2 - y1;
+    const nx = -dy, ny = dx;
+    const len = Math.hypot(nx, ny) || 1;
+    const c1x = x1 + dx * 0.3 + (nx / len) * bulge;
+    const c1y = y1 + dy * 0.3 + (ny / len) * bulge;
+    const c2x = x1 + dx * 0.7 - (nx / len) * bulge;
+    const c2y = y1 + dy * 0.7 - (ny / len) * bulge;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.bezierCurveTo(c1x, c1y, c2x, c2y, x2, y2);
+    ctx.stroke();
+    // terminal curl
+    const tipR = 0.05 + Math.random() * 0.04;
+    ctx.beginPath();
+    let r = 0.01, a = 0;
+    const cx = x2, cy = y2;
+    for (; a < Math.PI * 1.8; a += 0.2) {
+      r = 0.01 + a * 0.025;
+      if (r > tipR + 0.06) break;
+      ctx.lineTo(cx + Math.cos(curlDir * a) * r, cy + Math.sin(curlDir * a) * r);
+    }
+    ctx.stroke();
+  };
+
+  // ---- Variant 1: bunga terung — concentric spiral + outer ring ----
+  if (choice === 0) {
+    const turns = 3 + Math.random() * 2;
+    const growth = 0.06 + Math.random() * 0.04;
+    const ringR = 0.85;
+    const dir = Math.random() < 0.5 ? 1 : -1;
+    const hasOuterDots = Math.random() < 0.6;
+    return (ctx) => {
+      drawSpiral(ctx, 0, 0, 0.03, growth, turns, dir);
+      ctx.beginPath();
+      ctx.arc(0, 0, ringR, 0, Math.PI * 2);
+      ctx.stroke();
+      if (hasOuterDots) {
+        const n = 8;
+        for (let i = 0; i < n; i++) {
+          const a = (i / n) * Math.PI * 2;
+          ctx.beginPath();
+          ctx.arc(Math.cos(a) * ringR, Math.sin(a) * ringR, 0.025, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    };
+  }
+
+  // ---- Variant 2: kelawit-lawit — paired interlocking curly tendrils ----
+  if (choice === 1) {
+    const flip = Math.random() < 0.5 ? 1 : -1;
+    const seed = Math.random();
+    return (ctx) => {
+      // main S-tendril
+      ctx.beginPath();
+      ctx.moveTo(-0.9, 0.5 * flip);
+      ctx.bezierCurveTo(-0.4, 0.6 * flip, -0.2, 0.0, -0.3, -0.4 * flip);
+      ctx.bezierCurveTo(-0.4, -0.7 * flip, 0.0, -0.8 * flip, 0.2, -0.5 * flip);
+      ctx.bezierCurveTo(0.35, -0.25 * flip, 0.25, 0.0, 0.4, 0.2 * flip);
+      ctx.bezierCurveTo(0.6, 0.45 * flip, 0.85, 0.3 * flip, 0.9, 0.0);
+      ctx.stroke();
+      // side hook
+      ctx.beginPath();
+      ctx.moveTo(-0.3, -0.4 * flip);
+      ctx.bezierCurveTo(-0.55, -0.45 * flip, -0.6, -0.2 * flip, -0.45, -0.15 * flip);
+      ctx.stroke();
+      // tip curl spiral
+      drawSpiral(ctx, 0.85, -0.05 * flip, 0.02, 0.04, 1.4, flip);
+      // small accent hook
+      if (seed > 0.5) {
+        ctx.beginPath();
+        ctx.moveTo(0.0, 0.0);
+        ctx.bezierCurveTo(0.15, 0.1 * flip, 0.25, 0.0, 0.2, -0.15 * flip);
+        ctx.stroke();
+      }
+    };
+  }
+
+  // ---- Variant 3: kalong aso' — abstracted dragon-dog with eye spiral ----
+  if (choice === 2) {
+    const eyeDir = Math.random() < 0.5 ? 1 : -1;
+    return (ctx) => {
+      // body curl
+      ctx.beginPath();
+      ctx.moveTo(-0.85, 0.2);
+      ctx.bezierCurveTo(-0.6, 0.7, 0.0, 0.75, 0.4, 0.4);
+      ctx.bezierCurveTo(0.7, 0.15, 0.7, -0.25, 0.4, -0.45);
+      ctx.bezierCurveTo(0.1, -0.6, -0.2, -0.45, -0.25, -0.15);
+      ctx.stroke();
+      // eye spiral
+      drawSpiral(ctx, -0.1, 0.15, 0.02, 0.04, 1.6, eyeDir);
+      // jaw / tongue hook
+      ctx.beginPath();
+      ctx.moveTo(0.25, -0.35);
+      ctx.bezierCurveTo(0.5, -0.55, 0.6, -0.4, 0.45, -0.2);
+      ctx.stroke();
+      // tail flick
+      ctx.beginPath();
+      ctx.moveTo(-0.85, 0.2);
+      ctx.bezierCurveTo(-1.0, 0.0, -0.95, -0.25, -0.7, -0.3);
+      ctx.stroke();
+      // small inner curl on body
+      drawSpiral(ctx, 0.3, 0.0, 0.015, 0.025, 1.2, -eyeDir);
+    };
+  }
+
+  // ---- Variant 4: bungai radial — flower-like with curly petals (kelawit petals) ----
+  if (choice === 3) {
+    const petals = 4 + ((Math.random() * 4) | 0); // 4-7
+    const dir = Math.random() < 0.5 ? 1 : -1;
+    const hasCenterRing = Math.random() < 0.7;
+    return (ctx) => {
+      for (let i = 0; i < petals; i++) {
+        const a = (i / petals) * Math.PI * 2;
+        ctx.save();
+        ctx.rotate(a);
+        // curly petal — outward S then curl
+        ctx.beginPath();
+        ctx.moveTo(0.12, 0);
+        ctx.bezierCurveTo(0.35, 0.1 * dir, 0.6, 0.15 * dir, 0.75, 0);
+        ctx.bezierCurveTo(0.85, -0.1 * dir, 0.7, -0.2 * dir, 0.55, -0.12 * dir);
+        ctx.stroke();
+        // tip spiral
+        drawSpiral(ctx, 0.55, -0.12 * dir, 0.015, 0.025, 1.0, -dir);
+        ctx.restore();
+      }
+      if (hasCenterRing) {
+        ctx.beginPath();
+        ctx.arc(0, 0, 0.1, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(0, 0, 0.04, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    };
+  }
+
+  // ---- Variant 5: tegulun — hooked spiral cluster (interlocking hooks) ----
+  {
+    const arms = 2 + ((Math.random() * 3) | 0); // 2-4
+    const dir = Math.random() < 0.5 ? 1 : -1;
+    return (ctx) => {
+      for (let i = 0; i < arms; i++) {
+        const a = (i / arms) * Math.PI * 2;
+        const cx = Math.cos(a) * 0.45;
+        const cy = Math.sin(a) * 0.45;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(a);
+        // hook arm
+        ctx.beginPath();
+        ctx.moveTo(-0.4, 0);
+        ctx.bezierCurveTo(-0.2, 0.15 * dir, 0.0, 0.2 * dir, 0.15, 0.05 * dir);
+        ctx.bezierCurveTo(0.25, -0.05 * dir, 0.2, -0.2 * dir, 0.05, -0.18 * dir);
+        ctx.stroke();
+        // small curl at tip
+        drawSpiral(ctx, 0.05, -0.18 * dir, 0.012, 0.022, 1.0, -dir);
+        ctx.restore();
+      }
+      // center dot
+      ctx.beginPath();
+      ctx.arc(0, 0, 0.05, 0, Math.PI * 2);
+      ctx.fill();
+      // outer arc segments between arms
+      for (let i = 0; i < arms; i++) {
+        const a1 = (i / arms) * Math.PI * 2 + Math.PI / arms - 0.3;
+        const a2 = (i / arms) * Math.PI * 2 + Math.PI / arms + 0.3;
+        ctx.beginPath();
+        ctx.arc(0, 0, 0.85, a1, a2);
+        ctx.stroke();
+      }
+    };
+  }
+}
+
+class Glyph {
+  constructor() { this.reset(true); }
+  reset(initial) {
+    this.shape = makeTribal();
+    this.x = sourceX + (Math.random() - 0.5) * W * 0.25;
+    this.y = sourceY - 60 - Math.random() * (H * 0.55);
+    this.size = 18 + Math.random() * 30;
+    this.rot = (Math.random() - 0.5) * 0.6;
+    this.life = 0;
+    this.maxLife = 380 + Math.random() * 320;
+    this.vy = -0.06 - Math.random() * 0.08;
+    this.vx = (Math.random() - 0.5) * 0.04;
+    this.seed = Math.random() * 1000;
+    this.hueOffset = Math.random() * 360;
+    if (initial) this.life = Math.random() * this.maxLife;
+  }
+  update() {
+    this.x += this.vx;
+    this.y += this.vy;
+    this.rot += 0.003;
+    this.life++;
+  }
+  draw(ctx, t) {
+    const tr = this.life / this.maxLife;
+    if (tr >= 1) return;
+    // smooth fade in & out — peak around middle
+    const alpha = Math.sin(tr * Math.PI) * 0.85;
+    if (alpha <= 0.001) return;
+    // Sarawak motif palette — ivory/bone/rust complementing the amber smoke
+    // cycles slowly between warm cream, pale gold, and terracotta highlights
+    const hue = 35 + Math.sin(t * 0.003 + this.seed * 0.001) * 15;
+    // pulsing size — flower breathes in and out slowly
+    const pulse = 1 + Math.sin(t * 0.008 + this.seed) * 0.4;
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.rot);
+    ctx.scale(this.size * pulse, this.size * pulse);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    // chalk effect: multiple slightly offset, jittered, semi-transparent strokes — same hue
+    const passes = 4;
+    for (let p = 0; p < passes; p++) {
+      const jitterAlpha = alpha * (0.25 + Math.random() * 0.35);
+      const lightVar = 75 + (Math.random() - 0.5) * 15;
+      ctx.strokeStyle = `hsla(${hue}, 55%, ${lightVar}%, ${jitterAlpha})`;
+      ctx.fillStyle = `hsla(${hue}, 55%, ${lightVar}%, ${jitterAlpha})`;
+      ctx.lineWidth = 0.012 + Math.random() * 0.015;
+      ctx.shadowBlur = 0;
+      ctx.save();
+      // tiny offset per pass for chalky scatter
+      ctx.translate((Math.random() - 0.5) * 0.04, (Math.random() - 0.5) * 0.04);
+      this.shape(ctx);
+      ctx.restore();
+    }
+
+    // sparse chalk dust dots around the motif — same hue
+    const dustCount = 30;
+    for (let d = 0; d < dustCount; d++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = 0.3 + Math.random() * 0.9;
+      const x = Math.cos(a) * r;
+      const y = Math.sin(a) * r;
+      const dotAlpha = alpha * Math.random() * 0.4;
+      ctx.fillStyle = `hsla(${hue}, 50%, 80%, ${dotAlpha})`;
+      ctx.beginPath();
+      ctx.arc(x, y, 0.008 + Math.random() * 0.018, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
+}
+
+// offscreen buffer for glyphs so we can mask them with the smoke
+const glyphs = [];
+const MAX_GLYPHS = 6;
+for (let i = 0; i < MAX_GLYPHS; i++) glyphs.push(new Glyph());
+
+let time = 0;
+function frame() {
+  // camera shake
+  const shakeX = (noise2D(time * 0.005, 0) * 8) + (Math.random() - 0.5) * 0.6;
+  const shakeY = (noise2D(0, time * 0.005) * 8) + (Math.random() - 0.5) * 0.6;
+  const shakeRot = noise2D(time * 0.003, 100) * 0.012;
+
+  // ---- 1) main canvas: smoke trails (same look as before) ----
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.12)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.translate(W / 2 + shakeX, H / 2 + shakeY);
+  ctx.rotate(shakeRot);
+  ctx.translate(-W / 2, -H / 2);
+
+  ctx.globalCompositeOperation = 'screen';
+  for (let i = 0; i < particles.length; i++) {
+    const p = particles[i];
+    p.update(time);
+    p.draw(ctx, time);
+    if (p.life >= p.maxLife || p.y < -50 || p.x < -100 || p.x > W + 100) {
+      p.reset(false);
+    }
+  }
+
+  // ---- 2) build smoke mask: redraw current particles to transparent buffer ----
+  sctx.setTransform(1, 0, 0, 1, 0, 0);
+  sctx.clearRect(0, 0, W, H);
+  sctx.translate(W / 2 + shakeX, H / 2 + shakeY);
+  sctx.rotate(shakeRot);
+  sctx.translate(-W / 2, -H / 2);
+  sctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < particles.length; i++) {
+    particles[i].draw(sctx, time);
+  }
+
+  // ---- 3) draw glyphs offscreen, mask them by the smoke buffer ----
+  gctx.setTransform(1, 0, 0, 1, 0, 0);
+  gctx.clearRect(0, 0, W, H);
+  gctx.translate(W / 2 + shakeX, H / 2 + shakeY);
+  gctx.rotate(shakeRot);
+  gctx.translate(-W / 2, -H / 2);
+  for (let i = 0; i < glyphs.length; i++) {
+    const g = glyphs[i];
+    g.update();
+    g.draw(gctx, time);
+    if (g.life >= g.maxLife || g.y < -100) g.reset(false);
+  }
+  gctx.setTransform(1, 0, 0, 1, 0, 0);
+  gctx.globalCompositeOperation = 'destination-in';
+  gctx.drawImage(smokeCanvas, 0, 0);
+  gctx.globalCompositeOperation = 'source-over';
+
+  // ---- 4) composite masked glyphs onto main canvas ----
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalCompositeOperation = 'screen';
+  ctx.drawImage(glyphCanvas, 0, 0);
+  ctx.globalCompositeOperation = 'source-over';
+
+  time += 1;
+  requestAnimationFrame(frame);
+}
+frame();
+</script>
+</body>
+</html>

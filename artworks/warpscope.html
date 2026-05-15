@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body { margin: 0; overflow: hidden; background: #000; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  #wrap { width: min(100vw, 100vh); height: min(100vw, 100vh); }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c"></canvas></div>
+<script>
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl', { antialias: false, alpha: false, depth: false, stencil: false });
+
+function resize() {
+  const s = Math.min(innerWidth, innerHeight);
+  const dpr = Math.min(devicePixelRatio || 1, 1.5);
+  canvas.width = s * dpr;
+  canvas.height = s * dpr;
+  gl.viewport(0, 0, canvas.width, canvas.height);
+}
+resize();
+addEventListener('resize', resize);
+
+const vert = `attribute vec2 p;void main(){gl_Position=vec4(p,0,1);}`;
+
+const frag = `
+precision highp float;
+uniform vec2 uRes;
+uniform float uTime;
+
+#define N 20
+#define TRAIL 10
+#define ECHO 6
+#define STARS 60
+#define LINE_TRAIL 3
+#define BEZ_STEPS 8
+
+float hash(float n){return fract(sin(n)*43758.5453);}
+vec2 hash2(float n){return vec2(hash(n),hash(n+17.3));}
+
+vec3 hsv(vec3 c){
+  vec3 p=abs(fract(c.xxx+vec3(1.,.6666667,.3333333))*6.-3.);
+  return c.z*mix(vec3(1),clamp(p-1.,0.,1.),c.y);
+}
+
+float rectSDF(vec2 p,float r){
+  vec2 b=vec2(r*.85,r*.6375);
+  vec2 d=abs(p)-b;
+  return length(max(d,0.))+min(max(d.x,d.y),0.)-r*.15;
+}
+
+// Per-hex state
+struct Hex { vec2 pos; float size; float valid; };
+
+Hex hexState(int i, float t){
+  float fi=float(i);
+  float rp=(t+fi*.37)/6.;
+  float phase=rp-floor(rp);
+  float cid=floor(rp)+fi*100.;
+  vec2 off=(hash2(cid)-.5)*1.2;
+  float sr=.04+hash(cid+5.1)*.12;
+  float tz=pow(phase,1.8)*15.;
+  vec2 cd=vec2(sin(t*.3)*.15+cos(t*.17)*.08,cos(t*.23)*.15+sin(t*.13)*.08);
+  Hex h;
+  h.pos=(off-cd)*tz;
+  h.size=sr*(tz+.15);
+  h.valid=(h.size>.02 && tz<8.)?1.:0.;
+  return h;
+}
+
+float bezDist(vec2 p, vec2 a, vec2 b, vec2 c){
+  float md=1e9;
+  vec2 pr=a;
+  for(int i=1;i<=BEZ_STEPS;i++){
+    float t=float(i)/float(BEZ_STEPS);
+    float u=1.-t;
+    vec2 pt=u*u*a+2.*u*t*c+t*t*b;
+    vec2 pa=p-pr,ba=pt-pr;
+    float h=clamp(dot(pa,ba)/dot(ba,ba),0.,1.);
+    md=min(md,length(pa-ba*h));
+    pr=pt;
+  }
+  return md;
+}
+
+// Wave Y position at normalized x in [-1,1], with given time and random offset
+float waveY(float nx, float t, float hv, float ho, float size){
+  float f=8.+sin(t*.7+ho)*6.;
+  float a=.45+.25*sin(t*.5+hv*3.);
+  float h=.35*sin(t*1.3+hv*2.);
+  float nf=nx*f;
+  return (sin(nf+t*4.+ho)+h*sin(nf*2.3+t*2.))*size*a;
+}
+
+void main(){
+  vec2 uv=(gl_FragCoord.xy-.5*uRes)/uRes.y;
+  vec3 col=vec3(.08);
+  float gH=fract(uTime*.05);
+  vec2 cd=vec2(sin(uTime*.3)*.15+cos(uTime*.17)*.08,cos(uTime*.23)*.15+sin(uTime*.13)*.08);
+  float lw=1.5/uRes.y;
+
+  // STARFIELD with curved trails
+  for(int s=0;s<STARS;s++){
+    float fs=float(s);
+    float rp=(uTime+fs*.13)/4.;
+    float cn=floor(rp);
+    float sp=rp-cn;
+    float sid=cn+fs*77.;
+    float sR=cn*4.*.08;
+    float c=cos(sR),si=sin(sR);
+    vec2 so=mat2(c,-si,si,c)*((hash2(sid)-.5)*2.2);
+    float sz=pow(sp,1.6)*12.;
+    float sl=length(so);
+    float sa=atan(so.y,so.x);
+    vec2 du=uv+cd*sz*.3;
+    float pl=length(du);
+    float pa=atan(du.y,du.x);
+    float hr=sl*sz;
+    float ea=sa-(hr-pl)*(3.5/sl);
+    float da=atan(sin(pa-ea),cos(pa-ea));
+    float ss=(.0008+hash(sid+3.1)*.0015)*(.5+sz*2.);
+    float head=smoothstep(ss*2.5,0.,length(du-so*sz));
+    float inR=smoothstep(-.01,0.,pl)*smoothstep(-.01,0.,hr-pl);
+    float streak=smoothstep(ss*3.,0.,abs(da)*pl)*inR*smoothstep(hr*.6,hr,pl);
+    float br=smoothstep(0.,.1,sz);
+    vec3 sc=hsv(vec3(fract(gH+.5+(hash(sid+19.7)-.5)*.15),.4,1.));
+    col+=sc*(head+streak*1.2)*br*.25;
+  }
+
+  // HEX ANCHORS
+  vec2 anchors[N];
+  float anchorSizes[N];
+  float anchorValid[N];
+  for(int i=0;i<N;i++){
+    Hex h=hexState(i,uTime);
+    anchors[i]=h.pos;
+    anchorSizes[i]=h.size;
+    anchorValid[i]=h.valid;
+  }
+
+  // CONNECTING BEZIER CURVES with trails
+  vec3 lineCol=hsv(vec3(gH,.6,1.));
+  for(int i=0;i<N-1;i++){
+    if(anchorValid[i]<.5) continue;
+    vec2 a=anchors[i];
+    float sA=anchorSizes[i];
+    vec2 b=vec2(0);
+    float sB=0.,vB=0.;
+    for(int k=0;k<N;k++){
+      if(k==i+1){ b=anchors[k]; sB=anchorSizes[k]; vB=anchorValid[k]; }
+    }
+    if(vB<.5) continue;
+    if(length(a)>1.5 && length(b)>1.5) continue;
+
+    vec2 mid=(a+b)*.5;
+    vec2 perp=vec2(-(b.y-a.y),b.x-a.x);
+    float avgS=(sA+sB)*.5;
+    float la=smoothstep(.02,.08,avgS)*smoothstep(.8,.3,avgS);
+
+    for(int lt=0;lt<LINE_TRAIL;lt++){
+      float flt=float(lt);
+      float tt=uTime-flt*.08;
+      float tf=1.-flt/float(LINE_TRAIL);
+      float bend=sin(tt*.5+float(i)*1.3)*.4+.3;
+      float d=bezDist(uv,a,b,mid+perp*bend);
+      col+=lineCol*smoothstep(lw*1.5,lw*.5,d)*la*.6*tf;
+    }
+  }
+
+  // HEXAGONS with oscilloscope waves
+  for(int i=0;i<N;i++){
+    if(anchorValid[i]<.5) continue;
+
+    float fi=float(i);
+    float rp=(uTime+fi*.37)/6.;
+    float phase=rp-floor(rp);
+    float cid=floor(rp)+fi*100.;
+    vec2 off=(hash2(cid)-.5)*1.2;
+    float sr=.04+hash(cid+5.1)*.12;
+    float h97=hash(cid+9.7);
+    float spin=(h97-.5)*4.+1.;
+    float rotB=h97*6.283;
+    float hv=hash(cid+13.2);
+    float ho=hv*6.28;
+    vec3 mc=hsv(vec3(fract(gH+hv*.08),.75,1.));
+    vec2 od=off-cd;
+
+    for(int t=0;t<TRAIL;t++){
+      float ft=float(t);
+      float tf=1.-ft/float(TRAIL);
+      float tp=phase-ft*.014;
+      if(tp<0.) continue;
+      float tz=pow(tp,1.8)*15.;
+      float size=sr*(tz+.15);
+      if(size<.02) continue;
+      vec2 pos=od*tz;
+      vec2 lp=uv-pos;
+      float bnd=size*1.2;
+      if(abs(lp.x)>bnd || abs(lp.y)>bnd) continue;
+
+      float st=uTime-ft*.014*6.;
+      float rot=rotB+st*spin;
+      float cs=cos(rot),sn=sin(rot);
+      lp=mat2(cs,-sn,sn,cs)*lp;
+
+      float d=rectSDF(lp,size);
+      if(d>.003) continue;
+
+      float ig=smoothstep(.002,-.002,d)*smoothstep(size*.8,0.,length(lp))*smoothstep(0.,.05,tz)*tf;
+      if(ig<.01) continue;
+
+      float nx=lp.x/size;
+      float wlw=lw*(1.+1.5*(.5+.5*sin(st*.8+hv*5.)));
+      float wy=waveY(nx,st,hv,ho,size);
+      col+=mc*smoothstep(wlw*2.,wlw*.8,abs(lp.y-wy))*1.2*ig;
+
+      for(int e=1;e<=ECHO;e++){
+        float fe=float(e);
+        float et=st-fe*.05;
+        float elw=lw*(1.+1.5*(.5+.5*sin(et*.8+hv*5.)));
+        float ey=waveY(nx,et,hv,ho,size);
+        col+=mc*smoothstep(elw*2.,elw*.8,abs(lp.y-ey))*.5*ig*(1.-fe/float(ECHO));
+      }
+    }
+  }
+
+  gl_FragColor=vec4(col,1);
+}`;
+
+function compile(type, src){
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if(!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s));
+  return s;
+}
+
+const prog = gl.createProgram();
+gl.attachShader(prog, compile(gl.VERTEX_SHADER, vert));
+gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, frag));
+gl.linkProgram(prog);
+gl.useProgram(prog);
+
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+const loc = gl.getAttribLocation(prog, 'p');
+gl.enableVertexAttribArray(loc);
+gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+
+const uR = gl.getUniformLocation(prog, 'uRes');
+const uT = gl.getUniformLocation(prog, 'uTime');
+
+const start = performance.now() - 10000; // pre-warm 10s so nothing pops in at t=0
+function render(){
+  gl.uniform2f(uR, canvas.width, canvas.height);
+  gl.uniform1f(uT, (performance.now() - start) / 1000);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  requestAnimationFrame(render);
+}
+render();
+</script>
+</body>
+</html>

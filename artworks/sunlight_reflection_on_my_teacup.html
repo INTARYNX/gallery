@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tasse au soleil 3D</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #1a1a1a; overflow: hidden; }
+  #bg-wrap, #cup-wrap {
+    position: fixed; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 100vmin; height: 100vmin;
+    max-width: 100vw; max-height: 100vh;
+    pointer-events: none;
+  }
+  #bg-wrap { z-index: 1; }
+  #cup-wrap { z-index: 2; }
+  canvas { width: 100%; height: 100%; display: block; }
+</style>
+</head>
+<body>
+<div id="bg-wrap"><canvas id="bg-canvas"></canvas></div>
+<div id="cup-wrap"><canvas id="cup-canvas"></canvas></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ═══ TWO RENDERERS, TWO SCENES, ONE CAMERA ════════════════════════
+const bgCanvas = document.getElementById('bg-canvas');
+const cupCanvas = document.getElementById('cup-canvas');
+const bgRenderer = new THREE.WebGLRenderer({ canvas: bgCanvas, antialias: true });
+const cupRenderer = new THREE.WebGLRenderer({ canvas: cupCanvas, antialias: true, alpha: true });
+cupRenderer.setClearColor(0x000000, 0);
+
+const bgScene = new THREE.Scene();    // background only
+const cupScene = new THREE.Scene();   // cup + effects only
+const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 100);
+camera.position.set(-1.4, 3, 3.8);
+camera.lookAt(0, 0.4, 0);
+
+function resize() {
+  const s = Math.min(window.innerWidth, window.innerHeight);
+  bgRenderer.setSize(s, s, false);
+  cupRenderer.setSize(s, s, false);
+  bgRenderer.setPixelRatio(window.devicePixelRatio);
+  cupRenderer.setPixelRatio(window.devicePixelRatio);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ═══ Noise ═══════════════════════════════════════════════════════
+function hash(a, b) { const n = Math.sin(a*12.9898 + b*78.233)*43758.5453; return n - Math.floor(n); }
+function sn(a, b) {
+  const ai = Math.floor(a), bi = Math.floor(b);
+  const af = a - ai, bf = b - bi;
+  const A = hash(ai, bi), B = hash(ai+1, bi), C = hash(ai, bi+1), D = hash(ai+1, bi+1);
+  const u = af*af*(3-2*af), v = bf*bf*(3-2*bf);
+  return A*(1-u)*(1-v) + B*u*(1-v) + C*(1-u)*v + D*u*v;
+}
+function fbm(a, b) {
+  let v = 0, amp = 0.5, f = 1;
+  for (let i = 0; i < 5; i++) { v += amp * sn(a*f, b*f); f *= 2; amp *= 0.5; }
+  return v;
+}
+
+// ═══ BG SCENE: sky, grass, table ═════════════════════════════════
+function makeSkyTexture() {
+  const W = 2048, H = 1024;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const x = c.getContext('2d');
+  const sky = x.createLinearGradient(0, 0, 0, H);
+  sky.addColorStop(0, '#5a9ed0');
+  sky.addColorStop(0.6, '#8ec4e0');
+  sky.addColorStop(1, '#cfe4f0');
+  x.fillStyle = sky;
+  x.fillRect(0, 0, W, H);
+  const img = x.getImageData(0, 0, W, H);
+  for (let j = 0; j < H; j++) {
+    for (let i = 0; i < W; i++) {
+      const n = fbm(i * 0.0008, j * 0.0015);
+      const cloud = Math.max(0, (n - 0.45) * 4);
+      const a = Math.min(0.9, cloud);
+      const idx = (j * W + i) * 4;
+      img.data[idx] = img.data[idx]*(1-a) + 255*a;
+      img.data[idx+1] = img.data[idx+1]*(1-a) + 255*a;
+      img.data[idx+2] = img.data[idx+2]*(1-a) + 252*a;
+    }
+  }
+  x.putImageData(img, 0, 0);
+  const blurred = document.createElement('canvas');
+  blurred.width = W; blurred.height = H;
+  const bx = blurred.getContext('2d');
+  bx.filter = 'blur(3px)';
+  bx.drawImage(c, 0, 0);
+  return new THREE.CanvasTexture(blurred);
+}
+bgScene.background = makeSkyTexture();
+
+function makeWoodTexture() {
+  const SZ = 1024;
+  const c = document.createElement('canvas');
+  c.width = SZ; c.height = SZ;
+  const x = c.getContext('2d');
+  const img = x.createImageData(SZ, SZ);
+  for (let j = 0; j < SZ; j++) {
+    for (let i = 0; i < SZ; i++) {
+      const grain = fbm(i * 0.004, j * 0.06);
+      const ringNoise = fbm(i * 0.002, j * 0.005);
+      const rings = Math.sin(j * 0.025 + ringNoise * 12) * 0.5 + 0.5;
+      const fine = fbm(i * 0.05, j * 0.4) * 0.15;
+      let v = grain * 0.45 + Math.pow(rings, 2) * 0.4 + fine;
+      v = Math.pow(Math.max(0, Math.min(1, v)), 1.4);
+      const idx = (j * SZ + i) * 4;
+      img.data[idx] = 28 + v*70;
+      img.data[idx+1] = 18 + v*45;
+      img.data[idx+2] = 8 + v*22;
+      img.data[idx+3] = 255;
+    }
+  }
+  x.putImageData(img, 0, 0);
+  for (let k = 0; k < 220; k++) {
+    const py = Math.random() * SZ;
+    const startX = Math.random() * SZ * 0.3 - 100;
+    const len = SZ + 200;
+    const wobble = 4 + Math.random() * 12;
+    x.strokeStyle = `rgba(0,0,0,${0.1 + Math.random() * 0.18})`;
+    x.lineWidth = 0.5 + Math.random() * 1.2;
+    x.beginPath();
+    x.moveTo(startX, py);
+    for (let s = 1; s <= 30; s++) {
+      const sx = startX + (s/30) * len;
+      const sy = py + Math.sin(s*0.4 + py*0.01) * wobble + (Math.random()-0.5)*1.5;
+      x.lineTo(sx, sy);
+    }
+    x.stroke();
+  }
+  for (let k = 0; k < 5; k++) {
+    const kx = Math.random()*SZ, ky = Math.random()*SZ, kr = 10 + Math.random()*25;
+    const grad = x.createRadialGradient(kx, ky, 0, kx, ky, kr);
+    grad.addColorStop(0, 'rgba(15,8,3,0.95)');
+    grad.addColorStop(0.4, 'rgba(35,18,8,0.7)');
+    grad.addColorStop(1, 'rgba(35,18,8,0)');
+    x.fillStyle = grad;
+    x.beginPath();
+    x.ellipse(kx, ky, kr*1.2, kr, 0, 0, Math.PI*2);
+    x.fill();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.anisotropy = 16;
+  return t;
+}
+
+function makeGrassTexture() {
+  const SZ = 1024;
+  const c = document.createElement('canvas');
+  c.width = SZ; c.height = SZ;
+  const x = c.getContext('2d');
+  const img = x.createImageData(SZ, SZ);
+  for (let j = 0; j < SZ; j++) {
+    for (let i = 0; i < SZ; i++) {
+      const n1 = fbm(i*0.02, j*0.02);
+      const n2 = fbm(i*0.08+50, j*0.08+50);
+      const v = n1*0.6 + n2*0.4;
+      const idx = (j * SZ + i) * 4;
+      img.data[idx] = 25 + v*50 + (n2 > 0.6 ? 20 : 0);
+      img.data[idx+1] = 55 + v*55;
+      img.data[idx+2] = 15 + v*25;
+      img.data[idx+3] = 255;
+    }
+  }
+  x.putImageData(img, 0, 0);
+  for (let k = 0; k < 8000; k++) {
+    const px = Math.random()*SZ, py = Math.random()*SZ;
+    const len = 3 + Math.random()*7;
+    const lean = (Math.random()-0.5)*3;
+    const lit = 15 + Math.random()*22;
+    x.strokeStyle = `hsl(${70 + Math.random()*60}, ${40 + Math.random()*30}%, ${lit}%)`;
+    x.lineWidth = 0.7 + Math.random()*0.6;
+    x.beginPath();
+    x.moveTo(px, py);
+    x.lineTo(px+lean, py-len);
+    x.stroke();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(15, 15);
+  t.anisotropy = 8;
+  return t;
+}
+
+const grass = new THREE.Mesh(
+  new THREE.PlaneGeometry(20, 20),
+  new THREE.MeshStandardMaterial({ map: makeGrassTexture(), roughness: 1 })
+);
+grass.rotation.x = -Math.PI/2;
+grass.position.y = -0.25;
+bgScene.add(grass);
+
+const tableMat = new THREE.MeshStandardMaterial({ map: makeWoodTexture(), roughness: 0.85, metalness: 0 });
+const numPlanks = 10, plankWidth = 0.45, plankGap = 0.18;
+const tableLength = 8, plankThickness = 0.12;
+const totalSpan = numPlanks*plankWidth + (numPlanks-1)*plankGap;
+for (let i = 0; i < numPlanks; i++) {
+  const plank = new THREE.Mesh(new THREE.BoxGeometry(tableLength, plankThickness, plankWidth), tableMat);
+  const z = -totalSpan/2 + plankWidth/2 + i*(plankWidth+plankGap) + 0.22;
+  plank.position.set(0, -plankThickness/2, z);
+  bgScene.add(plank);
+}
+
+bgScene.add(new THREE.AmbientLight(0xffffff, 0.55));
+const bgSun = new THREE.DirectionalLight(0xfff2cc, 1.4);
+bgSun.position.set(3, 5, 2);
+bgScene.add(bgSun);
+const bgFill = new THREE.DirectionalLight(0xaaccff, 0.3);
+bgFill.position.set(-3, 2, -1);
+bgScene.add(bgFill);
+
+// dappled shadows
+function makeShadowSprite() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const x = c.getContext('2d');
+  const g = x.createRadialGradient(64, 64, 0, 64, 64, 60);
+  g.addColorStop(0, 'rgba(0,0,0,0.25)');
+  g.addColorStop(0.5, 'rgba(0,0,0,0.12)');
+  g.addColorStop(0.9, 'rgba(0,0,0,0.02)');
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  x.fillStyle = g;
+  x.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(c);
+}
+const shadowTex = makeShadowSprite();
+const shadows = [];
+for (let i = 0; i < 80; i++) {
+  const m = new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, color: 0x000000, depthWrite: false });
+  const sz = 0.2 + Math.random()*0.9;
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(sz, sz), m);
+  mesh.rotation.x = -Math.PI/2;
+  mesh.position.set((Math.random()-0.5)*14, -0.245, (Math.random()-0.5)*14);
+  mesh.userData = { baseX: mesh.position.x, baseZ: mesh.position.z, seed: Math.random()*100, speed: 0.15 + Math.random()*0.3 };
+  bgScene.add(mesh);
+  shadows.push(mesh);
+}
+
+// ═══ CUP SCENE: cup, tea, effects ════════════════════════════════
+const baseR = 0.65, topR_ = 0.95, height = 1.1, flatH = 0.15, cupY = 0.05;
+
+cupScene.add(new THREE.AmbientLight(0xffffff, 0.55));
+const cs1 = new THREE.DirectionalLight(0xfff2cc, 1.4); cs1.position.set(3, 5, 2); cupScene.add(cs1);
+const cs2 = new THREE.DirectionalLight(0xaaccff, 0.3); cs2.position.set(-3, 2, -1); cupScene.add(cs2);
+
+// cup texture (animated for 8 dance)
+const cupTexCanvas = document.createElement('canvas');
+cupTexCanvas.width = 1024; cupTexCanvas.height = 512;
+const cupTexCtx = cupTexCanvas.getContext('2d');
+const cupTexture = new THREE.CanvasTexture(cupTexCanvas);
+
+function updateCupTexture(time) {
+  const psy = Math.max(0, Math.min(1, (time-15)/25));
+  const x = cupTexCtx;
+  x.clearRect(0, 0, 1024, 512);
+  const grad = x.createLinearGradient(0, 0, 0, 512);
+  grad.addColorStop(0, '#fafaf6');
+  grad.addColorStop(1, '#e8e2d8');
+  x.fillStyle = grad;
+  x.fillRect(0, 0, 1024, 512);
+  x.fillStyle = '#1a2540';
+  x.fillRect(0, 0, 1024, 12);
+  x.strokeStyle = '#1a2540';
+  x.lineWidth = 3;
+  const cols = 22, rows = 4, startY = 80, gapY = 110, gapX = 1024/cols;
+  for (let r = 0; r < rows; r++) {
+    for (let i = 0; i < cols; i++) {
+      const cx = i*gapX + gapX/2;
+      const cy = startY + r*gapY;
+      const phase = i*0.4 + r*0.7;
+      const dx = Math.sin(time*0.8 + phase) * 6 * psy;
+      const dy = Math.cos(time*0.6 + phase*1.3) * 4 * psy;
+      const rotate = Math.sin(time*0.5 + phase) * 0.25 * psy;
+      x.save();
+      x.translate(cx+dx, cy+dy);
+      x.rotate(rotate);
+      x.beginPath();
+      x.ellipse(0, -22, 19, 22, 0, 0, Math.PI*2);
+      x.stroke();
+      x.beginPath();
+      x.ellipse(0, 22, 19, 22, 0, 0, Math.PI*2);
+      x.stroke();
+      x.restore();
+    }
+  }
+  cupTexture.needsUpdate = true;
+}
+updateCupTexture(0);
+
+// cup body (lathe)
+const profile = [];
+const segments = 48;
+profile.push(new THREE.Vector2(baseR*0.6, 0));
+for (let i = 1; i <= segments; i++) {
+  const t = i/segments;
+  const angle = t * Math.PI/2;
+  const r = baseR + (topR_-baseR) * Math.sin(angle);
+  const y = flatH + (height-flatH) * (1 - Math.cos(angle));
+  profile.push(new THREE.Vector2(r, y));
+}
+const cupGeom = new THREE.LatheGeometry(profile, 64);
+
+const cupMat = new THREE.MeshStandardMaterial({ map: cupTexture, roughness: 0.4, metalness: 0.05, side: THREE.FrontSide });
+const cup = new THREE.Mesh(cupGeom, cupMat);
+cup.position.y = cupY;
+cupScene.add(cup);
+
+const cupInnerMat = new THREE.MeshStandardMaterial({ color: 0xfafaf6, roughness: 0.4, metalness: 0.05, side: THREE.BackSide });
+const cupInnerMesh = new THREE.Mesh(cupGeom, cupInnerMat);
+cupInnerMesh.position.y = cupY;
+cupScene.add(cupInnerMesh);
+
+const rim = new THREE.Mesh(
+  new THREE.TorusGeometry(topR_, 0.012, 12, 64),
+  new THREE.MeshStandardMaterial({ color: 0x1a2540, roughness: 0.3 })
+);
+rim.rotation.x = Math.PI/2;
+rim.position.y = cupY + height;
+cupScene.add(rim);
+
+// handle
+function cupRadiusAtWorldY(worldY) {
+  const yLocal = worldY - cupY;
+  if (yLocal <= flatH) return baseR;
+  if (yLocal >= height) return topR_;
+  const ratio = (yLocal - flatH) / (height - flatH);
+  const a = Math.acos(1 - ratio);
+  return baseR + (topR_ - baseR) * Math.sin(a);
+}
+const yTopH = cupY + height*0.88, yBotH = cupY + height*0.25;
+const rTopH = cupRadiusAtWorldY(yTopH), rBotH = cupRadiusAtWorldY(yBotH);
+const handleCurve = new THREE.CatmullRomCurve3([
+  new THREE.Vector3(rTopH, yTopH, 0),
+  new THREE.Vector3(rTopH+0.22, yTopH-0.05, 0),
+  new THREE.Vector3(Math.max(rTopH, rBotH)+0.32, (yTopH+yBotH)/2, 0),
+  new THREE.Vector3(rBotH+0.22, yBotH+0.05, 0),
+  new THREE.Vector3(rBotH, yBotH, 0)
+]);
+const handleMat = new THREE.MeshStandardMaterial({ color: 0xfafaf6, roughness: 0.4, metalness: 0.05 });
+const handle = new THREE.Mesh(new THREE.TubeGeometry(handleCurve, 40, 0.06, 16, false), handleMat);
+cupScene.add(handle);
+
+// cup shadow
+function makeCupShadowSprite() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const x = c.getContext('2d');
+  const g = x.createRadialGradient(128, 128, 0, 128, 128, 128);
+  g.addColorStop(0, 'rgba(0,0,0,0.7)');
+  g.addColorStop(0.4, 'rgba(0,0,0,0.45)');
+  g.addColorStop(0.8, 'rgba(0,0,0,0.12)');
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  x.fillStyle = g;
+  x.fillRect(0, 0, 256, 256);
+  return new THREE.CanvasTexture(c);
+}
+const cupShadow = new THREE.Mesh(
+  new THREE.PlaneGeometry(2.4, 1.4),
+  new THREE.MeshBasicMaterial({ map: makeCupShadowSprite(), transparent: true, color: 0x000000, depthWrite: false })
+);
+cupShadow.rotation.x = -Math.PI/2;
+cupShadow.position.set(0, 0.07, topR_*0.5);
+cupScene.add(cupShadow);
+
+// tea (animated)
+function makeTeaTexture() {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 256;
+  const x = c.getContext('2d');
+  x.fillStyle = '#b88838';
+  x.fillRect(0, 0, 256, 256);
+  return { canvas: c, ctx: x };
+}
+const teaTex = makeTeaTexture();
+const teaCanvasTex = new THREE.CanvasTexture(teaTex.canvas);
+const teaMat = new THREE.MeshStandardMaterial({
+  map: teaCanvasTex, roughness: 0.15, metalness: 0.4,
+  emissive: 0x553311, emissiveIntensity: 0.3
+});
+const tea = new THREE.Mesh(new THREE.CircleGeometry(topR_-0.02, 64), teaMat);
+tea.rotation.x = -Math.PI/2;
+tea.position.y = cupY + height - 0.15;
+cupScene.add(tea);
+
+function updateTeaTexture(time) {
+  const x = teaTex.ctx;
+  const psy = Math.max(0, Math.min(1, (time-15)/25));
+  x.fillStyle = '#b88838';
+  x.fillRect(0, 0, 256, 256);
+  const normalAlpha = 0.45 * (1 - psy*0.4);
+  for (let j = 0; j < 256; j += 2) {
+    const wave1 = Math.sin(j*0.08 + time*1.2) * 4;
+    const wave2 = Math.sin(j*0.18 - time*0.8) * 2;
+    const wave3 = Math.sin(j*0.04 + time*0.5) * 6;
+    const offset = wave1 + wave2 + wave3;
+    const brightness = Math.sin(j*0.1 + offset*0.05 + time*0.6)*0.5 + 0.5;
+    const r = 184 + brightness*35;
+    const g = 136 + brightness*30;
+    const b = 56 + brightness*25;
+    x.fillStyle = `rgba(${r|0},${g|0},${b|0},${normalAlpha})`;
+    x.fillRect(0, j, 256, 2);
+  }
+  for (let i = 0; i < 4; i++) {
+    const y = 50 + i*45 + Math.sin(time*0.4 + i)*15;
+    const grad = x.createLinearGradient(0, y-12, 0, y+12);
+    grad.addColorStop(0, 'rgba(255,220,150,0)');
+    grad.addColorStop(0.5, `rgba(255,225,170,${(0.2 + Math.sin(time+i)*0.1) * (1 - psy*0.5)})`);
+    grad.addColorStop(1, 'rgba(255,220,150,0)');
+    x.fillStyle = grad;
+    x.fillRect(0, y-12, 256, 24);
+  }
+  if (psy > 0) {
+    const cx = 128, cy = 128;
+    const baseHue = 20 + Math.sin(time*0.3)*25;
+    x.fillStyle = `hsla(${baseHue}, 60%, 35%, ${psy*0.35})`;
+    x.fillRect(0, 0, 256, 256);
+    for (let r = 4; r < 180; r += 4) {
+      const wobble = Math.sin(r*0.08 + time*1.5)*8 + Math.sin(r*0.03 - time)*12;
+      const hue = (baseHue + Math.sin(r*0.05 + time*0.5)*25 + 30) % 60;
+      const sat = 55 + Math.sin(time*0.7 + r*0.05)*20;
+      const lit = 35 + Math.sin(r*0.1 + time*2)*25;
+      x.strokeStyle = `hsla(${hue}, ${sat}%, ${lit}%, ${0.5*psy})`;
+      x.lineWidth = 3;
+      x.beginPath();
+      const segs = 32;
+      for (let i = 0; i <= segs; i++) {
+        const a = (i/segs) * Math.PI*2;
+        const rr = r + Math.sin(a*5 + time*2 + r*0.1) * wobble * 0.3;
+        const px = cx + Math.cos(a)*rr;
+        const py = cy + Math.sin(a)*rr;
+        if (i === 0) x.moveTo(px, py); else x.lineTo(px, py);
+      }
+      x.stroke();
+    }
+    for (let s = 0; s < 5; s++) {
+      const armAngle = (s/5)*Math.PI*2 + time*0.4;
+      x.strokeStyle = `hsla(${(baseHue + s*8) % 50}, 75%, 55%, ${0.35*psy})`;
+      x.lineWidth = 2;
+      x.beginPath();
+      for (let r = 0; r < 120; r += 2) {
+        const a = armAngle + r*0.04;
+        const px = cx + Math.cos(a)*r;
+        const py = cy + Math.sin(a)*r;
+        if (r === 0) x.moveTo(px, py); else x.lineTo(px, py);
+      }
+      x.stroke();
+    }
+    const hotR = 28 + Math.sin(time*2)*8;
+    const hotGrad = x.createRadialGradient(cx, cy, 0, cx, cy, hotR);
+    hotGrad.addColorStop(0, `rgba(255,250,230,${psy})`);
+    hotGrad.addColorStop(0.4, `rgba(255,225,160,${0.7*psy})`);
+    hotGrad.addColorStop(1, 'rgba(255,180,80,0)');
+    x.fillStyle = hotGrad;
+    x.fillRect(cx-hotR, cy-hotR, hotR*2, hotR*2);
+  }
+  teaCanvasTex.needsUpdate = true;
+}
+
+// sun reflection
+function makeSunSprite() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 512;
+  const x = c.getContext('2d');
+  const g = x.createRadialGradient(256, 256, 0, 256, 256, 256);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.15, 'rgba(255,255,255,1)');
+  g.addColorStop(0.3, 'rgba(255,255,250,0.95)');
+  g.addColorStop(0.5, 'rgba(255,250,220,0.6)');
+  g.addColorStop(0.75, 'rgba(255,230,170,0.25)');
+  g.addColorStop(1, 'rgba(255,210,120,0)');
+  x.fillStyle = g;
+  x.fillRect(0, 0, 512, 512);
+  return new THREE.CanvasTexture(c);
+}
+const sunMat = new THREE.MeshBasicMaterial({ map: makeSunSprite(), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
+const sunReflect = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.6), sunMat);
+sunReflect.rotation.x = -Math.PI/2;
+sunReflect.position.set(-0.15, cupY + height - 0.149, -0.08);
+cupScene.add(sunReflect);
+const sunReflect2 = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 0.7), sunMat);
+sunReflect2.rotation.x = -Math.PI/2;
+sunReflect2.position.copy(sunReflect.position);
+sunReflect2.position.y += 0.001;
+cupScene.add(sunReflect2);
+
+// lens flare
+function makeFlareGhost(color) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const x = c.getContext('2d');
+  const g = x.createRadialGradient(64, 64, 0, 64, 64, 64);
+  g.addColorStop(0, color.replace('1)', '0.8)'));
+  g.addColorStop(0.4, color.replace('1)', '0.3)'));
+  g.addColorStop(1, color.replace('1)', '0)'));
+  x.fillStyle = g;
+  x.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(c);
+}
+const flareGhosts = [];
+[
+  { tex: 'rgba(255,200,150,1)', size: 0.25, offset: 0.3 },
+  { tex: 'rgba(180,220,255,1)', size: 0.4, offset: 0.6 },
+  { tex: 'rgba(255,180,180,1)', size: 0.18, offset: 0.9 },
+  { tex: 'rgba(200,255,200,1)', size: 0.32, offset: 1.3 },
+  { tex: 'rgba(255,240,180,1)', size: 0.22, offset: 1.7 }
+].forEach(cfg => {
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: makeFlareGhost(cfg.tex), transparent: true, blending: THREE.AdditiveBlending,
+    depthWrite: false, depthTest: false, opacity: 0.55
+  }));
+  sprite.scale.set(cfg.size, cfg.size, 1);
+  sprite.userData.offset = cfg.offset;
+  cupScene.add(sprite);
+  flareGhosts.push(sprite);
+});
+
+function makeStreak() {
+  const c = document.createElement('canvas');
+  c.width = 1024; c.height = 64;
+  const x = c.getContext('2d');
+  for (let y = 0; y < 64; y++) {
+    const a = 1 - Math.abs(y-32)/32;
+    const g = x.createLinearGradient(0, 0, 1024, 0);
+    g.addColorStop(0, `rgba(120,180,255,0)`);
+    g.addColorStop(0.4, `rgba(180,210,255,${0.4*a})`);
+    g.addColorStop(0.5, `rgba(255,255,255,${0.9*a})`);
+    g.addColorStop(0.6, `rgba(180,210,255,${0.4*a})`);
+    g.addColorStop(1, `rgba(120,180,255,0)`);
+    x.fillStyle = g;
+    x.fillRect(0, y, 1024, 1);
+  }
+  return new THREE.CanvasTexture(c);
+}
+const streakSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+  map: makeStreak(), transparent: true, blending: THREE.AdditiveBlending,
+  depthWrite: false, depthTest: false, opacity: 0.7
+}));
+streakSprite.scale.set(3.5, 0.25, 1);
+cupScene.add(streakSprite);
+
+// steam
+function makeSmokeSprite() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const x = c.getContext('2d');
+  const g = x.createRadialGradient(64, 64, 0, 64, 64, 64);
+  g.addColorStop(0, 'rgba(255,255,255,0.5)');
+  g.addColorStop(0.4, 'rgba(255,255,255,0.18)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = g;
+  x.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(c);
+}
+const smokeTex = makeSmokeSprite();
+const smokeMatBase = new THREE.SpriteMaterial({ map: smokeTex, transparent: true, depthWrite: false, opacity: 0.6 });
+const steam = [];
+for (let i = 0; i < 24; i++) {
+  const s = new THREE.Sprite(smokeMatBase.clone());
+  s.userData = {
+    age: Math.random()*4, life: 3.5 + Math.random()*1.5,
+    seed: Math.random()*100,
+    baseX: (Math.random()-0.5)*(topR_*0.7),
+    baseZ: (Math.random()-0.5)*(topR_*0.7)
+  };
+  cupScene.add(s);
+  steam.push(s);
+}
+const teaSurfaceY = cupY + height - 0.15;
+
+// ═══ ANIMATION ═══════════════════════════════════════════════════
+let prevTime = 0, lastTeaUpdate = 0;
+function loop(t) {
+  const time = t * 0.001;
+  const dt = Math.min(0.05, time - prevTime);
+  prevTime = time;
+  const psy = Math.max(0, Math.min(1, (time-4)/8));
+
+  // tea + cup texture
+  if (time - lastTeaUpdate > 0.033) {
+    updateTeaTexture(time);
+    updateCupTexture(time);
+    lastTeaUpdate = time;
+  }
+
+  // shimmer (color tint on cup materials)
+  const shimmer = Math.sin(time*1.2)*0.5 + 0.5;
+  const hue = (35 + Math.sin(time*0.5)*30 + 360) % 360;
+  const tint = new THREE.Color().setHSL(hue/360, 0.6 + shimmer*0.4, 0.55 + shimmer*0.15);
+  const finalCol = new THREE.Color(1, 1, 1).lerp(tint, psy*0.85);
+  cupMat.color.copy(finalCol);
+  cupInnerMat.color.copy(finalCol);
+  handleMat.color.copy(finalCol);
+
+  // steam
+  for (const s of steam) {
+    s.userData.age += dt;
+    if (s.userData.age > s.userData.life) {
+      s.userData.age = 0;
+      s.userData.seed = Math.random()*100;
+      s.userData.baseX = (Math.random()-0.5)*(topR_*0.7);
+      s.userData.baseZ = (Math.random()-0.5)*(topR_*0.7);
+    }
+    const tt = s.userData.age / s.userData.life;
+    const rise = tt * 1.4;
+    const drift = Math.sin(time*0.8 + s.userData.seed) * 0.15 * tt;
+    const sway = Math.cos(time*0.6 + s.userData.seed*1.7) * 0.12 * tt;
+    s.position.x = s.userData.baseX + drift;
+    s.position.z = s.userData.baseZ + sway;
+    s.position.y = teaSurfaceY + 0.05 + rise;
+    const sc = 0.15 + tt*0.6;
+    s.scale.set(sc, sc, 1);
+    s.material.opacity = Math.min(1, tt*4) * (1 - tt) * 0.55;
+  }
+
+  // shadows
+  for (const b of shadows) {
+    const u = b.userData;
+    b.position.x = u.baseX + Math.sin(time*u.speed + u.seed) * 0.35;
+    b.position.z = u.baseZ + Math.cos(time*u.speed*0.6 + u.seed) * 0.25;
+    b.material.opacity = 0.3 + Math.sin(time*1.2 + u.seed) * 0.1;
+    const pulse = 1 + Math.sin(time*0.7 + u.seed) * 0.12;
+    b.scale.set(pulse, pulse, 1);
+  }
+
+  // sun reflection
+  const flicker = 0.9 + Math.sin(time*3)*0.05 + Math.sin(time*7)*0.05;
+  sunReflect.position.x = -0.15 + Math.sin(time*0.5) * 0.04;
+  sunReflect.position.z = -0.08 + Math.cos(time*0.4) * 0.03;
+  sunReflect.material.opacity = flicker;
+  sunReflect2.position.x = sunReflect.position.x;
+  sunReflect2.position.z = sunReflect.position.z;
+
+  const hotspotPos = sunReflect.position.clone();
+  flareGhosts.forEach(g => {
+    const off = g.userData.offset;
+    const lookAt = new THREE.Vector3(0, 0.4, 0);
+    const dir = hotspotPos.clone().sub(lookAt);
+    const ghostWorld = lookAt.clone().add(dir.multiplyScalar(off));
+    g.position.copy(ghostWorld);
+    g.position.y += 0.3;
+    g.material.opacity = 0.45 + Math.sin(time*2 + off*3) * 0.15;
+  });
+  streakSprite.position.copy(hotspotPos);
+  streakSprite.position.y += 0.05;
+  streakSprite.material.opacity = 0.6 + Math.sin(time*2) * 0.2;
+
+  // BLUR background only via CSS filter on bg-canvas
+  bgCanvas.style.filter = `blur(${psy * 14}px)`;
+
+  // RENDER both scenes
+  bgRenderer.render(bgScene, camera);
+  cupRenderer.render(cupScene, camera);
+
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

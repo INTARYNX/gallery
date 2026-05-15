@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { display: flex; justify-content: center; align-items: center; height: 100vh; background: #000; }
+  canvas { width: min(100vw, 100vh); height: min(100vw, 100vh); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const S = 600;
+canvas.width = S;
+canvas.height = S;
+
+const bodyPath = new Path2D("M109.47,47.96c-3.14,2.32-6.16,3.96-7.04,8.01c-1.07,4.9,4.24,12.08,3.87,20.77c-0.72,16.64-11.6,26.55-31.04,26.56c-9.38,0.01-19.49-1.6-26.77,1.03c-7.97,2.88-12.98,9.85-17.83,18.55c-6.86-0.62-9.15-4.39-8.21-11.54c-10.13,12.32-24.4-7.44-12.94-17.33C2.4,90.45-1.47,84.87,0.52,75.65c12.57,15.74,30.65,14.23,51.53,3.93c-18.16-2.92-30.89-12.12-33.05-33.55C12.8,32.64,12,19.56,18.34,6.88c0.63-1.27,2.18-4.71,3.82-4.64c0.56,0.02,1.07,0.46,1.53,1.37C25.61,9.55,29.04,15.15,34.56,20c17.55,15.4,34.38,10.86,49.77,37.17c0.12-0.81,0.23-1.64,0.34-2.46c-4.99-8.16-11.01-15.06-18.7-19.55c-7.33-4.29-15.43-6.63-22.89-11.45c-5.39-3.48-10.41-7.23-14.02-12.47c1.31-1.16,2.82-2.54,3.89-3.96c1.53-2.04,2.07-4.07,3.79-6.03c0.75-0.85,1.61-1.51,2.39-1.16c0.66,0.3,1.22,1.24,1.68,2.8c7.79,20.37,26.67,21.88,35.45,29.65c3.84,3.4,7.2,8.62,9.56,14.85c0.26-1.16,0.57-2.3,0.97-3.4c1.88-5.16,6.13-9.94,12.12-9.14c1.49,0.2,2.96,0.76,4.31,1.69c0.62,0.42,1.2,0.93,1.76,1.52c0.83,0.89,1.59,1.97,2.26,3.27l1.92,1.66l1.09,0.95C114.07,47.04,112.58,45.66,109.47,47.96L109.47,47.96z M101.18,40.56c0.79,0,1.44,0.64,1.44,1.44c0,0.79-0.64,1.44-1.44,1.44s-1.44-0.64-1.44-1.44C99.74,41.2,100.39,40.56,101.18,40.56L101.18,40.56z");
+
+const svgW=112.53, svgH=122.88;
+const sc=S*0.75/Math.max(svgW,svgH);
+const ox=(S-svgW*sc)/2, oy=(S-svgH*sc)/2-10;
+
+// Noise
+const perm=new Uint8Array(512);
+const GP=[[1,1],[-1,1],[1,-1],[-1,-1],[1,0],[-1,0],[0,1],[0,-1]];
+for(let i=0;i<256;i++) perm[i]=i;
+for(let i=255;i>0;i--){const j=(Math.random()*i)|0;[perm[i],perm[j]]=[perm[j],perm[i]];}
+for(let i=0;i<256;i++) perm[i+256]=perm[i];
+function noise2d(x,y){
+  const X=Math.floor(x),Y=Math.floor(y),xf=x-X,yf=y-Y,u=xf*xf*xf*(xf*(xf*6-15)+10),v=yf*yf*yf*(yf*(yf*6-15)+10);
+  const Xm=X&255,Ym=Y&255;
+  const aa=perm[perm[Xm]+Ym],ab=perm[perm[Xm]+Ym+1],ba=perm[perm[Xm+1]+Ym],bb=perm[perm[Xm+1]+Ym+1];
+  const g=(h,x,y)=>{const g2=GP[h&7];return g2[0]*x+g2[1]*y;};
+  return (g(aa,xf,yf)+(g(ba,xf-1,yf)-g(aa,xf,yf))*u) + ((g(ab,xf,yf-1)+(g(bb,xf-1,yf-1)-g(ab,xf,yf-1))*u)-(g(aa,xf,yf)+(g(ba,xf-1,yf)-g(aa,xf,yf))*u))*v;
+}
+function fbm3(x,y){return .5*noise2d(x,y)+.25*noise2d(x*2,y*2)+.125*noise2d(x*4,y*4);}
+function fbm5(x,y){return .5*noise2d(x,y)+.25*noise2d(x*2,y*2)+.125*noise2d(x*4,y*4)+.0625*noise2d(x*8,y*8)+.03125*noise2d(x*16,y*16);}
+
+// Mask + distance field
+const maskCan=document.createElement('canvas');
+maskCan.width=S;maskCan.height=S;
+const mCtx=maskCan.getContext('2d');
+mCtx.translate(ox,oy);mCtx.scale(sc,sc);
+mCtx.fillStyle='#fff';mCtx.fill(bodyPath,'evenodd');
+const mRaw=mCtx.getImageData(0,0,S,S).data;
+const mask=new Uint8Array(S*S);
+for(let i=0;i<S*S;i++) mask[i]=mRaw[i*4+3]>128?1:0;
+
+const DIST_RANGE=35;
+const distField=new Float32Array(S*S);
+distField.fill(9999);
+const queue=[];
+for(let y=1;y<S-1;y++) for(let x=1;x<S-1;x++){
+  const i=y*S+x;
+  if(mask[i]&&(!mask[i-1]||!mask[i+1]||!mask[i-S]||!mask[i+S])){distField[i]=0;queue.push(i);}
+}
+let qi=0;
+while(qi<queue.length){const i=queue[qi++];const d=distField[i]+1;if(d>=DIST_RANGE)continue;
+  const nb=[i-1,i+1,i-S,i+S];for(let j=0;j<4;j++){const n=nb[j];if(d<distField[n]){distField[n]=d;queue.push(n);}}}
+
+// Precompute lists
+const cxB=ox+svgW*sc*.5, cyB=oy+svgH*sc*.45, rW=svgW*sc*.5, rH=svgH*sc*.5;
+const maskPx=[];
+for(let y=0;y<S;y++) for(let x=0;x<S;x++){
+  const i=y*S+x;if(mask[i]){
+    const dx=(x-cxB)/rW,dy2=(y-cyB)/rH;
+    const dist=Math.sqrt(dx*dx+dy2*dy2);
+    maskPx.push({x,y,i,core:Math.max(0,1-dist*.7),vert:(y-oy)/(svgH*sc),dist});
+  }
+}
+const heatPx=[];
+for(let y=0;y<S;y++) for(let x=0;x<S;x++){
+  const i=y*S+x;if(distField[i]<DIST_RANGE) heatPx.push({x,y,i,d:distField[i]});
+}
+
+// Palette
+const pal=new Uint8Array(256*3);
+for(let i=0;i<256;i++){
+  const t=i/255;let r,g,b;
+  if(t<.2){r=t/.2*40;g=0;b=0;}
+  else if(t<.45){const p=(t-.2)/.25;r=40+p*180;g=p*10;b=0;}
+  else if(t<.65){const p=(t-.45)/.2;r=220+p*35;g=10+p*60;b=0;}
+  else if(t<.85){const p=(t-.65)/.2;r=255;g=70+p*110;b=p*25;}
+  else{const p=(t-.85)/.15;r=255;g=180+p*75;b=25+p*200;}
+  pal[i*3]=Math.min(255,r)|0;pal[i*3+1]=Math.min(255,g)|0;pal[i*3+2]=Math.min(255,b)|0;
+}
+
+// Flags
+const flags=["🇦🇫","🇦🇱","🇩🇿","🇦🇩","🇦🇴","🇦🇬","🇦🇷","🇦🇲","🇦🇺","🇦🇹","🇦🇿","🇧🇸","🇧🇭","🇧🇩","🇧🇧","🇧🇾","🇧🇪","🇧🇿","🇧🇯","🇧🇹","🇧🇴","🇧🇦","🇧🇼","🇧🇷","🇧🇳","🇧🇬","🇧🇫","🇧🇮","🇰🇭","🇨🇲","🇨🇦","🇨🇻","🇨🇫","🇹🇩","🇨🇱","🇨🇳","🇨🇴","🇰🇲","🇨🇬","🇨🇷","🇭🇷","🇨🇺","🇨🇾","🇨🇿","🇨🇩","🇩🇰","🇩🇯","🇩🇲","🇩🇴","🇪🇨","🇪🇬","🇸🇻","🇬🇶","🇪🇷","🇪🇪","🇸🇿","🇪🇹","🇫🇯","🇫🇮","🇫🇷","🇬🇦","🇬🇲","🇬🇪","🇩🇪","🇬🇭","🇬🇷","🇬🇩","🇬🇹","🇬🇳","🇬🇼","🇬🇾","🇭🇹","🇭🇳","🇭🇺","🇮🇸","🇮🇳","🇮🇩","🇮🇷","🇮🇶","🇮🇪","🇮🇱","🇮🇹","🇯🇲","🇯🇵","🇯🇴","🇰🇿","🇰🇪","🇰🇮","🇰🇼","🇰🇬","🇱🇦","🇱🇻","🇱🇧","🇱🇸","🇱🇷","🇱🇾","🇱🇮","🇱🇹","🇱🇺","🇲🇬","🇲🇼","🇲🇾","🇲🇻","🇲🇱","🇲🇹","🇲🇭","🇲🇷","🇲🇺","🇲🇽","🇫🇲","🇲🇩","🇲🇨","🇲🇳","🇲🇪","🇲🇦","🇲🇿","🇲🇲","🇳🇦","🇳🇷","🇳🇵","🇳🇱","🇳🇿","🇳🇮","🇳🇪","🇳🇬","🇰🇵","🇲🇰","🇳🇴","🇴🇲","🇵🇰","🇵🇼","🇵🇦","🇵🇬","🇵🇾","🇵🇪","🇵🇭","🇵🇱","🇵🇹","🇶🇦","🇷🇴","🇷🇺","🇷🇼","🇰🇳","🇱🇨","🇻🇨","🇼🇸","🇸🇲","🇸🇹","🇸🇦","🇸🇳","🇷🇸","🇸🇨","🇸🇱","🇸🇬","🇸🇰","🇸🇮","🇸🇧","🇸🇴","🇿🇦","🇰🇷","🇸🇸","🇪🇸","🇱🇰","🇸🇩","🇸🇷","🇸🇪","🇨🇭","🇸🇾","🇹🇼","🇹🇯","🇹🇿","🇹🇭","🇹🇱","🇹🇬","🇹🇴","🇹🇹","🇹🇳","🇹🇷","🇹🇲","🇹🇻","🇺🇬","🇺🇦","🇦🇪","🇬🇧","🇺🇸","🇺🇾","🇺🇿","🇻🇺","🇻🇪","🇻🇳","🇾🇪","🇿🇲","🇿🇼"];
+
+// Pre-render flag grid
+const fSz=44, fH=34;
+const fCols=Math.ceil(S*2/fSz), fRows=Math.ceil(S*2/fH)+2;
+const flagCan=document.createElement('canvas');
+flagCan.width=fCols*fSz; flagCan.height=fRows*fH;
+const fCtx=flagCan.getContext('2d');
+fCtx.font=`${fSz-4}px serif`;
+let fii=0;
+for(let r=0;r<fRows;r++) for(let c=0;c<fCols;c++){
+  fCtx.fillText(flags[fii%flags.length],c*fSz,r*fH+fH);fii++;
+}
+
+// Rasterize flags into RGBA for pixel-level consumption effect
+const flagRaster=document.createElement('canvas');
+flagRaster.width=S;flagRaster.height=S;
+const frCtx=flagRaster.getContext('2d');
+
+// Offscreen
+const fireCan=document.createElement('canvas');fireCan.width=S;fireCan.height=S;
+const fireCtx=fireCan.getContext('2d');
+const fireImg=fireCtx.createImageData(S,S);
+const fireBuf=fireImg.data;
+
+const sceneCan=document.createElement('canvas');sceneCan.width=S;sceneCan.height=S;
+const sceneCtx=sceneCan.getContext('2d');
+
+const sparks=Array.from({length:60},()=>({
+  x:ox+Math.random()*svgW*sc, y:oy+Math.random()*svgH*sc,
+  vx:(Math.random()-.5)*1.2, vy:-Math.random()*2.5-.8,
+  sz:Math.random()*2+.5, life:Math.random(), hue:(Math.random()*30+5)|0
+}));
+
+let time=0;
+const outImg=ctx.createImageData(S,S);
+
+function render(){
+  time+=0.018;
+
+  // Rasterize current flag positions (rotated, scrolling) for pixel sampling
+  frCtx.clearRect(0,0,S,S);
+  frCtx.save();
+  const rot=-30*Math.PI/180+Math.sin(time*.3)*.15;
+  const scrollY=(time*15)%fH;
+  const ext=S*.8;
+  frCtx.translate(S/2,S/2);
+  frCtx.rotate(rot);
+  frCtx.translate(-S/2,-S/2);
+  frCtx.drawImage(flagCan,-ext,-ext-scrollY);
+  frCtx.restore();
+  const flagData=frCtx.getImageData(0,0,S,S).data;
+
+  // Fire with flag consumption — flags dissolve into fire palette
+  fireBuf.fill(0);
+  const flow=time*1.2, ns=.008, ts=.015;
+  const sin3=Math.sin(time*3);
+  // Burn line moves cyclically through the bird
+  const burnCycle=(time*.12)%1; // 0→1 cycle
+
+  for(let k=0;k<maskPx.length;k++){
+    const p=maskPx[k];
+    const {x,y,i}=p;
+
+    // Fire value
+    const nx=x*ns, ny=y*ns+flow;
+    const dx=fbm3(x*ts+100,y*ts+flow*.7)*30;
+    const dy=fbm3(x*ts+200,y*ts+flow*.5)*30;
+    let v=fbm5(nx+dx*.01,ny+dy*.01);
+    v=(v+1)*.5;
+    v=v*(.4+p.core*.9)+p.core*.15+p.vert*.1;
+    v+=sin3*.08+Math.sin(p.dist*4)*.04;
+    v=v<.35?v*.4:v;
+    v=Math.max(0,Math.min(.999,v));
+
+    // Flag pixel at this position
+    const fi4=i*4;
+    const fR=flagData[fi4], fG=flagData[fi4+1], fB=flagData[fi4+2], fA=flagData[fi4+3];
+    const hasFlag=fA>30;
+
+    // Consumption: noise-driven burn threshold
+    // Each pixel has a burn progress based on noise + time
+    const burnNoise=fbm3(x*.012+50,y*.012+time*.4);
+    const burnThreshold=(burnNoise+1)*.5; // 0→1
+    // Burn wave: pixels consume when burnCycle passes their threshold
+    const burnProgress=Math.max(0,Math.min(1,(burnCycle*2-burnThreshold+.5)*2));
+
+    const px=i*4;
+
+    if(hasFlag && burnProgress<1){
+      // Flag still visible — blend flag → fire based on burnProgress
+      // Flag gets redder/oranger as it burns
+      const bp=burnProgress;
+      const ci=Math.max(0,Math.min(255,(v*255)|0));
+      const fireR=pal[ci*3], fireG=pal[ci*3+1], fireB=pal[ci*3+2];
+
+      // Tint flag toward fire colors as it burns
+      const tint=bp*bp; // accelerating burn
+      const charR=Math.min(255, fR*(1-tint) + fireR*tint + bp*80);
+      const charG=Math.max(0, fG*(1-tint*1.5) + fireG*tint*.5);
+      const charB=Math.max(0, fB*(1-tint*2));
+
+      // Edge glow at burn front
+      const edgeGlow = bp>.3 && bp<.7 ? Math.sin((bp-.3)/.4*Math.PI)*1.5 : 0;
+
+      fireBuf[px]  =Math.min(255,(charR+edgeGlow*180)|0);
+      fireBuf[px+1]=Math.min(255,(charG+edgeGlow*60)|0);
+      fireBuf[px+2]=Math.min(255,(charB+edgeGlow*10)|0);
+      fireBuf[px+3]=255;
+    } else {
+      // Fully consumed — pure fire
+      const ci=Math.max(0,Math.min(255,(v*255)|0));
+      fireBuf[px]=pal[ci*3];fireBuf[px+1]=pal[ci*3+1];fireBuf[px+2]=pal[ci*3+2];fireBuf[px+3]=255;
+    }
+  }
+  fireCtx.putImageData(fireImg,0,0);
+
+  // Scene compose
+  sceneCtx.fillStyle='#000';
+  sceneCtx.fillRect(0,0,S,S);
+
+  // BG glow
+  const bg=sceneCtx.createRadialGradient(S/2,S/2,20,S/2,S/2,S*.55);
+  bg.addColorStop(0,`rgba(160,30,0,${.12+Math.sin(time*1.5)*.04})`);
+  bg.addColorStop(.4,'rgba(60,5,0,0.05)');
+  bg.addColorStop(1,'rgba(0,0,0,0)');
+  sceneCtx.fillStyle=bg;
+  sceneCtx.fillRect(0,0,S,S);
+
+  // BG flags (dim, still intact outside bird)
+  sceneCtx.save();
+  sceneCtx.globalAlpha=.12+Math.sin(time*2)*.04;
+  sceneCtx.translate(S/2,S/2);
+  sceneCtx.rotate(rot);
+  sceneCtx.translate(-S/2,-S/2);
+  const bgScroll=(time*10)%fH;
+  sceneCtx.drawImage(flagCan,-ext,-ext-bgScroll);
+  sceneCtx.restore();
+
+  // Outer glow
+  sceneCtx.save();
+  sceneCtx.translate(ox,oy);sceneCtx.scale(sc,sc);
+  sceneCtx.shadowColor=`rgba(255,${(50+Math.sin(time*3)*30)|0},0,.8)`;
+  sceneCtx.shadowBlur=45+Math.sin(time*2)*15;
+  sceneCtx.fillStyle='rgba(200,40,0,.01)';
+  sceneCtx.fill(bodyPath,'evenodd');
+  sceneCtx.restore();
+
+  // Fire + consumed flags
+  sceneCtx.drawImage(fireCan,0,0);
+
+  // Bloom
+  sceneCtx.save();
+  sceneCtx.globalCompositeOperation='screen';
+  sceneCtx.globalAlpha=.3;
+  sceneCtx.filter='blur(6px)';
+  sceneCtx.drawImage(fireCan,0,0);
+  sceneCtx.restore();
+
+  // Sparks — some carry flag colors
+  for(let k=0;k<sparks.length;k++){
+    const e=sparks[k];
+    e.life+=.009;
+    if(e.life>1){
+      e.life=0;
+      e.x=ox+Math.random()*svgW*sc;
+      e.y=oy+svgH*sc*(.3+Math.random()*.7);
+      // Sample flag color at spark origin
+      const si=((e.y|0)*S+(e.x|0))*4;
+      if(flagData[si+3]>30){
+        e.cr=flagData[si];e.cg=flagData[si+1];e.cb=flagData[si+2];e.fromFlag=true;
+      } else {e.fromFlag=false;}
+    }
+    e.x+=e.vx+Math.sin(time*2+e.y*.01)*.4;
+    e.y+=e.vy;
+    const a=(1-e.life)*.8;
+    sceneCtx.beginPath();
+    sceneCtx.arc(e.x,e.y,e.sz*(1-e.life*.3),0,Math.PI*2);
+    if(e.fromFlag && e.life<.4){
+      // Spark starts with flag color, fades to fire
+      const blend=e.life/.4;
+      const r=(e.cr*(1-blend)+255*blend)|0;
+      const g=(e.cg*(1-blend)+80*blend)|0;
+      const b=(e.cb*(1-blend)+0*blend)|0;
+      sceneCtx.fillStyle=`rgba(${r},${g},${b},${a})`;
+    } else {
+      sceneCtx.fillStyle=`hsla(${e.hue},100%,${(50+e.life*20)|0}%,${a})`;
+    }
+    sceneCtx.fill();
+  }
+
+  // Heat distortion
+  const sceneData=sceneCtx.getImageData(0,0,S,S);
+  const src=sceneData.data;
+  const out=outImg.data;
+  out.set(src);
+  const hStr=12,hSpd=time*2.5,hFreq=.04;
+  for(let k=0;k<heatPx.length;k++){
+    const hp=heatPx[k];
+    const str=Math.pow(1-hp.d/DIST_RANGE,1.5)*hStr;
+    const dpX=fbm3(hp.x*hFreq+300,hp.y*hFreq+hSpd)*str;
+    const dpY=fbm3(hp.x*hFreq+500,hp.y*hFreq+hSpd*.8)*str;
+    const rise=Math.sin(hp.y*.05-time*4+hp.x*.02)*str*.5;
+    const sx=Math.max(0,Math.min(S-1,(hp.x+dpX+rise*.3+.5)|0));
+    const sy=Math.max(0,Math.min(S-1,(hp.y+dpY-Math.abs(rise)+.5)|0));
+    const si=(sy*S+sx)*4, di=hp.i*4;
+    out[di]=src[si];out[di+1]=src[si+1];out[di+2]=src[si+2];out[di+3]=src[si+3];
+  }
+  ctx.putImageData(outImg,0,0);
+
+  requestAnimationFrame(render);
+}
+render();
+</script>
+</body>
+</html>

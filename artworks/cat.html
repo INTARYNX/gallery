@@ -1,0 +1,859 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Cat Eyes & Firefly</title>
+    <style>
+        * {
+            touch-action: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: #000;
+            font-family: monospace;
+            overflow: hidden;
+        }
+        #container {
+            text-align: center;
+            padding: 20px;
+            background: #000;
+            box-sizing: border-box;
+            width: min(90vmin, 700px);
+            height: min(90vmin, 700px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        canvas {
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+            display: block;
+            max-width: 100%;
+            max-height: 100%;
+            width: auto;
+            height: auto;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <canvas id="canvas"></canvas>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const w = 120;
+        const h = 140;
+        const scale = 5;
+        
+        canvas.width = w * scale;
+        canvas.height = h * scale;
+
+        let time = 0;
+        let brightness = 0.8;
+        let targetBrightness = 0.8;
+        let hue = 160;
+        let targetHue = 160;
+        let nextHueChange = 160;
+
+        let fireflyX = 20;
+        let fireflyY = 32;
+        let fireflyAngle = 0;
+        let fireflyGlow = 0;
+        
+        let blinkTimer = 0;
+        let nextBlink = Math.random() * 300 + 200;
+        let blinkAmount = 0;
+        let isBlinking = false;
+        let blinkAfterFlash = false;
+        
+        let blinkTimerRight = 0;
+        let blinkAmountRight = 0;
+        let isBlinkingRight = false;
+        
+        let flashTimer = 0;
+        let nextFlash = Math.random() * 400 + 300;
+        let flashIntensity = 0;
+        let pupilDilation = 0;
+        
+        let mouthOpenTimer = 0;
+        let nextMouthOpen = Math.random() * 500 + 400;
+        let mouthOpenAmount = 0;
+        let isMouthOpening = false;
+
+        function drawPixel(x, y, color) {
+            ctx.fillStyle = color;
+            ctx.fillRect(x * scale, y * scale, scale, scale);
+        }
+
+        function hslToRgb(h, s, l) {
+            const c = (1 - Math.abs(2 * l - 1)) * s;
+            const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+            const m = l - c / 2;
+            let r, g, b;
+            
+            if (h < 60) { r = c; g = x; b = 0; }
+            else if (h < 120) { r = x; g = c; b = 0; }
+            else if (h < 180) { r = 0; g = c; b = x; }
+            else if (h < 240) { r = 0; g = x; b = c; }
+            else if (h < 300) { r = x; g = 0; b = c; }
+            else { r = c; g = 0; b = x; }
+            
+            r = Math.round((r + m) * 255);
+            g = Math.round((g + m) * 255);
+            b = Math.round((b + m) * 255);
+            
+            return `rgb(${r}, ${g}, ${b})`;
+        }
+
+        function hslToRgba(h, s, l, a) {
+            const c = (1 - Math.abs(2 * l - 1)) * s;
+            const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+            const m = l - c / 2;
+            let r, g, b;
+            
+            if (h < 60) { r = c; g = x; b = 0; }
+            else if (h < 120) { r = x; g = c; b = 0; }
+            else if (h < 180) { r = 0; g = c; b = x; }
+            else if (h < 240) { r = 0; g = x; b = c; }
+            else if (h < 300) { r = x; g = 0; b = c; }
+            else { r = c; g = 0; b = x; }
+            
+            r = Math.round((r + m) * 255);
+            g = Math.round((g + m) * 255);
+            b = Math.round((b + m) * 255);
+            
+            return `rgba(${r}, ${g}, ${b}, ${a})`;
+        }
+
+        function drawWhiskers() {
+            const leftWhiskers = [
+                { startX: 42, startY: 116, angle: Math.PI + 0.3, length: 53 },
+                { startX: 41, startY: 120, angle: Math.PI + 0.065, length: 55 },
+                { startX: 40, startY: 124, angle: Math.PI - 0.15, length: 56 }
+            ];
+            
+            const rightWhiskers = [
+                { startX: 78, startY: 116, angle: -0.3, length: 53 },
+                { startX: 79, startY: 120, angle: -0.065, length: 55 },
+                { startX: 80, startY: 124, angle: 0.15, length: 56 }
+            ];
+            
+            const leftWhiskerArea = fireflyX < 50 && fireflyY > 105 && fireflyY < 125;
+            const rightWhiskerArea = fireflyX > 70 && fireflyY > 105 && fireflyY < 125;
+            
+            const whiskersMoving = leftWhiskerArea || rightWhiskerArea;
+            if (whiskersMoving && !isMouthOpening && mouthOpenTimer === 0) {
+                isMouthOpening = true;
+                mouthOpenTimer = 0;
+            }
+            
+            const allWhiskers = [...leftWhiskers, ...rightWhiskers];
+            
+            allWhiskers.forEach((whisker, index) => {
+                const isLeft = index < 3;
+                let angleOffset = 0;
+                
+                if (isLeft && leftWhiskerArea) {
+                    const distToFirefly = Math.abs(fireflyX - whisker.startX);
+                    angleOffset = Math.max(0, (30 - distToFirefly) / 30) * 0.3;
+                } else if (!isLeft && rightWhiskerArea) {
+                    const distToFirefly = Math.abs(fireflyX - whisker.startX);
+                    angleOffset = -Math.max(0, (30 - distToFirefly) / 30) * 0.3;
+                }
+                
+                const points = [];
+                for (let i = 0; i <= whisker.length; i += 0.5) {
+                    const t = i / whisker.length;
+                    const curve = Math.sin(t * Math.PI * 0.5) * 1.5;
+                    
+                    const adjustedAngle = whisker.angle + angleOffset * t;
+                    const x = whisker.startX + Math.cos(adjustedAngle) * i;
+                    const y = whisker.startY + Math.sin(adjustedAngle) * i + curve;
+                    
+                    points.push({x, y, t});
+                }
+                
+                points.forEach(point => {
+                    const px = Math.round(point.x);
+                    const py = Math.round(point.y);
+                    
+                    if (px >= 0 && px < w && py >= 0 && py < h) {
+                        const opacity = (1 - point.t * 0.7) * 0.35;
+                        const whiskerColor = hslToRgba(0, 0, 0.5, opacity);
+                        drawPixel(px, py, whiskerColor);
+                    }
+                });
+            });
+        }
+
+        function drawNose(centerX, centerY) {
+            for (let x = centerX - 10; x <= centerX + 10; x++) {
+                for (let y = centerY - 4; y <= centerY; y++) {
+                    if (x >= 0 && x < w && y >= 0 && y < h) {
+                        const distFromCenter = Math.abs(x - centerX);
+                        const distFromTop = Math.abs(y - (centerY - 4));
+                        
+                        // Arrondir les coins supérieurs
+                        if (distFromCenter > 8 && distFromTop < 2) continue;
+                        
+                        const darkness = 0.25 - distFromCenter * 0.01;
+                        const noseColor = hslToRgb(350, 0.4, darkness);
+                        drawPixel(x, y, noseColor);
+                    }
+                }
+            }
+            
+            for (let y = centerY; y <= centerY + 10; y++) {
+                for (let x = centerX - 3; x <= centerX + 3; x++) {
+                    if (x >= 0 && x < w && y >= 0 && y < h) {
+                        const vertDist = y - centerY;
+                        const distFromBottom = Math.abs(y - (centerY + 10));
+                        const distFromCenter = Math.abs(x - centerX);
+                        
+                        // Arrondir le coin inférieur
+                        if (distFromBottom < 1 && distFromCenter > 2) continue;
+                        
+                        const darkness = 0.28 - vertDist * 0.01;
+                        const noseColor = hslToRgb(345, 0.45, darkness);
+                        drawPixel(x, y, noseColor);
+                    }
+                }
+            }
+        }
+        
+        function drawMouth(centerX, centerY) {
+            const breathe = Math.sin(time * 0.04) * 0.5;
+            const adjustedCenterY = centerY + breathe;
+            const openOffset = mouthOpenAmount * 6;
+            
+            // Ligne verticale du nez à la bouche
+            for (let y = adjustedCenterY; y <= adjustedCenterY + 6; y++) {
+                if (y >= 0 && y < h) {
+                    const fadeOut = 1 - (y - adjustedCenterY) / 6;
+                    const mouthColor = hslToRgba(0, 0, 0.2, fadeOut * 0.6);
+                    drawPixel(centerX, Math.round(y), mouthColor);
+                }
+            }
+            
+            const mouthY = adjustedCenterY + 6;
+            
+            if (mouthOpenAmount > 0.05) {
+                // BOUCHE OUVERTE - forme en W qui s'écarte vers le bas
+                const openHeight = Math.floor(openOffset);
+                
+                // Côté gauche du W (ligne qui descend et s'écarte)
+                for (let i = 0; i <= 8; i++) {
+                    const x = centerX - i;
+                    const y = Math.round(mouthY + i * 0.8 - openOffset * 0.3 + 1);
+                    if (x >= 0 && x < w && y >= 0 && y < h) {
+                        drawPixel(x, y, hslToRgb(0, 0, 0.2));
+                    }
+                }
+                
+                // Côté droit du W (ligne qui descend et s'écarte)
+                for (let i = 0; i <= 8; i++) {
+                    const x = centerX + i;
+                    const y = Math.round(mouthY + i * 0.8 - openOffset * 0.3 + 1);
+                    if (x >= 0 && x < w && y >= 0 && y < h) {
+                        drawPixel(x, y, hslToRgb(0, 0, 0.2));
+                    }
+                }
+                
+                // Intérieur rose/rouge de la bouche ouverte
+                for (let x = centerX - 6; x <= centerX + 6; x++) {
+                    const dx = Math.abs(x - centerX) / 6;
+                    if (dx > 1) continue;
+                    
+                    const topY = mouthY + Math.abs(x - centerX) * 0.7 - openOffset * 0.3 + 2;
+                    const bottomY = topY - openHeight * 0.8 * (1 - dx * 0.5);
+                    
+                    for (let y = Math.floor(bottomY); y < Math.floor(topY); y++) {
+                        if (y >= 0 && y < h && x >= 0 && x < w) {
+                            const depth = (topY - y) / (topY - bottomY);
+                            // Intérieur sombre de la bouche
+                            const lightness = 0.15 - depth * 0.1;
+                            drawPixel(x, y, hslToRgb(345, 0.2, lightness));
+                        }
+                    }
+                }
+                
+                // Petite langue rose
+                if (openHeight > 5) {
+                    const tongueY = Math.round(mouthY - openHeight * 0.3 + 2);
+                    for (let x = centerX - 2; x <= centerX + 2; x++) {
+                        if (tongueY >= 0 && tongueY < h && x >= 0 && x < w) {
+                            drawPixel(x, tongueY, hslToRgb(350, 0.25, 0.28));
+                            if (tongueY - 1 >= 0) {
+                                drawPixel(x, tongueY - 1, hslToRgb(345, 0.2, 0.20));
+                            }
+                        }
+                    }
+                }
+                
+            } else {
+                // BOUCHE FERMÉE - forme en W de chat (comme un A inversé)
+                // Côté gauche du W (descend depuis le centre)
+                for (let i = 0; i <= 8; i++) {
+                    const x = centerX - i;
+                    const y = Math.round(mouthY + i * 0.7);
+                    if (x >= 0 && x < w && y >= 0 && y < h) {
+                        drawPixel(x, y, hslToRgb(0, 0, 0.2));
+                    }
+                }
+                
+                // Côté droit du W (descend depuis le centre)
+                for (let i = 0; i <= 8; i++) {
+                    const x = centerX + i;
+                    const y = Math.round(mouthY + i * 0.7);
+                    if (x >= 0 && x < w && y >= 0 && y < h) {
+                        drawPixel(x, y, hslToRgb(0, 0, 0.2));
+                    }
+                }
+                
+                // Ombre en dessous
+                const fireflyBelow = fireflyY > 115;
+                const shadowBoost = fireflyBelow ? 0.3 : 0;
+                for (let x = centerX - 9; x <= centerX + 9; x++) {
+                    const y = Math.round(mouthY + Math.abs(x - centerX) * 0.7 + 1);
+                    if (x >= 0 && x < w && y >= 0 && y < h) {
+                        const fadeOut = 1 - Math.abs(x - centerX) / 9;
+                        drawPixel(x, y, hslToRgba(0, 0, 0.15, (fadeOut * 0.3) + shadowBoost));
+                    }
+                }
+            }
+        }
+        
+        function drawForeheadPatch() {
+            const centerX = 60;
+            const centerY = 56;
+            
+            for (let y = 44; y < 70; y++) {
+                for (let x = 44; x < 76; x++) {
+                    const dx = Math.abs(x - centerX);
+                    const dy = y - centerY;
+                    
+                    const dist = Math.sqrt(Math.pow(dx / 14, 2) + Math.pow(dy / 12, 2));
+                    
+                    if (dist < 1) {
+                        const edgeNoise = Math.sin(Math.atan2(dy, dx) * 5 + x * 0.5) * 0.15;
+                        const adjustedDist = dist + edgeNoise;
+                        
+                        if (adjustedDist < 1.2) {
+                            const fadeOut = Math.pow(Math.max(0, 1 - dist), 0.8);
+                            
+                            const texture = Math.sin(x * 0.4) * Math.cos(y * 0.5) * 0.08;
+                            let intensity = (0.32 + texture) * fadeOut;
+                            
+                            const patchColor = hslToRgba(25, 0.1, intensity, fadeOut * 0.9);
+                            drawPixel(x, y, patchColor);
+                        }
+                    }
+                }
+            }
+        }
+        
+        function drawEars() {
+            const leftEarX = 20;
+            const leftEarY = 38;
+            const rightEarX = 100;
+            const rightEarY = 38;
+            
+            const distToLeftEar = Math.sqrt(Math.pow(fireflyX - leftEarX, 2) + Math.pow(fireflyY - leftEarY, 2));
+            const distToRightEar = Math.sqrt(Math.pow(fireflyX - rightEarX, 2) + Math.pow(fireflyY - rightEarY, 2));
+            
+            const leftEarTilt = distToLeftEar < 35 ? (35 - distToLeftEar) / 35 * 0.25 : 0;
+            const rightEarTilt = distToRightEar < 35 ? (35 - distToRightEar) / 35 * 0.25 : 0;
+            
+            const earHeight = 65;
+            
+            for (let i = 0; i < earHeight; i++) {
+                const progress = i / earHeight;
+                const tilt = leftEarTilt * progress;
+                const width = 16 * (1 - progress * 0.995);
+                
+                const leftEdge = Math.round(leftEarX - width + i * (0.14 + tilt));
+                const rightEdge = Math.round(leftEarX + width - i * (0.14 - tilt));
+                const y = Math.round(leftEarY - i);
+                
+                if (width > 0.3) {
+                    for (let x = leftEdge + 1; x < rightEdge; x++) {
+                        if (x >= 0 && x < w && y >= 0 && y < h) {
+                            const fadeOut = progress;
+                            const distFromCenter = Math.abs(x - leftEarX) / width;
+                            const grayIntensity = fadeOut * 0.2 * (1 - distFromCenter * 0.3);
+                            drawPixel(x, y, hslToRgba(0, 0, grayIntensity, (1 - fadeOut * 0.3) * 0.6));
+                        }
+                    }
+                }
+            }
+            
+            for (let i = 0; i < earHeight - 2; i++) {
+                const progress = i / (earHeight - 2);
+                const tilt = leftEarTilt * progress;
+                const width = 16 * (1 - progress * 0.995);
+                
+                const x1 = Math.round(leftEarX - width + i * (0.14 + tilt));
+                const x2 = Math.round(leftEarX + width - i * (0.14 - tilt));
+                const y = Math.round(leftEarY - i);
+                
+                if (x1 >= 0 && x1 < w && y >= 0 && y < h && width > 0.8) {
+                    const fadeOut = 1 - progress;
+                    drawPixel(x1, y, hslToRgba(0, 0, 0.3, fadeOut * 0.7));
+                }
+                if (x2 >= 0 && x2 < w && y >= 0 && y < h && x1 !== x2 && width > 0.8) {
+                    const fadeOut = 1 - progress;
+                    drawPixel(x2, y, hslToRgba(0, 0, 0.3, fadeOut * 0.7));
+                }
+            }
+            
+            for (let i = 0; i < earHeight; i++) {
+                const progress = i / earHeight;
+                const tilt = rightEarTilt * progress;
+                const width = 16 * (1 - progress * 0.995);
+                
+                const leftEdge = Math.round(rightEarX - width + i * (0.14 - tilt));
+                const rightEdge = Math.round(rightEarX + width - i * (0.14 + tilt));
+                const y = Math.round(rightEarY - i);
+                
+                if (width > 0.3) {
+                    for (let x = leftEdge + 1; x < rightEdge; x++) {
+                        if (x >= 0 && x < w && y >= 0 && y < h) {
+                            const fadeOut = progress;
+                            const distFromCenter = Math.abs(x - rightEarX) / width;
+                            const grayIntensity = fadeOut * 0.2 * (1 - distFromCenter * 0.3);
+                            drawPixel(x, y, hslToRgba(0, 0, grayIntensity, (1 - fadeOut * 0.3) * 0.6));
+                        }
+                    }
+                }
+            }
+            
+            for (let i = 0; i < earHeight - 2; i++) {
+                const progress = i / (earHeight - 2);
+                const tilt = rightEarTilt * progress;
+                const width = 16 * (1 - progress * 0.995);
+                
+                const x1 = Math.round(rightEarX - width + i * (0.14 - tilt));
+                const x2 = Math.round(rightEarX + width - i * (0.14 + tilt));
+                const y = Math.round(rightEarY - i);
+                
+                if (x1 >= 0 && x1 < w && y >= 0 && y < h && width > 0.8) {
+                    const fadeOut = 1 - progress;
+                    drawPixel(x1, y, hslToRgba(0, 0, 0.3, fadeOut * 0.7));
+                }
+                if (x2 >= 0 && x2 < w && y >= 0 && y < h && x1 !== x2 && width > 0.8) {
+                    const fadeOut = 1 - progress;
+                    drawPixel(x2, y, hslToRgba(0, 0, 0.3, fadeOut * 0.7));
+                }
+            }
+        }
+
+        function drawEye(centerX, centerY, lookAtX, lookAtY, blinkAmt, pupilDil, isRightEye) {
+            const dx = lookAtX - centerX;
+            const dy = lookAtY - centerY;
+            const angle = Math.atan2(dy, dx);
+            const offsetAmount = 1;
+            const pupilOffsetX = Math.cos(angle) * offsetAmount;
+            const pupilOffsetY = Math.sin(angle) * offsetAmount;
+
+            const basePupilWidth = Math.floor(2 + (1 - brightness) * 10);
+            const pupilWidth = basePupilWidth + pupilDil * 8;
+            const pupilHeight = 22;
+            
+            const irisRadius = 13;
+            const irisCenterX = centerX + pupilOffsetX;
+            const irisCenterY = centerY + pupilOffsetY;
+            
+            const baseVisibleHeight = 13;
+            const eyelidDropAmount = 7;
+            
+            const fireflyAngleToEye = Math.atan2(lookAtY - irisCenterY, lookAtX - irisCenterX);
+            const highlightDistance = 5;
+            const highlightX = irisCenterX + Math.cos(fireflyAngleToEye) * highlightDistance;
+            const highlightY = irisCenterY + Math.sin(fireflyAngleToEye) * highlightDistance;
+            
+            const minX = Math.max(0, Math.floor(irisCenterX - irisRadius - 3));
+            const maxX = Math.min(w, Math.ceil(irisCenterX + irisRadius + 3));
+            const minY = Math.max(0, Math.floor(irisCenterY - irisRadius - 3));
+            const maxY = Math.min(h, Math.ceil(irisCenterY + irisRadius + 3));
+            
+            // Fonction pour calculer la limite supérieure avec la paupière
+            function getUpperLimit(x) {
+                const dxFromCenter = Math.abs(x - irisCenterX);
+                const normalizedX = dxFromCenter / irisRadius;
+                const eyelidCurve = normalizedX * normalizedX * eyelidDropAmount;
+                return -baseVisibleHeight * (1 - blinkAmt) + eyelidCurve + 3;
+            }
+            
+            // Dessiner la paupière en noir
+            for (let x = minX; x < maxX; x++) {
+                const dxI = x - irisCenterX;
+                const dist = Math.abs(dxI);
+                if (dist > irisRadius) continue;
+                
+                const upperLimit = getUpperLimit(x);
+                // Rotation vers l'intérieur (10%) - miroir selon l'œil
+                const rotationOffset = dxI * 0.1 * (isRightEye ? 1 : -1);
+                const y = Math.round(irisCenterY + upperLimit + rotationOffset);
+                if (y >= 0 && y < h) {
+                    drawPixel(x, y, '#000');
+                    if (y - 1 >= 0) drawPixel(x, y - 1, '#000');
+                    if (y + 1 < h) drawPixel(x, y + 1, '#000');
+                    if (y + 2 < h) drawPixel(x, y + 2, '#000');
+                    if (y + 3 < h) drawPixel(x, y + 3, '#000');
+                }
+            }
+            
+            // Outer ring
+            for (let y = minY; y < maxY; y++) {
+                for (let x = minX; x < maxX; x++) {
+                    const dxI = x - irisCenterX;
+                    const dyI = y - irisCenterY;
+                    const dist = Math.sqrt(dxI * dxI + dyI * dyI);
+                    
+                    const upperLimit = getUpperLimit(x);
+                    if (dyI < upperLimit || dyI > baseVisibleHeight * (1 - blinkAmt)) continue;
+                    
+                    if (dist >= irisRadius - 1.5 && dist < irisRadius + 1) {
+                        const normalizedDist = dist / irisRadius;
+                        const sphereDepth = Math.sqrt(Math.max(0, 1 - Math.pow(normalizedDist - 1, 2))) * 0.5;
+                        
+                        const ringDarkness = (0.08 + sphereDepth * 0.1) * brightness;
+                        const ringColor = hslToRgb(hue - 20, 0.3, ringDarkness);
+                        drawPixel(x, y, ringColor);
+                    }
+                }
+            }
+            
+            // Iris
+            for (let y = minY; y < maxY; y++) {
+                for (let x = minX; x < maxX; x++) {
+                    const dxI = x - irisCenterX;
+                    const dyI = y - irisCenterY;
+                    const dist = Math.sqrt(dxI * dxI + dyI * dyI);
+                    
+                    const upperLimit = getUpperLimit(x);
+                    if (dyI < upperLimit || dyI > baseVisibleHeight * (1 - blinkAmt)) continue;
+                    if (dist >= irisRadius || dist <= 1) continue;
+                    
+                    const angleI = Math.atan2(dyI, dxI);
+                    const normalizedDist = dist / irisRadius;
+                    const sphereEffect = Math.sqrt(1 - normalizedDist * normalizedDist) * 0.15;
+                    const radialLines = Math.sin(angleI * 20) * 0.02;
+                    const distPattern = (irisRadius - dist) / irisRadius;
+                    
+                    const saturation = 0.7;
+                    const lightness = (0.35 + distPattern * 0.15 + radialLines + sphereEffect) * brightness;
+                    
+                    const irisColor = hslToRgb(hue, saturation, lightness);
+                    drawPixel(x, y, irisColor);
+                }
+            }
+            
+            // Pupil
+            const pupilMinY = Math.max(minY, Math.floor(irisCenterY - pupilHeight / 2));
+            const pupilMaxY = Math.min(maxY, Math.ceil(irisCenterY + pupilHeight / 2));
+            
+            for (let y = pupilMinY; y < pupilMaxY; y++) {
+                const dyP = y - irisCenterY;
+                
+                const upperLimit = getUpperLimit(irisCenterX);
+                if (dyP < upperLimit || dyP > baseVisibleHeight * (1 - blinkAmt)) continue;
+                
+                const normalizedY = dyP / (pupilHeight / 2);
+                const currentWidth = pupilWidth * Math.sqrt(Math.max(0, 1 - normalizedY * normalizedY));
+                
+                const xStart = Math.max(minX, Math.floor(irisCenterX - currentWidth));
+                const xEnd = Math.min(maxX, Math.ceil(irisCenterX + currentWidth));
+                
+                for (let x = xStart; x < xEnd; x++) {
+                    const dxP = x - irisCenterX;
+                    if (Math.abs(dyP) < pupilHeight / 2 && Math.abs(dxP) < currentWidth) {
+                        const upperLimitX = getUpperLimit(x);
+                        if (dyP >= upperLimitX) {
+                            drawPixel(x, y, '#000');
+                        }
+                    }
+                }
+            }
+            
+            // Highlights
+            const hlMinX = Math.max(0, Math.floor(highlightX - 4));
+            const hlMaxX = Math.min(w, Math.ceil(highlightX + 4));
+            const hlMinY = Math.max(0, Math.floor(highlightY - 4));
+            const hlMaxY = Math.min(h, Math.ceil(highlightY + 4));
+            
+            for (let y = hlMinY; y < hlMaxY; y++) {
+                for (let x = hlMinX; x < hlMaxX; x++) {
+                    const dxH = x - highlightX;
+                    const dyH = y - highlightY;
+                    const dist = Math.sqrt(dxH * dxH + dyH * dyH);
+                    
+                    const dyI = y - irisCenterY;
+                    const upperLimit = getUpperLimit(x);
+                    if (dyI < upperLimit || dyI > baseVisibleHeight * (1 - blinkAmt)) continue;
+                    
+                    if (dist < 3.5) {
+                        const falloff = 1 - (dist / 3.5);
+                        const smoothFalloff = falloff * falloff;
+                        const highlightBrightness = (0.7 + brightness * 0.3) * smoothFalloff;
+                        const alpha = smoothFalloff * 0.5;
+                        drawPixel(x, y, hslToRgba(0, 0, highlightBrightness, alpha));
+                    }
+                    
+                    if (dist < 1.3) {
+                        const coreFalloff = 1 - (dist / 1.3);
+                        drawPixel(x, y, hslToRgba(0, 0, 0.98, coreFalloff * 0.6));
+                    }
+                }
+            }
+            
+            const highlight2X = irisCenterX - Math.cos(fireflyAngleToEye) * 3;
+            const highlight2Y = irisCenterY - Math.sin(fireflyAngleToEye) * 3;
+            
+            const hl2MinX = Math.max(0, Math.floor(highlight2X - 3));
+            const hl2MaxX = Math.min(w, Math.ceil(highlight2X + 3));
+            const hl2MinY = Math.max(0, Math.floor(highlight2Y - 3));
+            const hl2MaxY = Math.min(h, Math.ceil(highlight2Y + 3));
+            
+            for (let y = hl2MinY; y < hl2MaxY; y++) {
+                for (let x = hl2MinX; x < hl2MaxX; x++) {
+                    const dxH2 = x - highlight2X;
+                    const dyH2 = y - highlight2Y;
+                    const dist = Math.sqrt(dxH2 * dxH2 + dyH2 * dyH2);
+                    
+                    const dyI = y - irisCenterY;
+                    const upperLimit = getUpperLimit(x);
+                    if (dyI < upperLimit || dyI > baseVisibleHeight * (1 - blinkAmt)) continue;
+                    if (dist >= 2) continue;
+                    
+                    const falloff = 1 - (dist / 2);
+                    const smoothFalloff = falloff * falloff;
+                    const highlightBrightness = (0.55 + brightness * 0.25) * smoothFalloff;
+                    const alpha = smoothFalloff * 0.5;
+                    drawPixel(x, y, hslToRgba(0, 0, highlightBrightness, alpha));
+                }
+            }
+            
+            // Anti-aliasing
+            for (let y = minY; y < maxY; y++) {
+                for (let x = minX; x < maxX; x++) {
+                    const dxI = x - irisCenterX;
+                    const dyI = y - irisCenterY;
+                    const dist = Math.sqrt(dxI * dxI + dyI * dyI);
+                    
+                    const upperLimit = getUpperLimit(x);
+                    if (dyI < upperLimit || dyI > baseVisibleHeight * (1 - blinkAmt)) continue;
+                    if (dist < irisRadius || dist >= irisRadius + 2) continue;
+                    
+                    const fadeAmount = 1 - (dist - irisRadius) / 2;
+                    const aaDarkness = 0.2 * brightness * fadeAmount;
+                    drawPixel(x, y, hslToRgba(hue, 0.5, aaDarkness, fadeAmount));
+                }
+            }
+        }
+
+        function animate() {
+            brightness += (targetBrightness - brightness) * 0.015;
+            hue += (targetHue - hue) * 0.08;
+            
+            if (time % 250 === 0) {
+                targetBrightness = 0.5 + Math.random() * 0.5;
+            }
+            
+            fireflyAngle += 0.015;
+            fireflyX = 60 + Math.sin(fireflyAngle * 1.3) * 45 + Math.cos(fireflyAngle * 0.7) * 12;
+            fireflyY = 75 + Math.cos(fireflyAngle * 1.1) * 40 + Math.sin(fireflyAngle * 0.9) * 8;
+            
+            const microDrift = Math.sin(time * 0.03) * 0.8;
+            const microDriftY = Math.cos(time * 0.025) * 0.5;
+            const lookAtX = fireflyX + microDrift;
+            const lookAtY = fireflyY + microDriftY;
+            
+            blinkTimer++;
+            
+            if (blinkAfterFlash && flashTimer === 20) {
+                isBlinking = true;
+                blinkTimer = 0;
+                blinkAfterFlash = false;
+            }
+            
+            if (isBlinking) {
+                if (blinkTimer < 10) {
+                    blinkAmount = blinkTimer / 10;
+                } else if (blinkTimer < 20) {
+                    blinkAmount = (20 - blinkTimer) / 10;
+                } else {
+                    blinkAmount = 0;
+                    isBlinking = false;
+                    blinkTimer = 0;
+                    nextBlink = Math.random() * 300 + 200;
+                }
+            } else if (blinkTimer >= nextBlink && !blinkAfterFlash) {
+                isBlinking = true;
+                blinkTimer = 0;
+            }
+            
+            blinkTimerRight++;
+            
+            if (blinkAfterFlash && flashTimer === 22) {
+                isBlinkingRight = true;
+                blinkTimerRight = 0;
+            }
+            
+            if (isBlinkingRight) {
+                if (blinkTimerRight < 10) {
+                    blinkAmountRight = blinkTimerRight / 10;
+                } else if (blinkTimerRight < 20) {
+                    blinkAmountRight = (20 - blinkTimerRight) / 10;
+                } else {
+                    blinkAmountRight = 0;
+                    isBlinkingRight = false;
+                    blinkTimerRight = 0;
+                }
+            } else if (isBlinking && blinkTimer === 2) {
+                isBlinkingRight = true;
+                blinkTimerRight = 0;
+            }
+            
+            mouthOpenTimer++;
+            
+            if (isMouthOpening) {
+                if (mouthOpenTimer < 20) {
+                    mouthOpenAmount = mouthOpenTimer / 20;
+                } else if (mouthOpenTimer < 50) {
+                    mouthOpenAmount = 1;
+                } else if (mouthOpenTimer < 70) {
+                    mouthOpenAmount = (70 - mouthOpenTimer) / 20;
+                } else {
+                    mouthOpenAmount = 0;
+                    isMouthOpening = false;
+                    mouthOpenTimer = 0;
+                }
+            } else if (mouthOpenTimer >= nextMouthOpen) {
+                isMouthOpening = true;
+                mouthOpenTimer = 0;
+                nextMouthOpen = Math.random() * 500 + 400;
+            }
+            
+            flashTimer++;
+            if (flashTimer >= nextFlash) {
+                flashTimer = 0;
+                nextFlash = Math.random() * 400 + 300;
+                
+                // Éviter les couleurs trop proches
+                let newHue;
+                do {
+                    newHue = 100 + Math.random() * 140;
+                } while (Math.abs(newHue - hue) < 40);
+                
+                nextHueChange = newHue;
+                blinkAfterFlash = true;
+            }
+            
+            if (flashTimer < 8) {
+                flashIntensity = (flashTimer / 8) * 1.5;
+                pupilDilation = flashTimer / 8;
+                if (flashTimer === 0) {
+                    targetHue = nextHueChange;
+                }
+            } else if (flashTimer < 16) {
+                flashIntensity = ((16 - flashTimer) / 8) * 1.5;
+                pupilDilation = 1;
+            } else if (flashTimer < 80) {
+                flashIntensity = 0;
+                pupilDilation = Math.max(0, 1 - (flashTimer - 16) / 64);
+            } else {
+                flashIntensity = 0;
+                pupilDilation = 0;
+            }
+            
+            fireflyGlow = 0.7 + Math.sin(time * 0.1) * 0.3 + flashIntensity * 0.5;
+            
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            drawEars();
+            drawWhiskers();
+            
+            drawEye(35, 75, fireflyX, fireflyY, blinkAmount, pupilDilation, false);
+            drawEye(85, 75, fireflyX, fireflyY, blinkAmountRight, pupilDilation, true);
+            
+            drawNose(60, 105);
+            drawMouth(60, 120);
+            
+            const ffMinX = Math.max(0, Math.floor(fireflyX - 15));
+            const ffMaxX = Math.min(w, Math.ceil(fireflyX + 15));
+            const ffMinY = Math.max(0, Math.floor(fireflyY - 15));
+            const ffMaxY = Math.min(h, Math.ceil(fireflyY + 15));
+            
+            for (let y = ffMinY; y < ffMaxY; y++) {
+                for (let x = ffMinX; x < ffMaxX; x++) {
+                    const dx = x - fireflyX;
+                    const dy = y - fireflyY;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (dist < 8) {
+                        const glowIntensity = (8 - dist) / 8 * fireflyGlow;
+                        const alpha = glowIntensity * 0.5;
+                        drawPixel(x, y, hslToRgba(50, 0.9, glowIntensity * 0.4, alpha));
+                    }
+                    
+                    if (dist < 1.5) {
+                        const alpha = (0.9 + flashIntensity * 0.1) * fireflyGlow;
+                        const bodyBrightness = 0.8 * fireflyGlow + flashIntensity * 0.2;
+                        drawPixel(x, y, hslToRgba(50, 1, bodyBrightness, alpha));
+                    }
+                    
+                    if (flashIntensity > 0 && dist < 15) {
+                        const flashGlow = (15 - dist) / 15 * flashIntensity;
+                        const alpha = flashGlow * 0.5;
+                        drawPixel(x, y, hslToRgba(55, 1, 0.7, alpha));
+                    }
+                }
+            }
+            
+            if (flashIntensity > 0) {
+                const overlayRadius = 50;
+                const ovMinX = Math.max(0, Math.floor(fireflyX - overlayRadius));
+                const ovMaxX = Math.min(w, Math.ceil(fireflyX + overlayRadius));
+                const ovMinY = Math.max(0, Math.floor(fireflyY - overlayRadius));
+                const ovMaxY = Math.min(h, Math.ceil(fireflyY + overlayRadius));
+                
+                for (let y = ovMinY; y < ovMaxY; y++) {
+                    for (let x = ovMinX; x < ovMaxX; x++) {
+                        const dx = x - fireflyX;
+                        const dy = y - fireflyY;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        
+                        const overlayIntensity = Math.max(0, 1 - dist / overlayRadius) * flashIntensity;
+                        if (overlayIntensity > 0.01) {
+                            const alpha = overlayIntensity * 0.6;
+                            drawPixel(x, y, hslToRgba(50, 1, 0.85, alpha));
+                        }
+                    }
+                }
+            }
+            
+            for (let y = 0; y < h; y += 2) {
+                for (let x = 0; x < w; x++) {
+                    drawPixel(x, y, 'rgba(0, 0, 0, 0.08)');
+                }
+            }
+            
+            time++;
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+    </script>
+</body>
+</html>

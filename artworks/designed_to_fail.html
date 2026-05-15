@@ -1,0 +1,1382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Designed To Fail</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #000;
+            font-family: 'Courier New', monospace;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+        canvas {
+            border: 2px solid #4a90e2;
+            background: #0d1b2a;
+            width: min(95vw, 95vh);
+            height: min(95vw, 95vh);
+            aspect-ratio: 1 / 1;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="c1"></canvas>
+    <script>
+        const canvases = [c1];
+        const blue = '#4a90e2', lightBlue = '#6db3f2', darkBlue = '#2c5f8d', grid = '#1e3a52', txt = '#a8d8ff';
+        
+        function resizeCanvas() {
+            const size = Math.min(window.innerWidth, window.innerHeight) * 0.95;
+            canvases.forEach(c => { 
+                c.width = size; 
+                c.height = size; 
+            });
+        }
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+        
+        // Generate random vintage pattern once for consistency
+        const vintagePattern = {
+            noise: [],
+            stains: [
+                { x: 0.12, y: 0.08, r: 80 },
+                { x: 0.88, y: 0.88, r: 100 },
+                { x: 0.75, y: 0.15, r: 60 }
+            ],
+            edges: []
+        };
+        
+        // Generate noise pattern
+        for (let i = 0; i < 1000; i++) {
+            vintagePattern.noise.push({ x: Math.random(), y: Math.random() });
+        }
+        
+        // Generate edge wear pattern
+        for (let i = 0; i < 25; i++) {
+            vintagePattern.edges.push({
+                edge: Math.floor(Math.random() * 4),
+                pos: Math.random(),
+                size: 5 + Math.random() * 10
+            });
+        }
+
+        // Helper for dimension lines with arrows
+        function dimLine(ctx, x1, y1, x2, y2, label, offset) {
+            ctx.save();
+            ctx.strokeStyle = lightBlue;
+            ctx.fillStyle = lightBlue;
+            ctx.lineWidth = 0.5;
+            const dx = x2 - x1, dy = y2 - y1;
+            const len = Math.sqrt(dx*dx + dy*dy);
+            const nx = -dy/len, ny = dx/len;
+            const ox = nx * offset, oy = ny * offset;
+            // extension lines
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x1 + ox, y1 + oy);
+            ctx.moveTo(x2, y2);
+            ctx.lineTo(x2 + ox, y2 + oy);
+            ctx.stroke();
+            // dim line
+            ctx.beginPath();
+            ctx.moveTo(x1 + ox, y1 + oy);
+            ctx.lineTo(x2 + ox, y2 + oy);
+            ctx.stroke();
+            // arrows
+            const ah = 4;
+            const ang = Math.atan2(dy, dx);
+            ctx.beginPath();
+            ctx.moveTo(x1 + ox, y1 + oy);
+            ctx.lineTo(x1 + ox + Math.cos(ang)*ah + Math.cos(ang+Math.PI/2)*2, y1 + oy + Math.sin(ang)*ah + Math.sin(ang+Math.PI/2)*2);
+            ctx.lineTo(x1 + ox + Math.cos(ang)*ah - Math.cos(ang+Math.PI/2)*2, y1 + oy + Math.sin(ang)*ah - Math.sin(ang+Math.PI/2)*2);
+            ctx.closePath();
+            ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(x2 + ox, y2 + oy);
+            ctx.lineTo(x2 + ox - Math.cos(ang)*ah + Math.cos(ang+Math.PI/2)*2, y2 + oy - Math.sin(ang)*ah + Math.sin(ang+Math.PI/2)*2);
+            ctx.lineTo(x2 + ox - Math.cos(ang)*ah - Math.cos(ang+Math.PI/2)*2, y2 + oy - Math.sin(ang)*ah - Math.sin(ang+Math.PI/2)*2);
+            ctx.closePath();
+            ctx.fill();
+            // label
+            ctx.font = '9px Courier New';
+            ctx.textAlign = 'center';
+            const mx = (x1+x2)/2 + ox, my = (y1+y2)/2 + oy;
+            ctx.fillText(label, mx, my - 3);
+            ctx.textAlign = 'left';
+            ctx.restore();
+        }
+
+        function grid2D(ctx, w, h) {
+            ctx.strokeStyle = grid;
+            ctx.lineWidth = 0.5;
+            for (let i = 0; i < w; i += 20) { ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, h); ctx.stroke(); }
+            for (let i = 0; i < h; i += 20) { ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(w, i); ctx.stroke(); }
+            ctx.strokeStyle = darkBlue;
+            ctx.lineWidth = 1;
+            for (let i = 0; i < w; i += 100) { ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, h); ctx.stroke(); }
+            for (let i = 0; i < h; i += 100) { ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(w, i); ctx.stroke(); }
+            
+            // Apply consistent vintage effects - subtle
+            // Light paper texture noise
+            ctx.fillStyle = 'rgba(200, 180, 120, 0.08)';
+            vintagePattern.noise.forEach(n => {
+                ctx.fillRect(n.x * w, n.y * h, 1, 1);
+            });
+            
+            // Subtle coffee stains (removed)
+            
+            // Light fold marks (same positions)
+            ctx.strokeStyle = 'rgba(80, 80, 80, 0.2)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            ctx.moveTo(w * 0.33, 0);
+            ctx.lineTo(w * 0.33, h);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(w * 0.66, 0);
+            ctx.lineTo(w * 0.66, h);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(0, h * 0.5);
+            ctx.lineTo(w, h * 0.5);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            
+            // Subtle edge wear (same pattern)
+            ctx.fillStyle = 'rgba(60, 60, 60, 0.15)';
+            vintagePattern.edges.forEach(e => {
+                if (e.edge === 0) ctx.fillRect(e.pos * w, 0, e.size, e.size * 1.5);
+                if (e.edge === 1) ctx.fillRect(e.pos * w, h - e.size * 1.5, e.size, e.size * 1.5);
+                if (e.edge === 2) ctx.fillRect(0, e.pos * h, e.size * 1.5, e.size);
+                if (e.edge === 3) ctx.fillRect(w - e.size * 1.5, e.pos * h, e.size * 1.5, e.size);
+            });
+            
+            // Light yellowing vignette
+            const gradient = ctx.createRadialGradient(w * 0.5, h * 0.5, 0, w * 0.5, h * 0.5, Math.max(w, h) * 0.7);
+            gradient.addColorStop(0, 'rgba(255, 245, 220, 0)');
+            gradient.addColorStop(1, 'rgba(139, 115, 85, 0.1)');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, w, h);
+        }
+
+        function drawHull(ctx, w, h, x, y, rot, alpha) {
+            const scale = Math.min(w / 700, h / 900);
+            const offsetX = (w - 700 * scale) / 2;
+            const offsetY = h * 0.05;
+            
+            ctx.save();
+            ctx.translate(offsetX + (87 + x) * scale, offsetY + (100 + y) * scale);
+            ctx.scale(scale, scale);
+            ctx.translate(262, 112);
+            ctx.rotate(rot);
+            ctx.translate(-262, -112);
+            ctx.globalAlpha = alpha;
+            ctx.strokeStyle = blue;
+            ctx.lineWidth = 2;
+            
+            // Main hull outline with more curves
+            ctx.beginPath();
+            ctx.moveTo(0, 150 + y);
+            ctx.bezierCurveTo(15, 160 + y, 35, 165 + y, 60, 167 + y);
+            ctx.bezierCurveTo(80, 168 + y, 90, 168 + y, 100, 168 + y);
+            ctx.lineTo(450, 168 + y);
+            ctx.bezierCurveTo(475, 167 + y, 495, 162 + y, 510, 152 + y);
+            ctx.bezierCurveTo(520, 143 + y, 525, 138 + y, 525, 135 + y);
+            ctx.lineTo(525, 90 + y);
+            ctx.lineTo(500, 75 + y);
+            ctx.lineTo(50, 75 + y);
+            ctx.lineTo(25, 90 + y);
+            ctx.lineTo(0, 105 + y);
+            ctx.closePath();
+            ctx.stroke();
+            
+            // Waterlines (DWL + buttocks)
+            ctx.strokeStyle = lightBlue;
+            ctx.lineWidth = 0.5;
+            ctx.setLineDash([6, 3]);
+            // Designed waterline
+            ctx.beginPath();
+            ctx.moveTo(0, 142 + y);
+            ctx.lineTo(525, 142 + y);
+            ctx.stroke();
+            ctx.font = '8px Courier New';
+            ctx.fillStyle = lightBlue;
+            ctx.fillText('DWL', 5, 140 + y);
+            // Additional waterlines
+            ctx.setLineDash([2, 2]);
+            ctx.beginPath();
+            ctx.moveTo(15, 155 + y);
+            ctx.lineTo(510, 155 + y);
+            ctx.moveTo(30, 162 + y);
+            ctx.lineTo(495, 162 + y);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            
+            // Hull sheer line
+            ctx.strokeStyle = lightBlue;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(25, 135 + y);
+            ctx.bezierCurveTo(100, 133 + y, 400, 133 + y, 500, 138 + y);
+            ctx.stroke();
+            
+            // Chine line
+            ctx.beginPath();
+            ctx.moveTo(30, 155 + y);
+            ctx.lineTo(495, 155 + y);
+            ctx.stroke();
+            
+            // Deck line
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(25, 90 + y);
+            ctx.lineTo(500, 90 + y);
+            ctx.stroke();
+            
+            // Station lines (frames visible from outside)
+            ctx.strokeStyle = lightBlue;
+            ctx.lineWidth = 0.4;
+            ctx.setLineDash([3, 3]);
+            for (let i = 1; i < 11; i++) {
+                const sx = 25 + i * 47;
+                ctx.beginPath();
+                ctx.moveTo(sx, 75 + y);
+                ctx.lineTo(sx, 167 + y);
+                ctx.stroke();
+                ctx.font = '7px Courier New';
+                ctx.fillStyle = lightBlue;
+                ctx.fillText(i, sx - 2, 73 + y);
+            }
+            ctx.setLineDash([]);
+            
+            // Main superstructure - lower salon
+            ctx.strokeStyle = blue;
+            ctx.lineWidth = 2;
+            ctx.strokeRect(150, 60 + y, 200, 30);
+            
+            // Upper deck/flybridge
+            ctx.strokeRect(200, 35 + y, 140, 25);
+            
+            // Bridge
+            ctx.strokeRect(235, 15 + y, 70, 20);
+            
+            // Hardtop/radar arch
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(230, 15 + y);
+            ctx.bezierCurveTo(230, 8 + y, 240, 5 + y, 250, 5 + y);
+            ctx.lineTo(290, 5 + y);
+            ctx.bezierCurveTo(300, 5 + y, 310, 8 + y, 310, 15 + y);
+            ctx.stroke();
+            
+            // Radar dome
+            ctx.beginPath();
+            ctx.arc(270, 5 + y, 3, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Mast & antennas on hardtop
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(245, 5 + y);
+            ctx.lineTo(245, -8 + y);
+            ctx.moveTo(295, 5 + y);
+            ctx.lineTo(295, -5 + y);
+            ctx.stroke();
+            // Antenna whip
+            ctx.beginPath();
+            ctx.moveTo(255, 5 + y);
+            ctx.lineTo(255, -15 + y);
+            ctx.stroke();
+            ctx.fillStyle = blue;
+            ctx.beginPath();
+            ctx.arc(255, -15 + y, 1.5, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Horn
+            ctx.strokeRect(285, 8 + y, 4, 3);
+            
+            // Lower salon windows with mullions
+            ctx.lineWidth = 2;
+            for (let i = 0; i < 5; i++) {
+                const wx = 160 + i * 36;
+                ctx.strokeRect(wx, 68 + y, 30, 18);
+                // Mullions
+                ctx.lineWidth = 0.5;
+                ctx.beginPath();
+                ctx.moveTo(wx + 10, 68 + y);
+                ctx.lineTo(wx + 10, 86 + y);
+                ctx.moveTo(wx + 20, 68 + y);
+                ctx.lineTo(wx + 20, 86 + y);
+                ctx.moveTo(wx, 77 + y);
+                ctx.lineTo(wx + 30, 77 + y);
+                ctx.stroke();
+                ctx.lineWidth = 2;
+            }
+            
+            // Upper deck windows
+            for (let i = 0; i < 4; i++) {
+                const wx = 210 + i * 30;
+                ctx.strokeRect(wx, 43 + y, 25, 15);
+                ctx.lineWidth = 0.5;
+                ctx.beginPath();
+                ctx.moveTo(wx + 12.5, 43 + y);
+                ctx.lineTo(wx + 12.5, 58 + y);
+                ctx.stroke();
+                ctx.lineWidth = 2;
+            }
+            
+            // Bridge windscreen
+            ctx.strokeRect(240, 22 + y, 55, 12);
+            ctx.lineWidth = 0.5;
+            for (let i = 1; i < 4; i++) {
+                ctx.beginPath();
+                ctx.moveTo(240 + i * 13.75, 22 + y);
+                ctx.lineTo(240 + i * 13.75, 34 + y);
+                ctx.stroke();
+            }
+            // Windscreen wipers
+            ctx.lineWidth = 0.5;
+            for (let i = 0; i < 4; i++) {
+                ctx.beginPath();
+                ctx.moveTo(248 + i * 13.75, 33 + y);
+                ctx.lineTo(252 + i * 13.75, 25 + y);
+                ctx.stroke();
+            }
+            ctx.lineWidth = 2;
+            
+            // Hull portholes with details
+            for (let i = 0; i < 7; i++) {
+                const px = 70 + i * 60;
+                ctx.beginPath();
+                ctx.arc(px, 110 + y, 12, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.arc(px, 110 + y, 9, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.lineWidth = 0.5;
+                ctx.beginPath();
+                ctx.arc(px, 110 + y, 6, 0, Math.PI * 2);
+                ctx.stroke();
+                // Bolt details
+                for (let j = 0; j < 6; j++) {
+                    const a = j * Math.PI / 3;
+                    ctx.beginPath();
+                    ctx.arc(px + Math.cos(a) * 10.5, 110 + y + Math.sin(a) * 10.5, 0.6, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.lineWidth = 2;
+            }
+            
+            // Bow details
+            ctx.lineWidth = 1.5;
+            // Bow thruster vent
+            ctx.strokeRect(505, 100 + y, 12, 8);
+            // Bow thruster cross
+            ctx.lineWidth = 0.5;
+            ctx.beginPath();
+            ctx.moveTo(505, 100 + y);
+            ctx.lineTo(517, 108 + y);
+            ctx.moveTo(517, 100 + y);
+            ctx.lineTo(505, 108 + y);
+            ctx.stroke();
+            
+            // Anchor with chain
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(510, 90 + y);
+            ctx.lineTo(510, 108 + y);
+            ctx.moveTo(504, 103 + y);
+            ctx.lineTo(516, 103 + y);
+            ctx.moveTo(507, 106 + y);
+            ctx.lineTo(513, 106 + y);
+            ctx.stroke();
+            // Chain
+            ctx.lineWidth = 0.5;
+            for (let i = 0; i < 5; i++) {
+                ctx.strokeRect(508 + i * 0.5, 108 + y + i * 2, 2, 2);
+            }
+            
+            // Bow railings and pulpit
+            ctx.lineWidth = 1;
+            ctx.setLineDash([2, 2]);
+            ctx.beginPath();
+            ctx.moveTo(500, 80 + y);
+            ctx.lineTo(518, 80 + y);
+            ctx.lineTo(520, 85 + y);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            
+            // Side deck railings
+            ctx.setLineDash([3, 3]);
+            ctx.beginPath();
+            ctx.moveTo(50, 80 + y);
+            ctx.lineTo(145, 80 + y);
+            ctx.moveTo(355, 80 + y);
+            ctx.lineTo(500, 80 + y);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            
+            // Stanchions (railing posts)
+            ctx.lineWidth = 1;
+            for (let i = 0; i < 8; i++) {
+                const sx = 60 + i * 55;
+                if (sx < 145 || sx > 355) {
+                    ctx.beginPath();
+                    ctx.moveTo(sx, 80 + y);
+                    ctx.lineTo(sx, 85 + y);
+                    ctx.stroke();
+                }
+            }
+            
+            // Swim platform
+            ctx.lineWidth = 1.5;
+            ctx.strokeRect(10, 168 + y, 30, 8);
+            // Swim ladder
+            ctx.lineWidth = 0.5;
+            ctx.beginPath();
+            ctx.moveTo(15, 176 + y);
+            ctx.lineTo(15, 188 + y);
+            ctx.moveTo(22, 176 + y);
+            ctx.lineTo(22, 188 + y);
+            for (let i = 0; i < 3; i++) {
+                ctx.moveTo(15, 178 + i*3 + y);
+                ctx.lineTo(22, 178 + i*3 + y);
+            }
+            ctx.stroke();
+            
+            // Rudder with stock
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(25, 168 + y);
+            ctx.lineTo(25, 195 + y);
+            ctx.lineTo(45, 187 + y);
+            ctx.closePath();
+            ctx.stroke();
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(30, 175 + y);
+            ctx.lineTo(40, 180 + y);
+            ctx.stroke();
+            
+            // Propeller shaft and prop
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(45, 175 + y);
+            ctx.lineTo(55, 180 + y);
+            ctx.stroke();
+            // Shaft strut
+            ctx.beginPath();
+            ctx.moveTo(52, 168 + y);
+            ctx.lineTo(56, 180 + y);
+            ctx.stroke();
+            
+            ctx.beginPath();
+            ctx.arc(58, 182 + y, 10, 0, Math.PI * 2);
+            ctx.stroke();
+            // Prop blades
+            for (let i = 0; i < 3; i++) {
+                const angle = (i * Math.PI * 2) / 3;
+                ctx.beginPath();
+                ctx.moveTo(58, 182 + y);
+                ctx.lineTo(58 + Math.cos(angle) * 10, 182 + y + Math.sin(angle) * 10);
+                ctx.stroke();
+            }
+            
+            // Stabilizer fin
+            ctx.beginPath();
+            ctx.moveTo(250, 168 + y);
+            ctx.lineTo(250, 178 + y);
+            ctx.lineTo(260, 175 + y);
+            ctx.closePath();
+            ctx.stroke();
+            
+            // Bilge keel
+            ctx.lineWidth = 0.8;
+            ctx.beginPath();
+            ctx.moveTo(180, 165 + y);
+            ctx.lineTo(330, 165 + y);
+            ctx.stroke();
+            
+            // Boot top stripe
+            ctx.strokeStyle = lightBlue;
+            ctx.lineWidth = 0.5;
+            ctx.beginPath();
+            ctx.moveTo(15, 145 + y);
+            ctx.lineTo(510, 145 + y);
+            ctx.stroke();
+            
+            // Exhaust outlets
+            ctx.strokeStyle = blue;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(75, 150 + y, 2.5, 0, Math.PI * 2);
+            ctx.arc(90, 150 + y, 2.5, 0, Math.PI * 2);
+            ctx.stroke();
+            
+            // Navigation lights
+            ctx.fillStyle = blue;
+            ctx.fillRect(0, 105 + y, 4, 4);
+            ctx.fillRect(522, 90 + y, 4, 4);
+            ctx.fillRect(270, 5 + y, 4, 4);
+            
+            // Fenders
+            ctx.strokeStyle = blue;
+            ctx.lineWidth = 1;
+            for (let i = 0; i < 4; i++) {
+                ctx.beginPath();
+                ctx.arc(100 + i * 100, 165 + y, 3, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+            
+            // DIMENSIONS
+            // LOA
+            dimLine(ctx, 0, 150 + y, 525, 150 + y, '35.0 m LOA', 60);
+            // Beam at deck (height)
+            dimLine(ctx, 0, 75 + y, 0, 150 + y, '4.2 m', -35);
+            // Draft
+            dimLine(ctx, 525, 142 + y, 525, 168 + y, '1.8 m', 35);
+            // Air draft
+            dimLine(ctx, 525, 5 + y, 525, 75 + y, '8.5 m', 75);
+            
+            // Labels (callouts) with leader lines
+            ctx.strokeStyle = lightBlue;
+            ctx.fillStyle = lightBlue;
+            ctx.lineWidth = 0.5;
+            ctx.font = '8px Courier New';
+            
+            function callout(fx, fy, tx, ty, label) {
+                ctx.beginPath();
+                ctx.moveTo(fx, fy);
+                ctx.lineTo(tx, ty);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.arc(fx, fy, 1, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillText(label, tx + 2, ty);
+            }
+            
+            callout(270, 5 + y, 320, -5 + y, 'RADAR');
+            callout(510, 95 + y, 555, 88 + y, 'ANCHOR');
+            callout(58, 182 + y, 100, 200 + y, 'PROP');
+            callout(25, 185 + y, -15, 200 + y, 'RUDDER');
+            callout(270, 15 + y, 330, 2 + y, 'BRIDGE');
+            callout(250, 47 + y, 320, 32 + y, 'FLYBRIDGE');
+            callout(70, 110 + y, 30, 105 + y, 'PORTHOLE');
+            
+            ctx.restore();
+        }
+
+        function drawDeck(ctx, w, h, y, alpha, shrink) {
+            const baseScale = Math.min(w / 700, h / 900);
+            const scale = baseScale * (shrink || 1);
+            const offsetX = (w - 700 * scale) / 2;
+            const offsetY = h * 0.05;
+            
+            ctx.save();
+            ctx.translate(offsetX + 87 * scale, offsetY + 400 * baseScale + y * scale);
+            ctx.scale(scale, scale);
+            ctx.globalAlpha = alpha;
+            ctx.strokeStyle = blue;
+            ctx.lineWidth = 2;
+            
+            // Hull outline from above
+            ctx.beginPath();
+            ctx.moveTo(525, 100);
+            ctx.bezierCurveTo(510, 70, 490, 55, 450, 55);
+            ctx.lineTo(100, 55);
+            ctx.bezierCurveTo(50, 55, 25, 75, 0, 100);
+            ctx.bezierCurveTo(25, 125, 50, 145, 100, 145);
+            ctx.lineTo(450, 145);
+            ctx.bezierCurveTo(490, 145, 510, 130, 525, 100);
+            ctx.closePath();
+            ctx.stroke();
+            
+            // Centerline
+            ctx.strokeStyle = lightBlue;
+            ctx.lineWidth = 0.5;
+            ctx.setLineDash([6, 3, 1, 3]);
+            ctx.beginPath();
+            ctx.moveTo(-10, 100);
+            ctx.lineTo(540, 100);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.font = '8px Courier New';
+            ctx.fillStyle = lightBlue;
+            ctx.fillText('CL', -8, 98);
+            
+            // Frame stations (couples)
+            ctx.strokeStyle = lightBlue;
+            ctx.lineWidth = 0.4;
+            ctx.setLineDash([3, 3]);
+            for (let i = 1; i < 11; i++) {
+                const sx = 25 + i * 47;
+                ctx.beginPath();
+                ctx.moveTo(sx, 60);
+                ctx.lineTo(sx, 140);
+                ctx.stroke();
+                ctx.font = '7px Courier New';
+                ctx.fillStyle = lightBlue;
+                ctx.fillText('#' + i, sx - 4, 52);
+            }
+            ctx.setLineDash([]);
+            
+            // Main cabin
+            ctx.strokeStyle = blue;
+            ctx.lineWidth = 2;
+            ctx.strokeRect(150, 75, 200, 50);
+            
+            // Cabin interior walls & layout
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(150, 100);
+            ctx.lineTo(350, 100);
+            ctx.moveTo(220, 75);
+            ctx.lineTo(220, 125);
+            ctx.moveTo(280, 75);
+            ctx.lineTo(280, 125);
+            ctx.stroke();
+            
+            // Cabin labels
+            ctx.font = '7px Courier New';
+            ctx.fillStyle = lightBlue;
+            ctx.textAlign = 'center';
+            ctx.fillText('GALLEY', 185, 90);
+            ctx.fillText('SALON', 250, 90);
+            ctx.fillText('CABIN', 315, 90);
+            ctx.fillText('HEAD', 185, 115);
+            ctx.fillText('DINING', 250, 115);
+            ctx.fillText('CABIN', 315, 115);
+            ctx.textAlign = 'left';
+            
+            // Cockpit (rear open area)
+            ctx.lineWidth = 2;
+            ctx.strokeRect(40, 85, 90, 30);
+            
+            // Cockpit seating (L-shaped settee)
+            ctx.lineWidth = 1;
+            ctx.strokeRect(50, 90, 35, 8);
+            ctx.strokeRect(50, 90, 8, 20);
+            // Cockpit table
+            ctx.strokeRect(95, 95, 20, 15);
+            // Helm seat
+            ctx.beginPath();
+            ctx.arc(120, 90, 3, 0, Math.PI * 2);
+            ctx.stroke();
+            
+            // Forward deck hatch
+            ctx.strokeRect(375, 90, 60, 20);
+            ctx.beginPath();
+            ctx.moveTo(375, 100);
+            ctx.lineTo(435, 100);
+            ctx.stroke();
+            ctx.font = '6px Courier New';
+            ctx.fillText('HATCH', 392, 103);
+            
+            // Sun pad on bow
+            ctx.lineWidth = 0.5;
+            ctx.setLineDash([1, 1]);
+            ctx.strokeRect(440, 85, 25, 30);
+            ctx.setLineDash([]);
+            ctx.font = '5px Courier New';
+            ctx.fillText('SUNPAD', 443, 103);
+            
+            // Side decks
+            ctx.strokeStyle = lightBlue;
+            ctx.lineWidth = 1.5;
+            [75, 125].forEach(yy => { 
+                ctx.beginPath(); 
+                ctx.moveTo(100, yy); 
+                ctx.lineTo(450, yy); 
+                ctx.stroke(); 
+            });
+            
+            // Teak deck planking pattern
+            ctx.strokeStyle = lightBlue;
+            ctx.lineWidth = 0.2;
+            for (let i = 0; i < 20; i++) {
+                ctx.beginPath();
+                ctx.moveTo(100 + i * 17.5, 55);
+                ctx.lineTo(100 + i * 17.5, 75);
+                ctx.moveTo(100 + i * 17.5, 125);
+                ctx.lineTo(100 + i * 17.5, 145);
+                ctx.stroke();
+            }
+            
+            // Anchor windlass
+            ctx.strokeStyle = blue;
+            ctx.lineWidth = 1.5;
+            ctx.strokeRect(460, 90, 40, 20);
+            ctx.beginPath();
+            ctx.arc(480, 100, 6, 0, Math.PI * 2);
+            ctx.stroke();
+            // Chain locker arrow
+            ctx.lineWidth = 0.5;
+            ctx.beginPath();
+            ctx.moveTo(495, 100);
+            ctx.lineTo(503, 100);
+            ctx.lineTo(500, 97);
+            ctx.moveTo(503, 100);
+            ctx.lineTo(500, 103);
+            ctx.stroke();
+            
+            // Cleats (mooring points) - bollards
+            ctx.fillStyle = blue;
+            for (let i = 0; i < 4; i++) { 
+                ctx.fillRect(75 + i * 110, 57, 8, 5);
+                ctx.fillRect(75 + i * 110, 138, 8, 5);
+                ctx.strokeRect(75 + i * 110, 57, 8, 5);
+                ctx.strokeRect(75 + i * 110, 138, 8, 5);
+            }
+            
+            // Fairleads (chocks)
+            ctx.lineWidth = 0.8;
+            for (let i = 0; i < 3; i++) {
+                ctx.beginPath();
+                ctx.arc(120 + i * 110, 56, 2, Math.PI, 2 * Math.PI);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.arc(120 + i * 110, 144, 2, 0, Math.PI);
+                ctx.stroke();
+            }
+            
+            // Capstan winches
+            ctx.lineWidth = 1;
+            [60, 440].forEach(cx => {
+                ctx.beginPath();
+                ctx.arc(cx, 65, 3, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.arc(cx, 135, 3, 0, Math.PI * 2);
+                ctx.stroke();
+            });
+            
+            // Mast
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.arc(300, 100, 8, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.fillStyle = blue;
+            ctx.fill();
+            ctx.strokeStyle = lightBlue;
+            ctx.lineWidth = 0.5;
+            ctx.beginPath();
+            ctx.moveTo(300, 92);
+            ctx.lineTo(300, 108);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(292, 100);
+            ctx.lineTo(308, 100);
+            ctx.stroke();
+            
+            // Helm/steering wheel
+            ctx.strokeStyle = blue;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(200, 95, 5, 0, Math.PI * 2);
+            ctx.stroke();
+            // Spokes
+            ctx.lineWidth = 0.4;
+            for (let i = 0; i < 4; i++) {
+                const a = i * Math.PI / 4;
+                ctx.beginPath();
+                ctx.moveTo(200 - Math.cos(a)*5, 95 - Math.sin(a)*5);
+                ctx.lineTo(200 + Math.cos(a)*5, 95 + Math.sin(a)*5);
+                ctx.stroke();
+            }
+            
+            // Davits (for tender)
+            ctx.lineWidth = 1;
+            ctx.strokeRect(50, 110, 10, 3);
+            ctx.strokeRect(115, 110, 10, 3);
+            
+            // Tender (dinghy) outline on swim platform
+            ctx.lineWidth = 0.5;
+            ctx.setLineDash([2, 2]);
+            ctx.beginPath();
+            ctx.moveTo(0, 95);
+            ctx.bezierCurveTo(-5, 90, -5, 110, 0, 105);
+            ctx.lineTo(35, 105);
+            ctx.bezierCurveTo(40, 103, 40, 97, 35, 95);
+            ctx.closePath();
+            ctx.stroke();
+            ctx.setLineDash([]);
+            
+            // Life rings
+            ctx.lineWidth = 0.8;
+            ctx.beginPath();
+            ctx.arc(140, 70, 2.5, 0, Math.PI * 2);
+            ctx.arc(140, 130, 2.5, 0, Math.PI * 2);
+            ctx.stroke();
+            
+            // Deck details - scuppers
+            ctx.fillStyle = blue;
+            for (let i = 0; i < 6; i++) {
+                ctx.fillRect(120 + i * 50, 58, 2, 2);
+                ctx.fillRect(120 + i * 50, 140, 2, 2);
+            }
+            
+            // Fuel & water fill caps
+            ctx.lineWidth = 0.8;
+            ctx.strokeStyle = blue;
+            ctx.beginPath();
+            ctx.arc(160, 65, 2, 0, Math.PI * 2);
+            ctx.arc(180, 65, 2, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.font = '5px Courier New';
+            ctx.fillStyle = lightBlue;
+            ctx.fillText('F', 158, 67);
+            ctx.fillText('W', 178, 67);
+            
+            // DIMENSIONS on deck plan
+            dimLine(ctx, 0, 100, 525, 100, '35.0 m', 60);
+            dimLine(ctx, 250, 55, 250, 145, '6.5 m BEAM', -50);
+            
+            // Bow/stern labels
+            ctx.fillStyle = lightBlue;
+            ctx.font = 'bold 9px Courier New';
+            ctx.textAlign = 'center';
+            ctx.fillText('STERN', 30, 165);
+            ctx.fillText('BOW', 510, 165);
+            ctx.font = '7px Courier New';
+            ctx.fillText('PORT', 250, 40);
+            ctx.fillText('STBD', 250, 160);
+            ctx.textAlign = 'left';
+            
+            // Compass rose
+            ctx.strokeStyle = blue;
+            ctx.lineWidth = 0.8;
+            ctx.beginPath();
+            ctx.arc(530, 30, 12, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(530, 18);
+            ctx.lineTo(533, 30);
+            ctx.lineTo(530, 42);
+            ctx.lineTo(527, 30);
+            ctx.closePath();
+            ctx.stroke();
+            ctx.fillStyle = blue;
+            ctx.beginPath();
+            ctx.moveTo(530, 18);
+            ctx.lineTo(533, 30);
+            ctx.lineTo(530, 30);
+            ctx.closePath();
+            ctx.fill();
+            ctx.font = '7px Courier New';
+            ctx.fillStyle = lightBlue;
+            ctx.textAlign = 'center';
+            ctx.fillText('N', 530, 16);
+            ctx.textAlign = 'left';
+            
+            ctx.restore();
+        }
+
+        function drawSection(ctx, w, h, rot, y, alpha) {
+            const scale = Math.min(w / 700, h / 900);
+            const offsetX = (w - 700 * scale) / 2;
+            const offsetY = h * 0.05;
+            
+            ctx.save();
+            ctx.translate(offsetX + 87 * scale, offsetY + (600 + y) * scale);
+            ctx.scale(scale, scale);
+            ctx.translate(262, 87);
+            ctx.rotate(rot);
+            ctx.translate(-262, -87);
+            ctx.globalAlpha = alpha;
+            ctx.strokeStyle = blue;
+            ctx.lineWidth = 2;
+            
+            // Hull cross-section
+            ctx.beginPath();
+            ctx.moveTo(150, 100 + y);
+            ctx.bezierCurveTo(150, 140 + y, 170, 160 + y, 200, 170 + y);
+            ctx.lineTo(325, 170 + y);
+            ctx.bezierCurveTo(355, 160 + y, 375, 140 + y, 375, 100 + y);
+            ctx.lineTo(375, 75 + y);
+            ctx.lineTo(150, 75 + y);
+            ctx.closePath();
+            ctx.stroke();
+            
+            // Hull thickness (double-skin)
+            ctx.lineWidth = 0.8;
+            ctx.beginPath();
+            ctx.moveTo(155, 100 + y);
+            ctx.bezierCurveTo(155, 138 + y, 173, 156 + y, 202, 165 + y);
+            ctx.lineTo(323, 165 + y);
+            ctx.bezierCurveTo(352, 156 + y, 370, 138 + y, 370, 100 + y);
+            ctx.lineTo(370, 78 + y);
+            ctx.stroke();
+            
+            // Waterline
+            ctx.strokeStyle = lightBlue;
+            ctx.lineWidth = 0.5;
+            ctx.setLineDash([6, 3]);
+            ctx.beginPath();
+            ctx.moveTo(140, 142 + y);
+            ctx.lineTo(385, 142 + y);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.font = '8px Courier New';
+            ctx.fillStyle = lightBlue;
+            ctx.fillText('DWL', 388, 144 + y);
+            
+            // Deck
+            ctx.strokeStyle = blue;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(150, 75 + y);
+            ctx.lineTo(375, 75 + y);
+            ctx.stroke();
+            
+            // Deck beams (structural)
+            ctx.lineWidth = 0.5;
+            for (let i = 0; i < 4; i++) {
+                ctx.strokeRect(160 + i * 55, 75 + y, 4, 3);
+            }
+            
+            // Cabin structure
+            ctx.lineWidth = 2;
+            ctx.strokeRect(210, 30 + y, 105, 45);
+            
+            // Cabin interior details (windows)
+            ctx.lineWidth = 1;
+            ctx.strokeRect(220, 38 + y, 20, 30);
+            ctx.strokeRect(245, 38 + y, 20, 30);
+            ctx.strokeRect(270, 38 + y, 20, 30);
+            ctx.strokeRect(295, 38 + y, 15, 30);
+            
+            // Roof / coachroof
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(210, 30 + y);
+            ctx.lineTo(315, 30 + y);
+            ctx.stroke();
+            
+            // Interior deck/floor (cabin sole)
+            ctx.strokeStyle = lightBlue;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(165, 100 + y);
+            ctx.lineTo(360, 100 + y);
+            ctx.stroke();
+            ctx.font = '6px Courier New';
+            ctx.fillStyle = lightBlue;
+            ctx.fillText('SOLE', 250, 98 + y);
+            
+            // Bilge
+            ctx.strokeStyle = blue;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(170, 145 + y);
+            ctx.bezierCurveTo(180, 155 + y, 190, 160 + y, 200, 162 + y);
+            ctx.lineTo(325, 162 + y);
+            ctx.bezierCurveTo(335, 160 + y, 345, 155 + y, 355, 145 + y);
+            ctx.stroke();
+            
+            // FRAMES (couples / varangues) - shown as cross-hatched structural members
+            ctx.strokeStyle = lightBlue;
+            ctx.lineWidth = 0.8;
+            // Floor frame (varangue) at bottom
+            ctx.beginPath();
+            ctx.moveTo(200, 170 + y);
+            ctx.lineTo(200, 162 + y);
+            ctx.lineTo(325, 162 + y);
+            ctx.lineTo(325, 170 + y);
+            ctx.stroke();
+            
+            // Stringers (longitudinal) shown as dots in section
+            ctx.fillStyle = blue;
+            for (let i = 0; i < 4; i++) {
+                const sy = 100 + i * 15 + y;
+                ctx.beginPath();
+                ctx.arc(155, sy, 1.5, 0, Math.PI * 2);
+                ctx.arc(370, sy, 1.5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            // Longitudinal stringers in bilge
+            for (let i = 0; i < 6; i++) {
+                ctx.beginPath();
+                ctx.arc(180 + i * 33, 160 + y, 1.2, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            // Cross-frames (web frames) shown with hatching
+            ctx.strokeStyle = lightBlue;
+            ctx.lineWidth = 0.4;
+            ctx.setLineDash([1, 2]);
+            // Hatching for structural member
+            for (let i = 0; i < 8; i++) {
+                ctx.beginPath();
+                ctx.moveTo(155 + i, 100 + y);
+                ctx.lineTo(155, 100 + y + i);
+                ctx.stroke();
+            }
+            ctx.setLineDash([]);
+            
+            // Stringers (structural supports diagonal)
+            ctx.strokeStyle = lightBlue;
+            ctx.setLineDash([2, 2]);
+            for (let i = 0; i < 4; i++) {
+                ctx.beginPath();
+                ctx.moveTo(190 + i * 35, 100 + y);
+                ctx.lineTo(185 + i * 35, 150 + y);
+                ctx.stroke();
+            }
+            ctx.setLineDash([]);
+            
+            // Fuel/water tanks indication
+            ctx.strokeStyle = blue;
+            ctx.lineWidth = 1;
+            ctx.strokeRect(175, 120 + y, 30, 25);
+            ctx.strokeRect(320, 120 + y, 30, 25);
+            // Tank hatching
+            ctx.lineWidth = 0.3;
+            for (let i = 0; i < 6; i++) {
+                ctx.beginPath();
+                ctx.moveTo(175 + i * 5, 120 + y);
+                ctx.lineTo(175, 120 + i * 5 + y);
+                ctx.moveTo(320 + i * 5, 120 + y);
+                ctx.lineTo(320, 120 + i * 5 + y);
+                ctx.stroke();
+            }
+            ctx.font = '8px Courier New';
+            ctx.fillStyle = blue;
+            ctx.fillText('FUEL', 182, 135 + y);
+            ctx.fillText('WATER', 322, 135 + y);
+            
+            // Engine indication (centerline)
+            ctx.lineWidth = 1;
+            ctx.strokeRect(235, 130 + y, 55, 20);
+            ctx.font = '7px Courier New';
+            ctx.fillStyle = lightBlue;
+            ctx.fillText('ENGINE', 247, 142 + y);
+            // Engine bolts
+            ctx.fillStyle = blue;
+            for (let i = 0; i < 4; i++) {
+                ctx.beginPath();
+                ctx.arc(240 + i * 15, 148 + y, 0.8, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            // Keel indication
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = blue;
+            ctx.beginPath();
+            ctx.moveTo(250, 170 + y);
+            ctx.lineTo(250, 185 + y);
+            ctx.lineTo(275, 185 + y);
+            ctx.lineTo(275, 170 + y);
+            ctx.stroke();
+            // Keel ballast hatching
+            ctx.lineWidth = 0.3;
+            for (let i = 0; i < 5; i++) {
+                ctx.beginPath();
+                ctx.moveTo(250 + i * 5, 170 + y);
+                ctx.lineTo(255 + i * 5, 185 + y);
+                ctx.stroke();
+            }
+            
+            // Handrails on cabin top
+            ctx.lineWidth = 0.8;
+            ctx.strokeStyle = blue;
+            ctx.beginPath();
+            ctx.moveTo(215, 28 + y);
+            ctx.lineTo(215, 25 + y);
+            ctx.lineTo(310, 25 + y);
+            ctx.lineTo(310, 28 + y);
+            ctx.stroke();
+            
+            // Section label
+            ctx.font = 'bold 8px Courier New';
+            ctx.fillStyle = lightBlue;
+            ctx.fillText('STA. 5', 250, 25 + y);
+            
+            // DIMENSIONS on section
+            dimLine(ctx, 150, 100 + y, 375, 100 + y, '6.5 m BEAM', -45);
+            dimLine(ctx, 140, 75 + y, 140, 170 + y, '3.2 m', -25);
+            dimLine(ctx, 385, 142 + y, 385, 170 + y, '1.8 m', 25);
+            
+            // Callouts
+            ctx.strokeStyle = lightBlue;
+            ctx.fillStyle = lightBlue;
+            ctx.lineWidth = 0.5;
+            ctx.font = '7px Courier New';
+            
+            function callout(fx, fy, tx, ty, label) {
+                ctx.beginPath();
+                ctx.moveTo(fx, fy);
+                ctx.lineTo(tx, ty);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.arc(fx, fy, 1, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillText(label, tx + 2, ty);
+            }
+            
+            callout(155, 130 + y, 110, 125 + y, 'HULL');
+            callout(200, 162 + y, 155, 175 + y, 'VARANGUE');
+            callout(370, 110 + y, 415, 105 + y, 'STRINGER');
+            callout(262, 175 + y, 290, 195 + y, 'KEEL');
+            callout(263, 130 + y, 220, 115 + y, 'ENGINE');
+            
+            ctx.restore();
+        }
+
+        function drawFrame(c, phase, rot, y, wy, alpha, animT) {
+            const ctx = c.getContext('2d');
+            const w = c.width;
+            const h = c.height;
+            const scale = Math.min(w / 700, h / 900);
+            const offsetX = (w - 700 * scale) / 2;
+            const offsetY = h * 0.05;
+            
+            ctx.clearRect(0, 0, w, h);
+            ctx.fillStyle = '#0d1b2a';
+            ctx.fillRect(0, 0, w, h);
+            grid2D(ctx, w, h);
+            
+            // Title block - always present
+            ctx.strokeStyle = blue;
+            ctx.lineWidth = 2;
+            ctx.strokeRect(offsetX + 50 * scale, offsetY + 20 * scale, 250 * scale, 60 * scale);
+            ctx.fillStyle = lightBlue;
+            ctx.font = `bold ${18 * scale}px Courier New`;
+            ctx.fillText('MOTOR YACHT', offsetX + 65 * scale, offsetY + 45 * scale);
+            ctx.font = `${11 * scale}px Courier New`;
+            ctx.fillText('GENERAL ARRANGEMENT', offsetX + 65 * scale, offsetY + 60 * scale);
+            ctx.font = `${9 * scale}px Courier New`;
+            ctx.fillText('Dwg: MY-001', offsetX + 65 * scale, offsetY + 72 * scale);
+            
+            // Specifications - always present
+            ctx.fillStyle = txt;
+            ctx.font = `${10 * scale}px Courier New`;
+            const specs = [
+                'SPECIFICATIONS',
+                '──────────────',
+                'Type: Motor Yacht',
+                'LOA: 35.0 m',
+                'LWL: 32.5 m',
+                'Beam: 6.5 m',
+                'Draft: 1.8 m',
+                'Displ: 85 tons',
+                'Fuel: 4,000 L',
+                'Water: 1,200 L',
+                'Crew: 2-4',
+                'Pass: 8-10'
+            ];
+            let sy = offsetY + 680 * scale;
+            specs.forEach(spec => {
+                ctx.fillText(spec, w - offsetX - 180 * scale, sy);
+                sy += 15 * scale;
+            });
+            
+            ctx.fillStyle = txt;
+            ctx.font = `bold ${14 * scale}px Courier New`;
+            ctx.textAlign = 'center';
+            ctx.fillText('SIDE ELEVATION', w * 0.5, offsetY + 105 * scale);
+            ctx.fillText('DECK PLAN', w * 0.5, offsetY + 365 * scale);
+            ctx.fillText('MIDSHIP SECTION', w * 0.5, offsetY + 565 * scale);
+            ctx.textAlign = 'left';
+            
+            drawHull(ctx, w, h, 0, y, rot, alpha);
+            drawDeck(ctx, w, h, 0, alpha, 1 - (phase || 0) * 0.05);
+            drawSection(ctx, w, h, rot, y, alpha);
+            
+            ctx.strokeStyle = blue;
+            ctx.setLineDash([8, 4]);
+            ctx.lineWidth = 0.8;
+            ctx.beginPath();
+            ctx.moveTo(offsetX + 50 * scale, offsetY + 230 * scale);
+            ctx.lineTo(w - offsetX - 50 * scale, offsetY + 230 * scale);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(offsetX + 50 * scale, offsetY + 745 * scale);
+            ctx.lineTo(w - offsetX - 50 * scale, offsetY + 745 * scale);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            
+            if (phase) {
+                if (phase > 1) {
+                    const nb = Math.floor(phase * 10);
+                    const t = animT || 0;
+                    // Animated rising bubbles
+                    for (let i = 0; i < nb; i++) {
+                        const s1 = Math.sin(i * 12.9898) * 43758.5453;
+                        const s2 = Math.sin(i * 78.233) * 12345.6789;
+                        const s3 = Math.sin(i * 4.7531) * 9876.5432;
+                        const s4 = Math.sin(i * 33.111) * 5432.1098;
+                        const rx = s1 - Math.floor(s1);
+                        const seedY = s2 - Math.floor(s2);
+                        const rs = s3 - Math.floor(s3);
+                        const speed = 0.3 + (s4 - Math.floor(s4)) * 0.7;
+                        // Cycle progress for this bubble (0..1, wraps around)
+                        const lifeT = (seedY + t * speed) % 1;
+                        const px = (offsetX + 50 * scale) + rx * (w - 2 * (offsetX + 50 * scale)) 
+                                   + Math.sin(lifeT * Math.PI * 4 + i) * 4 * scale;
+                        const py = offsetY + 335 * scale - lifeT * 100 * scale;
+                        const bubbleAlpha = Math.sin(lifeT * Math.PI) * Math.min(phase * 0.5, 1);
+                        ctx.fillStyle = `rgba(168, 216, 255, ${bubbleAlpha})`;
+                        ctx.beginPath();
+                        ctx.arc(px, py, 1 + rs * 3, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+            }
+        }
+
+        // Animate the canvas as one continuous sinking loop
+        const animCanvases = [canvases[0]];
+        const animStart = performance.now();
+        const INTRO_MS = 4500;
+        const LOOP_MS = 6000;
+        const OUTRO_MS = 5500;
+        const TOTAL_MS = INTRO_MS + LOOP_MS + OUTRO_MS;
+
+        function easeOut(t) { return 1 - Math.pow(1 - t, 3); }
+        function easeIn(t) { return t * t * t; }
+
+        function drawIntro(ctx, w, h, t) {
+            const phase = Math.min(t * 3, 3);
+            const baseAlpha = Math.min(t * 2, 1);
+            drawFrame(canvases[0], 0, 0, 0, 0, baseAlpha);
+
+            // Cinematic black bars
+            // (removed)
+
+            // Vignette
+            const vg = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, Math.max(w, h)*0.7);
+            vg.addColorStop(0, 'rgba(0,0,0,0)');
+            vg.addColorStop(1, 'rgba(0,0,0,0.6)');
+            ctx.fillStyle = vg;
+            ctx.fillRect(0, 0, w, h);
+
+            // Typewriter title
+            const title = 'IT WAS MEANT TO BE GREAT';
+            const charsShown = Math.floor(Math.min(t * 1.6, 1) * title.length);
+
+            ctx.fillStyle = '#a8d8ff';
+            ctx.font = `bold ${Math.min(w, h) * 0.045}px Courier New`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(title.substring(0, charsShown), w/2, h * 0.5);
+
+            // Blinking cursor
+            if (charsShown < title.length && Math.floor(t * 10) % 2 === 0) {
+                const tw = ctx.measureText(title.substring(0, charsShown)).width;
+                ctx.fillRect(w/2 + tw/2 + 4, h * 0.5 - Math.min(w, h) * 0.0225, 10, Math.min(w, h) * 0.045);
+            }
+
+            // Fade out at the end of intro
+            if (t > 0.85) {
+                const fade = (t - 0.85) / 0.15;
+                ctx.fillStyle = `rgba(0,0,0,${fade})`;
+                ctx.fillRect(0, 0, w, h);
+            }
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'alphabetic';
+        }
+
+        function drawOutro(ctx, w, h, t, animT) {
+            // Bateau coulé continue de s'enfoncer puis disparait
+            const sinkExtra = easeIn(Math.min(t * 1.2, 1));
+            const rot = -0.4 - sinkExtra * 0.6;
+            const yOff = 110 + sinkExtra * 200;
+            const wy = 95 + sinkExtra * 100;
+            const alpha = Math.max(0, 0.45 - t * 0.45);
+
+            drawFrame(canvases[0], 3, rot, yOff, wy, alpha, animT);
+
+            // Eau qui monte et envahit tout
+            const waterCover = easeOut(Math.min(t * 1.3, 1));
+            ctx.fillStyle = 'rgba(13, 27, 42, ' + (0.5 + waterCover * 0.5) + ')';
+            ctx.fillRect(0, 0, w, h);
+
+            // Cinematic bars
+            // (removed)
+
+            // Final text fade in
+            const textT = Math.max(0, Math.min((t - 0.35) * 1.8, 1));
+            ctx.globalAlpha = textT;
+
+            // Vignette behind text
+            const vg = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, Math.max(w, h)*0.5);
+            vg.addColorStop(0, 'rgba(0,0,0,0.7)');
+            vg.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = vg;
+            ctx.fillRect(0, 0, w, h);
+
+            ctx.fillStyle = '#a8d8ff';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.font = `${Math.min(w, h) * 0.025}px Courier New`;
+            ctx.fillText("BUT IT'S GONE WRONG AGAIN", w/2, h * 0.38);
+
+            ctx.font = `bold ${Math.min(w, h) * 0.07}px Courier New`;
+            ctx.fillStyle = '#6db3f2';
+            ctx.fillText('DESIGNED', w/2, h * 0.5);
+            ctx.fillText('TO FAIL', w/2, h * 0.6);
+
+            ctx.globalAlpha = 1;
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'alphabetic';
+        }
+
+        function animateSinking(now) {
+            const elapsed = (now - animStart) % TOTAL_MS;
+            const c = canvases[0];
+            const ctx = c.getContext('2d');
+
+            if (elapsed < INTRO_MS) {
+                drawIntro(ctx, c.width, c.height, elapsed / INTRO_MS);
+            } else if (elapsed < INTRO_MS + LOOP_MS) {
+                const raw = (elapsed - INTRO_MS) / LOOP_MS;
+                // Hold on intact plan for 2s, then sink for the rest
+                const HOLD = 2000 / LOOP_MS;
+                const t = raw < HOLD ? 0 : (raw - HOLD) / (1 - HOLD);
+                const phase = t * 3;
+                const rot = -t * 0.4;
+                const y = t * 110;
+                const wy = t * 95;
+                const alpha = 1 - t * 0.55;
+                drawFrame(c, phase, rot, y, wy, alpha, now / 1000);
+            } else {
+                const t = (elapsed - INTRO_MS - LOOP_MS) / OUTRO_MS;
+                drawOutro(ctx, c.width, c.height, t, now / 1000);
+            }
+
+            requestAnimationFrame(animateSinking);
+        }
+        requestAnimationFrame(animateSinking);
+        
+        // Draw opening slide "IT WAS MEANT TO BE GREAT"
+        // (removed)
+        
+        // Outro slide removed
+        
+        // Auto-scroll animation
+        let currentSlide = 0;
+        const totalSlides = 1;
+        
+        function scrollToSlide(index) {}
+        function nextSlide() {}
+        
+        // Disable user interaction
+        document.body.style.pointerEvents = 'none';
+        document.body.style.userSelect = 'none';
+        window.addEventListener('wheel', (e) => e.preventDefault(), { passive: false });
+        window.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+        
+        // Start animation after 2 seconds
+        setTimeout(nextSlide, 2000);
+    </script>
+</body>
+</html>

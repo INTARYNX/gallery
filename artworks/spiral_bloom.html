@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  * { margin: 0; padding: 0; }
+  body { background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H, t = 0;
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+function hsl(h, s, l, a) {
+  return `hsla(${h},${s}%,${l}%,${a})`;
+}
+
+const spirals = 6;
+const arms = 3;
+
+function draw() {
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.045)';
+  ctx.fillRect(0, 0, W, H);
+
+  const cx = W / 2;
+  const cy = H / 2;
+  const maxR = Math.min(W, H) * 0.45;
+  const accentHue = (t * 0.4) % 360;
+
+  for (let s = 0; s < spirals; s++) {
+    const dir = s % 2 === 0 ? 1 : -1;
+    const baseAngle = (s / spirals) * Math.PI * 2;
+    const speed = 0.008 + s * 0.002;
+
+    for (let a = 0; a < arms; a++) {
+      const armOffset = (a / arms) * Math.PI * 2;
+      const steps = 300;
+      const isAccent = (s === 0 && a === 0);
+
+      for (let layer = 2; layer >= 0; layer--) {
+        ctx.beginPath();
+        for (let i = 0; i <= steps; i++) {
+          const frac = i / steps;
+          const r = frac * maxR;
+          const spiralTwist = frac * Math.PI * 6;
+          const wave = Math.sin(frac * 8 - t * 0.03 * dir) * 20 * frac;
+          const breathe = Math.sin(t * 0.008 + frac * 3) * 12 * frac;
+          const wobble = Math.cos(frac * 14 + t * 0.02) * 8 * frac;
+          const angle = baseAngle + armOffset + spiralTwist * dir + t * speed * dir;
+
+          const x = cx + Math.cos(angle) * (r + wave + breathe + wobble);
+          const y = cy + Math.sin(angle) * (r + wave + breathe + wobble);
+
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+
+        if (isAccent) {
+          ctx.strokeStyle = hsl(accentHue, 100, 55 + layer * 10, 0.3 + layer * 0.25);
+          ctx.shadowColor = hsl(accentHue, 100, 60, 0.6);
+          ctx.shadowBlur = 15;
+        } else {
+          const white = 35 + layer * 20;
+          ctx.strokeStyle = `rgba(${white},${white},${white},${0.12 + layer * 0.12})`;
+          ctx.shadowBlur = 0;
+        }
+
+        ctx.lineWidth = 5 - layer * 1.5;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+      }
+    }
+  }
+
+  // Mandala central
+  const petals = 12;
+  const petalR = 30 + Math.sin(t * 0.02) * 10;
+  for (let i = 0; i < petals; i++) {
+    const angle = (i / petals) * Math.PI * 2 + t * 0.005;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(angle);
+    ctx.beginPath();
+    ctx.ellipse(petalR, 0, petalR * 0.6, petalR * 0.25, 0, 0, Math.PI * 2);
+    ctx.fillStyle = hsl(accentHue, 100, 55, 0.12 + Math.sin(t * 0.03 + i) * 0.08);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Centre accent
+  const pulse = Math.sin(t * 0.02) * 0.3 + 0.7;
+  const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, 25 * pulse);
+  grad.addColorStop(0, hsl(accentHue, 100, 70, 0.9 * pulse));
+  grad.addColorStop(0.5, hsl(accentHue, 80, 40, 0.3 * pulse));
+  grad.addColorStop(1, 'transparent');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(cx, cy, 25 * pulse, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Scanlines circulaires
+  for (let r = 0; r < Math.max(W, H); r += 6) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.12)';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+  }
+
+  t++;
+  requestAnimationFrame(draw);
+}
+
+draw();
+</script>
+</body>
+</html>

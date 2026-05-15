@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fading Memories</title>
+  <style>
+    body {
+      margin: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      background: #1a1a1a;
+    }
+    canvas {
+      border: 2px solid #333;
+      box-shadow: 0 0 15px rgba(255, 255, 255, 0.1);
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d', { alpha: false });
+    canvas.width = 500;
+    canvas.height = 600;
+
+    ctx.imageSmoothingEnabled = false;
+
+    const centerX = canvas.width / 2;
+    const allSand = [];
+    const maxParticles = 5000;
+    const particleSize = 2;
+    let frameCount = 0;
+    const updateEveryNFrames = 1;
+    let allAliensDestroyedFrame = -1;
+    let screenShutdownProgress = 0;
+    
+    // Generate random stars once
+    const stars = [];
+    for (let i = 0; i < 200; i++) {
+      stars.push({
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height,
+        size: Math.floor(Math.random() * 3) + 1,
+        twinkleSpeed: Math.random() * 0.1 + 0.02,
+        twinkleOffset: Math.random() * Math.PI * 2
+      });
+    }
+
+    // Alien explosion tracking
+    const totalAliens = 15; // 3 rows x 5 columns
+    const aliensDestroyed = [];
+    const alienOrder = []; // Random order for destruction
+    for (let i = 0; i < totalAliens; i++) {
+      aliensDestroyed.push({ dead: false, explosionFrame: 0 });
+      alienOrder.push(i);
+    }
+    // Shuffle alien destruction order
+    for (let i = alienOrder.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [alienOrder[i], alienOrder[j]] = [alienOrder[j], alienOrder[i]];
+    }
+
+    const gridSize = 6;
+    const gridCols = Math.ceil(canvas.width / gridSize);
+    const gridRows = Math.ceil(canvas.height / gridSize);
+    const spatialGrid = Array.from({ length: gridRows }, () => 
+      Array.from({ length: gridCols }, () => [])
+    );
+
+    const offscreenCanvas = document.createElement('canvas');
+    offscreenCanvas.width = canvas.width;
+    offscreenCanvas.height = canvas.height;
+    const offscreenCtx = offscreenCanvas.getContext('2d', { alpha: false });
+    offscreenCtx.imageSmoothingEnabled = false;
+
+    class SandParticle {
+      constructor(x, y, isTop = true) {
+        this.x = Math.round(x);
+        this.y = Math.round(y);
+        this.isTop = isTop;
+        this.offsetX = x / canvas.width;
+        this.offsetY = y / canvas.height;
+        this.brightness = Math.random() * 255;
+        this.gridX = -1;
+        this.gridY = -1;
+        this.r = 0;
+        this.g = 0;
+        this.b = 0;
+        this.sizeJitter = Math.random() < 0.1 ? 1 : 0;
+        this.colorFade = 1.0; // Starts at full color
+      }
+
+      updateColor(time) {
+        if (this.isTop) {
+          this.r = (Math.sin(time * 0.5 + this.offsetX * 10) * 127 + 128) | 0;
+          this.g = (Math.sin(time * 0.7 + this.offsetY * 10 + 2) * 127 + 128) | 0;
+          this.b = (Math.sin(time * 0.9 + (this.offsetX + this.offsetY) * 5 + 4) * 127 + 128) | 0;
+        } else {
+          // Gradually fade from color to grayscale
+          const targetBr = this.brightness | 0;
+          this.r = (this.r * this.colorFade + targetBr * (1 - this.colorFade)) | 0;
+          this.g = (this.g * this.colorFade + targetBr * (1 - this.colorFade)) | 0;
+          this.b = (this.b * this.colorFade + targetBr * (1 - this.colorFade)) | 0;
+          
+          // Slowly reduce color fade
+          if (this.colorFade > 0) {
+            this.colorFade -= 0.005;
+            if (this.colorFade < 0) this.colorFade = 0;
+          }
+        }
+      }
+
+      updateStatic() {
+        if (!this.isTop && Math.random() < 0.05) {
+          this.brightness = Math.random() * 255;
+        }
+      }
+    }
+
+    const hourglassPath = new Path2D();
+    let glassGradient;
+
+    function initHourglassPath() {
+      glassGradient = ctx.createLinearGradient(150, 80, 350, 520);
+      glassGradient.addColorStop(0, 'rgba(255,255,255,0.15)');
+      glassGradient.addColorStop(0.3, 'rgba(255,255,255,0.05)');
+      glassGradient.addColorStop(0.5, 'rgba(255,255,255,0.02)');
+      glassGradient.addColorStop(0.7, 'rgba(255,255,255,0.05)');
+      glassGradient.addColorStop(1, 'rgba(255,255,255,0.1)');
+      
+      hourglassPath.moveTo(160, 80);
+      hourglassPath.bezierCurveTo(150, 150, 190, 250, 245, 300);
+      hourglassPath.bezierCurveTo(190, 350, 150, 450, 160, 520);
+      hourglassPath.lineTo(340, 520);
+      hourglassPath.bezierCurveTo(350, 450, 310, 350, 255, 300);
+      hourglassPath.bezierCurveTo(310, 250, 350, 150, 340, 80);
+      hourglassPath.closePath();
+    }
+
+    function drawHourglass(context) {
+      context.strokeStyle = '#888';
+      context.lineWidth = 5;
+      context.lineCap = 'round';
+      context.lineJoin = 'round';
+      
+      // Top metal base
+      const topGradient = context.createLinearGradient(130, 55, 130, 80);
+      topGradient.addColorStop(0, '#d4d4d4');
+      topGradient.addColorStop(0.3, '#888888');
+      topGradient.addColorStop(0.7, '#666666');
+      topGradient.addColorStop(1, '#444444');
+      context.fillStyle = topGradient;
+      context.fillRect(130, 55, 240, 25);
+      
+      // Metal shine
+      context.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      context.fillRect(135, 57, 230, 3);
+      
+      // Metal edge
+      context.fillStyle = 'rgba(0, 0, 0, 0.3)';
+      context.fillRect(130, 78, 240, 2);
+      
+      context.strokeStyle = '#888';
+      context.lineWidth = 5;
+      
+      context.beginPath();
+      context.moveTo(160, 80);
+      context.bezierCurveTo(150, 150, 190, 250, 245, 300);
+      context.moveTo(340, 80);
+      context.bezierCurveTo(350, 150, 310, 250, 255, 300);
+      context.moveTo(245, 300);
+      context.bezierCurveTo(190, 350, 150, 450, 160, 520);
+      context.moveTo(255, 300);
+      context.bezierCurveTo(310, 350, 350, 450, 340, 520);
+      context.stroke();
+      
+      context.fillStyle = glassGradient;
+      context.fill(hourglassPath);
+      
+      context.strokeStyle = 'rgba(255,255,255,0.3)';
+      context.lineWidth = 2;
+      context.beginPath();
+      context.moveTo(170, 100);
+      context.bezierCurveTo(165, 165, 195, 230, 248, 290);
+      context.stroke();
+      
+      context.strokeStyle = 'rgba(255,255,255,0.2)';
+      context.lineWidth = 1.5;
+      context.beginPath();
+      context.moveTo(248, 310);
+      context.bezierCurveTo(195, 370, 165, 435, 170, 500);
+      context.stroke();
+      
+      // Bottom metal base
+      const bottomGradient = context.createLinearGradient(130, 520, 130, 545);
+      bottomGradient.addColorStop(0, '#444444');
+      bottomGradient.addColorStop(0.3, '#666666');
+      bottomGradient.addColorStop(0.7, '#888888');
+      bottomGradient.addColorStop(1, '#d4d4d4');
+      context.fillStyle = bottomGradient;
+      context.fillRect(130, 520, 240, 25);
+      
+      // Metal edge
+      context.fillStyle = 'rgba(0, 0, 0, 0.3)';
+      context.fillRect(130, 520, 240, 2);
+      
+      // Metal shine
+      context.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      context.fillRect(135, 540, 230, 3);
+    }
+
+    const widthCache = {};
+    function getHourglassWidth(y) {
+      const yRound = Math.round(y);
+      if (widthCache[yRound] !== undefined) return widthCache[yRound];
+      
+      if (y < 80 || y > 520) return widthCache[yRound] = 0;
+      
+      let width;
+      if (y <= 300) {
+        const t = (y - 80) / 220;
+        const leftX = 160 + (85 * t);
+        const rightX = 340 - (85 * t);
+        const curve = Math.sin(t * Math.PI) * 20;
+        width = (rightX - leftX) / 2 + curve;
+      } else {
+        const t = (y - 300) / 220;
+        const leftX = 245 - (85 * t);
+        const rightX = 255 + (85 * t);
+        const curve = Math.sin(t * Math.PI) * 20;
+        width = (rightX - leftX) / 2 + curve;
+      }
+      return widthCache[yRound] = width;
+    }
+
+    function isInsideHourglass(x, y) {
+      if (y < 80 || y > 520) return false;
+      const width = getHourglassWidth(y);
+      return Math.abs(x - centerX) < width;
+    }
+
+    function addToGrid(sand) {
+      const gx = Math.floor(sand.x / gridSize);
+      const gy = Math.floor(sand.y / gridSize);
+      if (gx >= 0 && gx < gridCols && gy >= 0 && gy < gridRows) {
+        spatialGrid[gy][gx].push(sand);
+        sand.gridX = gx;
+        sand.gridY = gy;
+      }
+    }
+
+    function removeFromGrid(sand) {
+      if (sand.gridX >= 0 && sand.gridY >= 0) {
+        const cell = spatialGrid[sand.gridY][sand.gridX];
+        for (let i = 0; i < cell.length; i++) {
+          if (cell[i] === sand) {
+            cell[i] = cell[cell.length - 1];
+            cell.pop();
+            break;
+          }
+        }
+      }
+    }
+
+    function isOccupied(x, y, excludeSand) {
+      const gx = Math.floor(x / gridSize);
+      const gy = Math.floor(y / gridSize);
+      
+      for (let dy = -1; dy <= 1; dy++) {
+        const cy = gy + dy;
+        if (cy < 0 || cy >= gridRows) continue;
+        
+        for (let dx = -1; dx <= 1; dx++) {
+          const cx = gx + dx;
+          if (cx < 0 || cx >= gridCols) continue;
+          
+          const cell = spatialGrid[cy][cx];
+          for (let i = 0; i < cell.length; i++) {
+            const s = cell[i];
+            if (s !== excludeSand) {
+              const dx = s.x - x;
+              if (dx > -particleSize && dx < particleSize) {
+                const dy = s.y - y;
+                if (dy > -particleSize && dy < particleSize) {
+                  return true;
+                }
+              }
+            }
+          }
+        }
+      }
+      return false;
+    }
+
+    function initTopSand() {
+      for (let y = 85; y < 295; y += particleSize * 0.8) {
+        const width = getHourglassWidth(y);
+        for (let x = centerX - width + particleSize; x < centerX + width - particleSize; x += particleSize * 0.8) {
+          if (isInsideHourglass(x, y) && allSand.length < maxParticles) {
+            const sand = new SandParticle(x, y, true);
+            allSand.push(sand);
+            addToGrid(sand);
+          }
+        }
+      }
+    }
+
+    function animate() {
+      // Hourglass spin and shrink effect after sand shutdown is complete
+      let hourglassRotation = 0;
+      let hourglassScale = 1;
+      let hourglassFade = 0;
+      let hourglassOpacity = 1;
+      
+      if (screenShutdownProgress >= 1 && allAliensDestroyedFrame !== -1) {
+        const framesSinceShutdown = frameCount - allAliensDestroyedFrame - 90;
+        if (framesSinceShutdown > 60) { // 1 second delay
+          const totalFrames = 200;
+          const spinProgress = Math.min((framesSinceShutdown - 60) / totalFrames, 1);
+          
+          // Phase 1: Opacity fade (25% of animation)
+          if (spinProgress < 0.25) {
+            hourglassOpacity = 1 - (spinProgress / 0.25) * 0.65;
+          } else {
+            hourglassOpacity = 0.35;
+          }
+          
+          // Rotation starts slow and accelerates exponentially
+          // As it shrinks, it spins faster
+          const rotSpeed = Math.pow(spinProgress, 4) * 20; // Exponential acceleration
+          hourglassRotation = spinProgress * spinProgress * Math.PI * rotSpeed;
+          
+          // Scale shrinks progressively
+          if (spinProgress > 0.2) {
+            const shrinkProgress = (spinProgress - 0.2) / 0.8;
+            hourglassScale = 1 - Math.pow(shrinkProgress, 1.5) * 0.98;
+          }
+          
+          // Final fade out starts earlier
+          if (spinProgress > 0.75) {
+            hourglassFade = Math.pow((spinProgress - 0.75) / 0.25, 2);
+          }
+          
+          // Complete disappearance
+          if (spinProgress >= 0.98) {
+            hourglassFade = 1;
+          }
+        }
+      }
+
+      // Background gradient
+      const bgGradient = offscreenCtx.createLinearGradient(0, 0, 0, canvas.height);
+      bgGradient.addColorStop(0, '#1a0033');
+      bgGradient.addColorStop(0.5, '#0d001a');
+      bgGradient.addColorStop(1, '#000000');
+      offscreenCtx.fillStyle = bgGradient;
+      offscreenCtx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Starry sky when hourglass starts spinning
+      if (hourglassRotation > 0) {
+        offscreenCtx.fillStyle = '#000000';
+        offscreenCtx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        // Draw stars
+        offscreenCtx.fillStyle = '#ffffff';
+        for (let i = 0; i < stars.length; i++) {
+          const star = stars[i];
+          const twinkle = Math.sin(frameCount * star.twinkleSpeed + star.twinkleOffset) * 0.4 + 0.6;
+          offscreenCtx.globalAlpha = twinkle;
+          offscreenCtx.fillRect(star.x, star.y, star.size, star.size);
+        }
+        offscreenCtx.globalAlpha = 1;
+      }
+
+      // Draw retro space invaders in top section
+      offscreenCtx.save();
+      offscreenCtx.clip(hourglassPath);
+      
+      // Calculate how many aliens should be destroyed based on sand fallen
+      let topParticles = 0;
+      for (let i = 0; i < allSand.length; i++) {
+        if (allSand[i].y < 300) topParticles++;
+      }
+      const sandProgress = 1 - (topParticles / maxParticles);
+      const aliensToDestroy = Math.floor(sandProgress * totalAliens);
+      
+      // Mark aliens as dead in random order
+      for (let i = 0; i < aliensToDestroy; i++) {
+        const alienIndex = alienOrder[i];
+        const alien = aliensDestroyed[alienIndex];
+        if (!alien.dead) {
+          alien.dead = true;
+          alien.explosionFrame = frameCount;
+        }
+      }
+      
+      offscreenCtx.fillStyle = '#00ff00';
+      const invaderTime = Date.now() * 0.0005;
+      let alienIndex = 0;
+      
+      for (let row = 0; row < 3; row++) {
+        for (let col = 0; col < 5; col++) {
+          const alien = aliensDestroyed[alienIndex];
+          const x = 180 + col * 30 + Math.sin(invaderTime + col) * 5;
+          const y = 100 + row * 25 + Math.sin(invaderTime * 1.5) * 3;
+          
+          if (alien.dead) {
+            // Explosion effect
+            const explosionAge = frameCount - alien.explosionFrame;
+            if (explosionAge < 30) {
+              offscreenCtx.fillStyle = '#ff0000';
+              const spread = explosionAge * 0.5;
+              // Explosion particles
+              offscreenCtx.fillRect(x + 4 - spread, y + 4 - spread, 2, 2);
+              offscreenCtx.fillRect(x + 8 + spread, y + 4 - spread, 2, 2);
+              offscreenCtx.fillRect(x + 4 - spread, y + 8 + spread, 2, 2);
+              offscreenCtx.fillRect(x + 8 + spread, y + 8 + spread, 2, 2);
+              offscreenCtx.fillStyle = '#00ff00';
+            }
+            // After explosion, alien disappears
+          } else {
+            // Draw alive alien
+            offscreenCtx.fillStyle = '#00ff00';
+            offscreenCtx.fillRect(x + 2, y, 2, 2);
+            offscreenCtx.fillRect(x + 8, y, 2, 2);
+            offscreenCtx.fillRect(x + 4, y + 2, 6, 2);
+            offscreenCtx.fillRect(x + 2, y + 4, 10, 2);
+            offscreenCtx.fillRect(x, y + 6, 14, 2);
+            offscreenCtx.fillRect(x, y + 8, 2, 2);
+            offscreenCtx.fillRect(x + 4, y + 8, 2, 2);
+            offscreenCtx.fillRect(x + 8, y + 8, 2, 2);
+            offscreenCtx.fillRect(x + 12, y + 8, 2, 2);
+            offscreenCtx.fillRect(x + 2, y + 10, 2, 2);
+            offscreenCtx.fillRect(x + 10, y + 10, 2, 2);
+          }
+          
+          alienIndex++;
+        }
+      }
+      
+      offscreenCtx.restore();
+
+      offscreenCtx.save();
+      
+      // Apply rotation and scale transformations
+      offscreenCtx.translate(centerX, 300);
+      offscreenCtx.rotate(hourglassRotation);
+      offscreenCtx.scale(hourglassScale, hourglassScale);
+      offscreenCtx.translate(-centerX, -300);
+      
+      offscreenCtx.globalAlpha = hourglassOpacity * (1 - hourglassFade);
+      drawHourglass(offscreenCtx);
+      offscreenCtx.globalAlpha = 1;
+      
+      offscreenCtx.restore();
+
+      if (frameCount % updateEveryNFrames === 0) {
+        let topParticles = 0;
+        for (let i = 0; i < allSand.length; i++) {
+          if (allSand[i].y < 300) topParticles++;
+        }
+        
+        if (topParticles > maxParticles * 0.05 && Math.random() < 0.4) {
+          for (let n = 0; n < 2; n++) {
+            if (allSand.length >= maxParticles) break;
+            
+            const y = 300 + Math.random() * 10;
+            const x = centerX + (Math.random() - 0.5) * 6;
+            
+            if (!isOccupied(x, y, null)) {
+              const particle = new SandParticle(x, y, false);
+              allSand.push(particle);
+              addToGrid(particle);
+            }
+          }
+        }
+
+        for (let i = allSand.length - 1; i >= 0; i--) {
+          const sand = allSand[i];
+          
+          if (sand.y >= 520) {
+            sand.updateStatic();
+            continue;
+          }
+
+          const belowY = sand.y + particleSize;
+          
+          if (belowY > 520) {
+            sand.updateStatic();
+            continue;
+          }
+
+          let moved = false;
+
+          const canMoveDown = !isOccupied(sand.x, belowY, sand) && isInsideHourglass(sand.x, belowY);
+
+          if (canMoveDown) {
+            sand.y = belowY;
+            moved = true;
+            if (sand.y > 300 && sand.isTop) {
+              sand.isTop = false;
+              sand.offsetX = sand.x / canvas.width;
+              sand.offsetY = sand.y / canvas.height;
+            }
+          } else {
+            const spreadChance = !sand.isTop ? 0.7 : 0.3;
+            
+            if (Math.random() < spreadChance) {
+              const leftX = sand.x - particleSize;
+              const rightX = sand.x + particleSize;
+              const canMoveLeft = !isOccupied(leftX, sand.y, sand) && isInsideHourglass(leftX, sand.y);
+              const canMoveRight = !isOccupied(rightX, sand.y, sand) && isInsideHourglass(rightX, sand.y);
+
+              if (canMoveLeft && canMoveRight) {
+                sand.x = Math.random() < 0.5 ? leftX : rightX;
+                moved = true;
+              } else if (canMoveLeft) {
+                sand.x = leftX;
+                moved = true;
+              } else if (canMoveRight) {
+                sand.x = rightX;
+                moved = true;
+              }
+            }
+            
+            if (!moved) {
+              const leftY = sand.y + particleSize;
+              const leftX = sand.x - particleSize;
+              const canMoveLeft = !isOccupied(leftX, leftY, sand) && isInsideHourglass(leftX, leftY);
+
+              const rightY = sand.y + particleSize;
+              const rightX = sand.x + particleSize;
+              const canMoveRight = !isOccupied(rightX, rightY, sand) && isInsideHourglass(rightX, rightY);
+
+              if (canMoveLeft && canMoveRight) {
+                if (Math.random() < 0.5) {
+                  sand.x = leftX;
+                  sand.y = leftY;
+                } else {
+                  sand.x = rightX;
+                  sand.y = rightY;
+                }
+                moved = true;
+                if (sand.y > 300 && sand.isTop) {
+                  sand.isTop = false;
+                  sand.offsetX = sand.x / canvas.width;
+                  sand.offsetY = sand.y / canvas.height;
+                }
+              } else if (canMoveLeft) {
+                sand.x = leftX;
+                sand.y = leftY;
+                moved = true;
+                if (sand.y > 300 && sand.isTop) {
+                  sand.isTop = false;
+                  sand.offsetX = sand.x / canvas.width;
+                  sand.offsetY = sand.y / canvas.height;
+                }
+              } else if (canMoveRight) {
+                sand.x = rightX;
+                sand.y = rightY;
+                moved = true;
+                if (sand.y > 300 && sand.isTop) {
+                  sand.isTop = false;
+                  sand.offsetX = sand.x / canvas.width;
+                  sand.offsetY = sand.y / canvas.height;
+                }
+              }
+            }
+          }
+
+          if (moved) {
+            removeFromGrid(sand);
+            addToGrid(sand);
+          }
+
+          sand.updateStatic();
+        }
+      }
+
+      const time = Date.now() * 0.001;
+      let currentR = -1, currentG = -1, currentB = -1;
+      
+      for (const sand of allSand) {
+        sand.updateColor(time);
+        
+        // Apply CRT shutdown effect to bottom sand
+        let finalR = sand.r;
+        let finalG = sand.g;
+        let finalB = sand.b;
+        
+        if (!sand.isTop && sand.y > 300 && screenShutdownProgress > 0) {
+          // Vertical collapse from center
+          const centerY = 410; // Center of bottom half
+          const distFromCenter = Math.abs(sand.y - centerY);
+          const collapseThreshold = (1 - screenShutdownProgress) * 110;
+          
+          if (distFromCenter > collapseThreshold) {
+            // Fade out
+            const fadeAmount = Math.min((distFromCenter - collapseThreshold) / 20, 1);
+            finalR = Math.floor(sand.r * (1 - fadeAmount));
+            finalG = Math.floor(sand.g * (1 - fadeAmount));
+            finalB = Math.floor(sand.b * (1 - fadeAmount));
+          } else if (screenShutdownProgress > 0.7) {
+            // Final bright line effect
+            const brightness = (1 - screenShutdownProgress) * 3;
+            finalR = Math.min(255, Math.floor(sand.r + brightness * 200));
+            finalG = Math.min(255, Math.floor(sand.g + brightness * 200));
+            finalB = Math.min(255, Math.floor(sand.b + brightness * 200));
+          }
+        }
+        
+        if (finalR !== currentR || finalG !== currentG || finalB !== currentB) {
+          currentR = finalR;
+          currentG = finalG;
+          currentB = finalB;
+          offscreenCtx.fillStyle = `rgb(${currentR},${currentG},${currentB})`;
+        }
+        const size = particleSize + sand.sizeJitter;
+        offscreenCtx.fillRect(sand.x, sand.y, size, size);
+      }
+
+      ctx.drawImage(offscreenCanvas, 0, 0);
+
+      // IMPORTANT: Scanlines CRT effect - MUST use hourglassPath clip to affect ONLY sand inside, NOT the glass
+      // This ensures scanlines appear only on the sand particles, not on the hourglass glass structure
+      ctx.save();
+      ctx.clip(hourglassPath);
+      
+      ctx.fillStyle = 'rgba(0,0,0,0.4)';
+      for (let y = 80; y < 520; y += 2) {
+        ctx.fillRect(0, y, canvas.width, 1);
+      }
+      ctx.restore();
+
+      // Check if all aliens are destroyed
+      let allDestroyed = true;
+      for (let i = 0; i < aliensDestroyed.length; i++) {
+        if (!aliensDestroyed[i].dead) {
+          allDestroyed = false;
+          break;
+        }
+      }
+
+      // Start shutdown sequence when all aliens are destroyed
+      if (allDestroyed) {
+        if (allAliensDestroyedFrame === -1) {
+          allAliensDestroyedFrame = frameCount;
+        }
+        
+        // Gradually increase shutdown progress
+        const framesSinceDestruction = frameCount - allAliensDestroyedFrame;
+        screenShutdownProgress = Math.min(framesSinceDestruction / 120, 1);
+        
+        // Remove bottom sand gradually during shutdown
+        if (screenShutdownProgress < 1) {
+          const removeCount = Math.floor(allSand.length * 0.02);
+          for (let i = 0; i < removeCount; i++) {
+            for (let j = allSand.length - 1; j >= 0; j--) {
+              if (!allSand[j].isTop && allSand[j].y > 300) {
+                removeFromGrid(allSand[j]);
+                allSand.splice(j, 1);
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      frameCount++;
+      requestAnimationFrame(animate);
+    }
+
+    initHourglassPath();
+    initTopSand();
+    animate();
+  </script>
+</body>
+</html>

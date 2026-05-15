@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Genuary 2026 #26</title>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            padding: 20px;
+            box-sizing: border-box;
+            overflow: hidden;
+        }
+        canvas {
+            border: none;
+            background: #fff;
+            max-width: 100%;
+            max-height: 100%;
+            box-shadow: 0 30px 80px rgba(0, 0, 0, 0.15);
+            border-radius: 50%;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d', { alpha: false });
+        
+        let zoom = 1, targetZoom = 1, isSquareGrid = true, zoomProgress = 0, rotation = 0;
+        let hue = 0;
+        
+        const getZoomFactor = () => {
+            const size = Math.min(window.innerWidth - 40, window.innerHeight - 40, 800);
+            return isSquareGrid ? 21 : size / (size / 20 * 1.8);
+        };
+        
+        function resize() {
+            const size = Math.min(window.innerWidth - 40, window.innerHeight - 40, 800);
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = size * dpr;
+            canvas.height = size * dpr;
+            canvas.style.width = size + 'px';
+            canvas.style.height = size + 'px';
+            ctx.scale(dpr, dpr);
+            draw();
+            setTimeout(() => { targetZoom = getZoomFactor(); animate(); }, 500);
+        }
+        
+        function easeInOutCubic(t) {
+            return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+        }
+        
+        function animate() {
+            zoomProgress += 0.012;
+            const eased = easeInOutCubic(Math.min(zoomProgress, 1));
+            zoom = 1 + (targetZoom - 1) * eased;
+            rotation = Math.PI * eased;
+            hue = (hue + 0.3) % 360;
+            draw();
+            
+            if (zoomProgress < 1) {
+                requestAnimationFrame(animate);
+            } else {
+                isSquareGrid = !isSquareGrid;
+                zoom = rotation = zoomProgress = 0;
+                targetZoom = getZoomFactor();
+                setTimeout(() => animate(), 200);
+            }
+        }
+        
+        function draw() {
+            const size = Math.min(window.innerWidth - 40, window.innerHeight - 40, 800);
+            const w = size, h = size;
+            
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, w, h);
+            
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(w/2, h/2, w/2, 0, Math.PI * 2);
+            ctx.clip();
+            
+            const color = '#1a5fb4';
+            const pulseIntensity = 1;
+            
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            
+            ctx.save();
+            ctx.translate(w/2, h/2);
+            ctx.rotate(rotation);
+            ctx.scale(zoom, zoom);
+            ctx.translate(-w/2, -h/2);
+            
+            if(isSquareGrid) {
+                drawSquareGrid(0, 0, w, h, color, 1 * pulseIntensity);
+                
+                const gridSize = w / 21, centerX = 10 * gridSize, centerY = 10 * gridSize;
+                
+                ctx.fillStyle = '#fff';
+                ctx.fillRect(centerX, centerY, gridSize, gridSize);
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 1.2 * pulseIntensity / zoom;
+                ctx.strokeRect(centerX, centerY, gridSize, gridSize);
+                
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(centerX, centerY, gridSize, gridSize);
+                ctx.clip();
+                drawHexGrid(centerX, centerY, gridSize, gridSize, color, 0.8 * pulseIntensity);
+                
+                const hexSize = gridSize / 20;
+                const hexCenterX = centerX + gridSize / 2;
+                const hexCenterY = centerY + gridSize / 2;
+                drawHexagon(hexCenterX, hexCenterY, hexSize, '#fff', true);
+                drawHexagon(hexCenterX, hexCenterY, hexSize, color, false);
+                
+                ctx.beginPath();
+                drawHexagon(hexCenterX, hexCenterY, hexSize, null, false, true);
+                ctx.clip();
+                
+                const tinySize = hexSize * 1.8;
+                const tinyStartX = hexCenterX - tinySize / 2;
+                const tinyStartY = hexCenterY - tinySize / 2;
+                drawSquareGrid(tinyStartX, tinyStartY, tinySize, tinySize, color, 0.5 * pulseIntensity);
+                
+                ctx.restore();
+            } else {
+                drawHexGrid(0, 0, w, h, color, 1 * pulseIntensity);
+                
+                const hexSize = w / 20;
+                drawHexagon(w/2, h/2, hexSize, '#fff', true);
+                
+                ctx.save();
+                ctx.beginPath();
+                drawHexagon(w/2, h/2, hexSize, null, false, true);
+                ctx.clip();
+                
+                const innerSize = hexSize * 1.8, startX = w/2 - innerSize/2, startY = h/2 - innerSize/2;
+                drawSquareGrid(startX, startY, innerSize, innerSize, color, 0.8 * pulseIntensity);
+                
+                const cellSize = innerSize / 21, squareX = startX + 10 * cellSize, squareY = startY + 10 * cellSize;
+                ctx.restore();
+                
+                ctx.fillStyle = '#fff';
+                ctx.fillRect(squareX, squareY, cellSize, cellSize);
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 1 * pulseIntensity / zoom;
+                ctx.strokeRect(squareX, squareY, cellSize, cellSize);
+                
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(squareX, squareY, cellSize, cellSize);
+                ctx.clip();
+                drawHexGrid(squareX, squareY, cellSize, cellSize, color, 0.6 * pulseIntensity);
+                
+                const innerHexSize = cellSize / 20;
+                const innerHexCenterX = squareX + cellSize / 2;
+                const innerHexCenterY = squareY + cellSize / 2;
+                drawHexagon(innerHexCenterX, innerHexCenterY, innerHexSize, '#fff', true);
+                drawHexagon(innerHexCenterX, innerHexCenterY, innerHexSize, color, false);
+                
+                ctx.beginPath();
+                drawHexagon(innerHexCenterX, innerHexCenterY, innerHexSize, null, false, true);
+                ctx.clip();
+                
+                const tinySize2 = innerHexSize * 1.8;
+                const tinyStartX2 = innerHexCenterX - tinySize2 / 2;
+                const tinyStartY2 = innerHexCenterY - tinySize2 / 2;
+                drawSquareGrid(tinyStartX2, tinyStartY2, tinySize2, tinySize2, color, 0.4 * pulseIntensity);
+                
+                ctx.restore();
+            }
+            
+            ctx.restore();
+            
+            // Bordure principale avec épaisseur variable
+            ctx.beginPath();
+            ctx.arc(w/2, h/2, w/2 - 1, 0, Math.PI * 2);
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 4;
+            ctx.stroke();
+            
+            // Effet encre - bavures organiques
+            ctx.save();
+            ctx.globalAlpha = 0.12;
+            for(let i = 0; i < 80; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const radius = w/2 - 2 + Math.random() * 10 - 3;
+                const x = w/2 + Math.cos(angle) * radius;
+                const y = h/2 + Math.sin(angle) * radius;
+                const size = Math.random() * 4 + 0.5;
+                
+                ctx.beginPath();
+                ctx.arc(x, y, size, 0, Math.PI * 2);
+                ctx.fillStyle = color;
+                ctx.fill();
+            }
+            ctx.restore();
+            
+            // Ligne intérieure fine
+            ctx.save();
+            ctx.globalAlpha = 0.25;
+            ctx.beginPath();
+            ctx.arc(w/2, h/2, w/2 - 4, 0, Math.PI * 2);
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 0.8;
+            ctx.stroke();
+            ctx.restore();
+            
+            ctx.restore();
+        }
+        
+        function drawSquareGrid(x, y, w, h, color, lineWidth) {
+            const cells = 21, cellSize = w / cells;
+            ctx.strokeStyle = color;
+            ctx.lineWidth = lineWidth / zoom;
+            
+            for(let i = 0; i <= cells; i++) {
+                ctx.beginPath();
+                ctx.moveTo(x + i * cellSize, y);
+                ctx.lineTo(x + i * cellSize, y + h);
+                ctx.stroke();
+                
+                ctx.beginPath();
+                ctx.moveTo(x, y + i * cellSize);
+                ctx.lineTo(x + w, y + i * cellSize);
+                ctx.stroke();
+            }
+        }
+        
+        function drawHexGrid(x, y, w, h, color, lineWidth) {
+            const hexSize = w / 20, hexH = hexSize * Math.sqrt(3);
+            ctx.strokeStyle = color;
+            ctx.lineWidth = lineWidth / zoom;
+            
+            const cx = x + w/2, cy = y + h/2;
+            
+            for(let col = -15; col <= 15; col++) {
+                for(let row = -15; row <= 15; row++) {
+                    const hx = cx + col * hexSize * 1.5;
+                    const hy = cy + row * hexH + (col % 2) * hexH / 2;
+                    drawHexagon(hx, hy, hexSize, color, false);
+                }
+            }
+        }
+        
+        function drawHexagon(cx, cy, size, color, fill, pathOnly) {
+            ctx.beginPath();
+            for(let i = 0; i < 6; i++) {
+                const angle = Math.PI / 3 * i;
+                const px = cx + size * Math.cos(angle);
+                const py = cy + size * Math.sin(angle);
+                i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+            }
+            ctx.closePath();
+            
+            if(pathOnly) return;
+            
+            if(fill) {
+                ctx.fillStyle = color;
+                ctx.fill();
+            } else {
+                ctx.stroke();
+            }
+        }
+        
+        window.addEventListener('resize', resize);
+        resize();
+    </script>
+</body>
+</html>

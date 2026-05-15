@@ -1,0 +1,854 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hollow Transmission</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#000; display:flex; justify-content:center; align-items:center; height:100vh; overflow:hidden; }
+canvas { display:block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const S = Math.min(window.innerWidth, window.innerHeight) - 20;
+canvas.width = canvas.height = S;
+
+const rnd = (a,b) => Math.random()*(b-a)+a;
+const ri  = (a,b) => Math.floor(rnd(a,b+1));
+const ease = t => t<0.5 ? 2*t*t : -1+(4-2*t)*t;
+const easeOut = t => 1 - Math.pow(1-t, 3);
+const easeIn = t => t*t*t;
+const easeInOut = t => t<0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2, 3)/2;
+const smoothstep = (a,b,x) => {
+    const t = Math.max(0, Math.min(1, (x-a)/(b-a)));
+    return t*t*(3-2*t);
+};
+const prand = (s) => {
+    const x = Math.sin(s * 12.9898 + 78.233) * 43758.5453;
+    return x - Math.floor(x);
+};
+
+let time = 0;
+let now  = 0;
+
+// ── Global wind field ─────────────────────────────────────────────
+function windAt(wx, wy){
+    const baseAngle = Math.sin(time*0.15)*0.8 + Math.cos(time*0.09)*0.4;
+    const baseStrength = 120 + Math.sin(time*0.3)*60;
+    const gust = Math.max(0, Math.sin(time*0.5))*Math.max(0, Math.sin(time*0.8+1.3));
+    const gustStrength = gust*180;
+    const turbX = Math.sin(wx*0.008 + time*0.6)*40 + Math.sin(wy*0.006 - time*0.4)*25;
+    const turbY = Math.cos(wy*0.01 + time*0.5)*30 + Math.sin(wx*0.007 + time*0.3)*20;
+    const totalStrength = baseStrength + gustStrength;
+    const vx = Math.cos(baseAngle)*totalStrength + turbX;
+    const vy = Math.sin(baseAngle)*totalStrength*0.4 + turbY + 40;
+    return {vx, vy};
+}
+
+// ── TV cycle ──────────────────────────────────────────────────────
+const PHASES = [
+    {id:'off',     dur:3500},
+    {id:'flower',  dur:12000},
+    {id:'pixelin', dur:9000},
+    {id:'fruit',   dur:8000},
+    {id:'static',  dur:7000},
+];
+const CYCLE_MS = PHASES.reduce((s,p)=>s+p.dur, 0);
+let tvStartMs = -1;
+
+function tvPhase(offsetMs=0) {
+    if(tvStartMs < 0) return {id:'off', pct:0};
+    let t = (now - tvStartMs + offsetMs) % CYCLE_MS;
+    if(t < 0) t += CYCLE_MS;
+    for(const p of PHASES) {
+        if(t < p.dur) return {id:p.id, pct:t/p.dur};
+        t -= p.dur;
+    }
+    return {id:'off', pct:0};
+}
+
+// ── Seasons ───────────────────────────────────────────────────────
+const SDUR = 30000;
+const SNAMES = ['spring','summer','autumn','winter'];
+const SSKY = {
+    spring:[[0,'#1a0830'],[0.25,'#4a1860'],[0.55,'#9a3858'],[0.8,'#e07048'],[1,'#f4a868']],
+    summer:[[0,'#0a1840'],[0.25,'#1e4890'],[0.55,'#3a80c0'],[0.8,'#70b8e0'],[1,'#a8dcf8']],
+    autumn:[[0,'#1a0808'],[0.25,'#5a1a08'],[0.55,'#a04810'],[0.8,'#d88028'],[1,'#f0b848']],
+    winter:[[0,'#080c18'],[0.25,'#101838'],[0.55,'#283060'],[0.8,'#485890'],[1,'#7088b8']],
+};
+const SGND = {
+    spring:[[0,'#3a2010'],[0.4,'#241408'],[1,'#100804']],
+    summer:[[0,'#203010'],[0.4,'#121c08'],[1,'#081004']],
+    autumn:[[0,'#4a2408'],[0.4,'#2c1608'],[1,'#180a04']],
+    winter:[[0,'#202830'],[0.4,'#141820'],[1,'#0a0c10']],
+};
+function h2r(h){ return [parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)]; }
+function lerpc(h1,h2,t){ const c=h2r(h1).map((v,i)=>Math.round(v+(h2r(h2)[i]-v)*t)); return `rgb(${c[0]},${c[1]},${c[2]})`; }
+
+function buildStaticLayer(sn) {
+    const c=document.createElement('canvas'); c.width=c.height=S;
+    const b=c.getContext('2d'), gy=S*0.82;
+    for(let i=0;i<80;i++){
+        const x=rnd(0,S),y=rnd(0,gy*0.9),r=rnd(40,120);
+        const hue=sn==='spring'?rnd(280,340):sn==='summer'?rnd(180,220):sn==='autumn'?rnd(20,45):rnd(200,240);
+        const g=b.createRadialGradient(x,y,0,x,y,r);
+        g.addColorStop(0,`hsla(${hue},60%,50%,${rnd(0.04,0.10)})`);
+        g.addColorStop(1,`hsla(${hue},60%,50%,0)`);
+        b.fillStyle=g; b.fillRect(x-r,y-r,r*2,r*2);
+    }
+    for(let i=0;i<35;i++){
+        const y=rnd(0,S*0.6),w=rnd(S*0.25,S*0.8),x=rnd(0,S-w);
+        b.save(); b.translate(x+w/2,y); b.rotate(rnd(-0.04,0.04));
+        b.beginPath(); b.moveTo(-w/2,0);
+        b.bezierCurveTo(-w*0.2,rnd(-8,8),w*0.2,rnd(-8,8),w/2,rnd(-4,4));
+        const chue=sn==='winter'?rnd(200,230):sn==='autumn'?rnd(20,40):rnd(20,50);
+        b.strokeStyle=`hsla(${chue},50%,75%,${rnd(0.03,0.08)})`;
+        b.lineWidth=rnd(8,28); b.stroke(); b.restore();
+    }
+    const sa=sn==='winter'?1:sn==='summer'?0.3:0.65;
+    for(let i=0;i<200;i++){
+        const x=rnd(0,S),y=rnd(0,S*0.55),r=rnd(0.3,1.4);
+        const tw=rnd(0.3,1);
+        b.beginPath(); b.arc(x,y,r,0,Math.PI*2);
+        b.fillStyle=`rgba(255,255,255,${tw*sa})`; b.fill();
+        if(r>0.9){
+            b.beginPath(); b.arc(x,y,r*3,0,Math.PI*2);
+            b.fillStyle=`rgba(255,255,255,${tw*sa*0.1})`; b.fill();
+        }
+    }
+    for(let i=0;i<260;i++){
+        const x=rnd(0,S),y=rnd(gy,S),r=rnd(8,55);
+        const hue=sn==='winter'?rnd(200,230):sn==='spring'?rnd(15,40):sn==='summer'?rnd(70,110):rnd(15,40);
+        const sat=sn==='winter'?rnd(10,25):rnd(20,50);
+        const g=b.createRadialGradient(x,y,0,x,y,r);
+        g.addColorStop(0,`hsla(${hue},${sat}%,${rnd(10,30)}%,${rnd(0.05,0.15)})`);
+        g.addColorStop(1,`hsla(${hue},${sat}%,20%,0)`);
+        b.fillStyle=g; b.fillRect(x-r,y-r,r*2,r*2);
+    }
+    // distant hills silhouette
+    b.beginPath(); b.moveTo(0,gy);
+    const step = 20;
+    let lastY = gy;
+    for(let x=0;x<=S;x+=step){
+        const h=Math.sin(x*0.008)*15+Math.sin(x*0.02)*8+25;
+        lastY = gy-h;
+        b.lineTo(x,lastY);
+    }
+    b.lineTo(S, lastY);
+    b.lineTo(S,gy); b.closePath();
+    b.fillStyle=`rgba(0,0,0,0.35)`; b.fill();
+    return c;
+}
+const SL={};
+SNAMES.forEach(s=>{ SL[s]=buildStaticLayer(s); });
+
+const bgC=document.createElement('canvas'); bgC.width=bgC.height=S;
+const bgX=bgC.getContext('2d');
+
+function drawBg(s1,s2,bl){
+    bgX.clearRect(0,0,S,S);
+    const gy=S*0.82;
+    const sg=bgX.createLinearGradient(0,0,0,gy);
+    SSKY[s1].forEach((p,i)=>sg.addColorStop(p[0],lerpc(p[1],SSKY[s2][i][1],bl)));
+    bgX.fillStyle=sg; bgX.fillRect(0,0,S,gy);
+    bgX.globalAlpha=1-bl; bgX.drawImage(SL[s1],0,0);
+    bgX.globalAlpha=bl;   bgX.drawImage(SL[s2],0,0);
+    bgX.globalAlpha=1;
+    const wb=s1==='winter'?(1-bl):s2==='winter'?bl:0;
+    if(wb>0.01){ 
+        bgX.fillStyle=`rgba(210,225,250,${wb*0.12})`; 
+        bgX.fillRect(0,0,S,gy); 
+    }
+    const gg=bgX.createLinearGradient(0,gy,0,S);
+    SGND[s1].forEach((p,i)=>gg.addColorStop(p[0],lerpc(p[1],SGND[s2][i][1],bl)));
+    bgX.fillStyle=gg; bgX.fillRect(0,gy,S,S-gy);
+    if(wb>0.01){
+        const sg2=bgX.createLinearGradient(0,gy,0,S);
+        sg2.addColorStop(0,`rgba(200,215,240,${wb*0.45})`);
+        sg2.addColorStop(1,`rgba(160,180,215,${wb*0.25})`);
+        bgX.fillStyle=sg2; bgX.fillRect(0,gy,S,S-gy);
+    }
+    const hg=bgX.createLinearGradient(0,gy-30,0,gy+10);
+    hg.addColorStop(0,'rgba(255,180,100,0)');
+    hg.addColorStop(0.7,'rgba(255,180,100,0.12)');
+    hg.addColorStop(1,'rgba(255,180,100,0)');
+    bgX.fillStyle=hg; bgX.fillRect(0,gy-30,S,40);
+    const vg=bgX.createRadialGradient(S/2,S/2,S*0.3,S/2,S/2,S*0.75);
+    vg.addColorStop(0,'rgba(0,0,0,0)');
+    vg.addColorStop(1,'rgba(0,0,0,0.45)');
+    bgX.fillStyle=vg; bgX.fillRect(0,0,S,S);
+}
+
+function getSeason(){
+    const t=now%SDUR/SDUR, idx=Math.floor(now/SDUR)%4, B=0.2;
+    return {s1:SNAMES[idx],s2:SNAMES[(idx+1)%4],bl:ease(t<1-B?0:(t-(1-B))/B)};
+}
+
+// ── TV ────────────────────────────────────────────────────────────
+class TV {
+    constructor(){
+        this.w=S*rnd(0.07,0.11); this.h=this.w*0.78;
+        this.scale=0; this.appeared=false;
+        this.swayPhase=rnd(0,Math.PI*2);
+        this.petalHue=rnd(0,360); this.screenHue=rnd(0,360);
+        this.bodyHue=ri(10,40);
+        this.bodyColor=`hsl(${this.bodyHue},${ri(8,18)}%,${ri(10,16)}%)`;
+        this.bodyHighlight=`hsl(${this.bodyHue},${ri(8,18)}%,${ri(18,26)}%)`;
+        this.legColor=`hsl(0,0%,${ri(20,30)}%)`;
+        this.offsetMs=rnd(0,600);
+        this.PX=7; this.PY=6;
+        this.pixels=[];
+        for(let py=0;py<this.PY;py++) for(let px=0;px<this.PX;px++)
+            this.pixels.push({
+                gx:px,gy:py,
+                delay:rnd(0,0.4),
+                spawnAngle:rnd(0,Math.PI*2),
+                spiralTurns:rnd(0.8,2.2),
+                spiralDir:Math.random()<0.5?-1:1
+            });
+        this.lastPhaseId=null;
+        this.knobPhase=rnd(0,Math.PI*2);
+        
+        // flower petal particles — 6 per flower × 2 flowers
+        this.petals = [];
+        for(let f=0; f<2; f++){
+            for(let i=0; i<6; i++){
+                this.petals.push({
+                    flower:f, idx:i, released:false, life:0,
+                    wx:0, wy:0, vx:0, vy:0,
+                    rotation:0, angVel:0,
+                    flutterPhase:rnd(0, Math.PI*2),
+                    flutterFreq:rnd(2, 4),
+                    mass:rnd(0.8, 1.4)
+                });
+            }
+        }
+        this.tvWorldX=0; this.tvWorldY=0; this.tvSway=0;
+        
+        // falling fruit
+        this.fruit = {
+            released:false, life:0,
+            wx:0, wy:0, vx:0, vy:0,
+            rotation:0, angVel:0,
+            hue:rnd(0,60),
+            mass:2.5
+        };
+    }
+    
+    update(dt){
+        if(this.scale<1){ 
+            this.scale=Math.min(1,this.scale+dt*0.7); 
+            if(this.scale>=1) this.appeared=true;
+            return; 
+        }
+        const ph=tvPhase(this.offsetMs);
+        
+        if(ph.id==='flower' && this.lastPhaseId!=='flower'){
+            this.petals.forEach(p=>{ p.released=false; p.life=0; });
+        }
+        // reset fruit at start of fruit phase
+        if(ph.id==='fruit' && this.lastPhaseId!=='fruit'){
+            this.fruit.released=false; this.fruit.life=0;
+        }
+        this.lastPhaseId = ph.id;
+        
+        // release petals during fall window of flower phase
+        if(ph.id==='flower'){
+            const fallStart = 0.70;
+            if(ph.pct > fallStart){
+                const fallT = (ph.pct - fallStart)/(0.95 - fallStart);
+                const w = this.w, h = this.h;
+                const tvCos = Math.cos(this.tvSway), tvSin = Math.sin(this.tvSway);
+                const stems = [
+                    {tx:-w*0.38, ty:-h/2-h*0.52},
+                    {tx: w*0.40, ty:-h/2-h*0.46},
+                ];
+                this.petals.forEach(p=>{
+                    const detachT = (p.idx + p.flower*6)/12 * 0.7;
+                    if(!p.released && fallT > detachT){
+                        const maxR = w * 0.24;
+                        const a = (p.idx/6)*Math.PI*2 + p.flower*0.3;
+                        const stem = stems[p.flower];
+                        const lx = stem.tx + Math.cos(a)*maxR*0.4;
+                        const ly = stem.ty + Math.sin(a)*maxR*0.4;
+                        p.wx = this.tvWorldX + (lx*tvCos - ly*tvSin);
+                        p.wy = this.tvWorldY + (lx*tvSin + ly*tvCos);
+                        p.vx = 0; p.vy = 0;
+                        p.rotation = a + this.tvSway;
+                        p.angVel = rnd(-0.8, 0.8);
+                        p.life = 1;
+                        p.released = true;
+                    }
+                });
+            }
+        }
+        
+        // release fruit at 80% of fruit phase
+        if(ph.id==='fruit' && ph.pct > 0.80 && !this.fruit.released){
+            const tvCos = Math.cos(this.tvSway), tvSin = Math.sin(this.tvSway);
+            const lx = 0, ly = 0; // screen center in local coords
+            this.fruit.wx = this.tvWorldX + (lx*tvCos - ly*tvSin);
+            this.fruit.wy = this.tvWorldY + (lx*tvSin + ly*tvCos);
+            this.fruit.vx = rnd(-15, 15);
+            this.fruit.vy = 20;
+            this.fruit.rotation = 0;
+            this.fruit.angVel = rnd(-1, 1);
+            this.fruit.life = 1;
+            this.fruit.released = true;
+        }
+        
+        // physics on all released petals
+        this.petals.forEach(p=>{
+            if(!p.released) return;
+            const wind = windAt(p.wx, p.wy);
+            const k = 1 - Math.exp(-(1.8/p.mass) * dt);
+            p.vx += (wind.vx - p.vx) * k;
+            p.vy += (wind.vy - p.vy) * k;
+            p.vy += 40 * dt / p.mass;
+            p.wx += p.vx * dt;
+            p.wy += p.vy * dt;
+            p.rotation += p.angVel * dt;
+            p.angVel *= Math.pow(0.97, dt*60);
+            p.life = Math.max(0, p.life - dt*0.15);
+            if(p.life<=0) p.released = false;
+        });
+        
+        // fruit physics (heavy, falls fast)
+        if(this.fruit.released){
+            const f = this.fruit;
+            const wind = windAt(f.wx, f.wy);
+            const k = 1 - Math.exp(-(1.2/f.mass) * dt);
+            f.vx += (wind.vx - f.vx) * k;
+            f.vy += (wind.vy - f.vy) * k;
+            f.vy += 180 * dt / f.mass;
+            f.wx += f.vx * dt;
+            f.wy += f.vy * dt;
+            f.rotation += f.angVel * dt;
+            // fade out slowly
+            f.life = Math.max(0, f.life - dt*0.1);
+            if(f.life<=0) f.released = false;
+        }
+    }
+    
+    draw(o,bx,by){
+        const ph=tvPhase(this.offsetMs);
+        const w=this.w,h=this.h;
+        const sway=0;
+        const bob=0;
+        const appearScale = this.scale < 1 ? easeOut(this.scale) : 1;
+        
+        this.tvWorldX = bx;
+        this.tvWorldY = by + h*0.55 + bob;
+        this.tvSway = sway;
+        
+        o.save();
+        o.translate(bx, by+h*0.55+bob); 
+        o.rotate(sway); 
+        o.scale(appearScale, appearScale);
+
+        // shadow
+        o.beginPath(); 
+        o.ellipse(0, h*0.7, w*0.45, h*0.08, 0, 0, Math.PI*2); 
+        o.fillStyle='rgba(0,0,0,0)'; 
+        o.fill();
+
+        // cabinet back shadow
+        o.beginPath(); o.roundRect(-w/2+3, -h/2+4, w, h, 4); 
+        o.fillStyle='rgba(0,0,0,0)'; o.fill();
+        
+        // cabinet body
+        const bodyGrad = o.createLinearGradient(-w/2,-h/2,w/2,h/2);
+        bodyGrad.addColorStop(0, this.bodyHighlight);
+        bodyGrad.addColorStop(0.5, this.bodyColor);
+        bodyGrad.addColorStop(1, `hsl(${this.bodyHue},15%,6%)`);
+        o.beginPath(); o.roundRect(-w/2,-h/2,w,h,4); 
+        o.fillStyle=bodyGrad; o.fill();
+        
+        const topHl = o.createLinearGradient(0,-h/2,0,-h/2+h*0.2);
+        topHl.addColorStop(0,'rgba(255,255,255,0.12)');
+        topHl.addColorStop(1,'rgba(255,255,255,0)');
+        o.fillStyle=topHl;
+        o.beginPath(); o.roundRect(-w/2,-h/2,w,h*0.25,4); o.fill();
+        
+        o.strokeStyle='rgba(0,0,0,0.5)'; o.lineWidth=1; 
+        o.beginPath(); o.roundRect(-w/2,-h/2,w,h,4); o.stroke();
+        o.strokeStyle='rgba(255,255,255,0.08)'; o.lineWidth=0.5;
+        o.beginPath(); o.roundRect(-w/2+1,-h/2+1,w-2,h-2,3); o.stroke();
+
+        // screen bezel
+        const sw=w*0.72, sh=h*0.6, sx=-sw/2, sy=-sh/2-h*0.05;
+        o.fillStyle='rgba(0,0,0,0.7)'; 
+        o.beginPath(); o.roundRect(sx-2,sy-2,sw+4,sh+4,2); o.fill();
+        
+        // screen background
+        const scrGrad = o.createRadialGradient(sx+sw/2,sy+sh/2,0,sx+sw/2,sy+sh/2,sw*0.7);
+        scrGrad.addColorStop(0,'#0a0a0a');
+        scrGrad.addColorStop(1,'#020202');
+        o.fillStyle=scrGrad;
+        o.beginPath(); o.roundRect(sx,sy,sw,sh,1); o.fill();
+        
+        // screen contents (clipped)
+        o.save();
+        o.beginPath(); o.roundRect(sx,sy,sw,sh,1); o.clip();
+        if(ph.id==='fruit' && !this.fruit.released) this._fruit(o, sx, sy, sw, sh);
+        if(ph.id==='static') this._static(o, sx, sy, sw, sh, ph.pct);
+        if(ph.id==='pixelin'||ph.id==='fruit'||ph.id==='static'){
+            o.fillStyle='rgba(0,0,0,0.12)';
+            for(let sl=0;sl<sh;sl+=2){
+                o.fillRect(sx,sy+sl,sw,1);
+            }
+            const gl=o.createRadialGradient(sx+sw*0.3,sy+sh*0.25,0,sx+sw*0.3,sy+sh*0.25,sw*0.6);
+            gl.addColorStop(0,'rgba(255,255,255,0.12)');
+            gl.addColorStop(0.6,'rgba(255,255,255,0.02)');
+            gl.addColorStop(1,'rgba(255,255,255,0)');
+            o.fillStyle=gl; o.fillRect(sx,sy,sw,sh);
+        }
+        o.restore();
+        
+        // pixelin drawn unclipped (pixels come from off-screen)
+        if(ph.id==='pixelin') this._pixelIn(o, sx, sy, sw, sh, ph.pct);
+        
+        o.strokeStyle='rgba(255,255,255,0.06)'; o.lineWidth=0.5; 
+        o.beginPath(); o.roundRect(sx,sy,sw,sh,1); o.stroke();
+
+        // knobs and speaker
+        const kY = sy+sh+h*0.05;
+        const spkX = sx, spkW = sw*0.5;
+        o.fillStyle='rgba(0,0,0,0.4)';
+        o.fillRect(spkX,kY,spkW,h*0.08);
+        for(let i=0;i<6;i++){
+            o.fillStyle='rgba(255,255,255,0.05)';
+            o.fillRect(spkX+2+i*(spkW-4)/6,kY+2,(spkW-4)/6-1,h*0.08-4);
+        }
+        for(let k=0;k<2;k++){
+            const kx = sx+sw*0.62+k*(sw*0.18);
+            const kr = h*0.04;
+            const kg = o.createRadialGradient(kx-kr*0.3,kY+h*0.04-kr*0.3,0,kx,kY+h*0.04,kr);
+            kg.addColorStop(0,'#555'); kg.addColorStop(1,'#111');
+            o.beginPath(); o.arc(kx,kY+h*0.04,kr,0,Math.PI*2); 
+            o.fillStyle=kg; o.fill();
+            const ka = this.knobPhase+k*1.2+time*0.3;
+            o.beginPath(); 
+            o.moveTo(kx,kY+h*0.04);
+            o.lineTo(kx+Math.cos(ka)*kr*0.7, kY+h*0.04+Math.sin(ka)*kr*0.7);
+            o.strokeStyle='rgba(255,255,255,0.5)'; o.lineWidth=0.8; o.stroke();
+        }
+
+        // legs removed
+
+        // flowers on top
+        if(ph.id==='flower') this._flower(o, ph.pct);
+
+        o.restore();
+    }
+
+    _flower(o, pct){
+        const w=this.w, h=this.h;
+        const stemT = smoothstep(0, 0.08, pct);
+        const bloomT = smoothstep(0.05, 0.25, pct);
+        const fallStart = 0.70;
+        const attachedFade = pct < fallStart ? 1 : Math.max(0, 1 - (pct-fallStart)/0.15);
+        const stemFade = pct < 0.85 ? 1 : Math.max(0, 1 - (pct-0.85)/0.15);
+        
+        const stems = [
+            {bx:-w*0.14, by:-h/2, tx:-w*0.38, ty:-h/2-h*0.52, idx:0},
+            {bx: w*0.14, by:-h/2, tx: w*0.40, ty:-h/2-h*0.46, idx:1},
+        ];
+        
+        stems.forEach(({bx, by, tx, ty, idx})=>{
+            const ex = bx + (tx-bx)*stemT;
+            const ey = by + (ty-by)*stemT;
+            
+            if(stemT > 0){
+                const cpx = bx + (tx-bx)*0.5 + (idx===0?-5:5);
+                const cpy = by + (ty-by)*0.5;
+                o.beginPath();
+                o.moveTo(bx, by);
+                o.quadraticCurveTo(cpx, cpy, ex, ey);
+                o.strokeStyle = `rgba(70,130,50,${stemFade})`;
+                o.lineWidth = 2; o.lineCap = 'round'; o.stroke();
+            }
+            
+            if(bloomT <= 0) return;
+            
+            const NUM_PETALS = 6;
+            const maxR = w * 0.24;
+            
+            for(let i=0; i<NUM_PETALS; i++){
+                const petalIdx = idx*NUM_PETALS + i;
+                const particle = this.petals[petalIdx];
+                if(particle && particle.released) continue;
+                
+                const petalBloom = smoothstep((i/NUM_PETALS)*0.4, (i/NUM_PETALS)*0.4 + 0.6, bloomT);
+                if(petalBloom <= 0) continue;
+                const a = (i/NUM_PETALS)*Math.PI*2 + idx*0.3;
+                const hue = (this.petalHue + idx*45 + i*8) % 360;
+                const petalLen = maxR * 0.85 * petalBloom;
+                const petalWid = maxR * 0.45 * petalBloom;
+                this._drawPetal(o, ex, ey, a, petalLen, petalWid, hue, petalBloom*attachedFade, 1);
+            }
+            
+            const centerBloom = smoothstep(0.15, 0.5, bloomT);
+            if(centerBloom > 0){
+                const centerHue = (this.petalHue + 30) % 360;
+                const cr = maxR*0.22*centerBloom;
+                o.beginPath();
+                o.arc(ex, ey, cr, 0, Math.PI*2);
+                const cgrad = o.createRadialGradient(ex-cr*0.3, ey-cr*0.3, 0, ex, ey, cr);
+                cgrad.addColorStop(0, `hsla(${centerHue},100%,92%,${attachedFade})`);
+                cgrad.addColorStop(1, `hsla(${(centerHue+20)%360},90%,55%,${attachedFade})`);
+                o.fillStyle = cgrad;
+                o.fill();
+            }
+        });
+    }
+
+    _drawPetal(o, cx, cy, angle, len, wid, hue, alpha, scaleY){
+        if(alpha <= 0 || len <= 0) return;
+        o.save();
+        o.translate(cx, cy);
+        o.rotate(angle);
+        o.scale(1, scaleY);
+        o.beginPath();
+        o.moveTo(0, 0);
+        o.bezierCurveTo(len*0.2, -wid*0.8, len*0.85, -wid*0.5, len, 0);
+        o.bezierCurveTo(len*0.85, wid*0.5, len*0.2, wid*0.8, 0, 0);
+        const petalGrad = o.createLinearGradient(0, 0, len, 0);
+        petalGrad.addColorStop(0, `hsla(${hue},80%,55%,${alpha})`);
+        petalGrad.addColorStop(1, `hsla(${(hue+15)%360},95%,82%,${alpha*0.95})`);
+        o.fillStyle = petalGrad;
+        o.fill();
+        o.restore();
+    }
+
+    _drawFlyingPetals(o){
+        const w = this.w;
+        const maxR = w * 0.24;
+        this.petals.forEach(p=>{
+            if(!p.released || p.life <= 0.01) return;
+            const hue = (this.petalHue + p.flower*45 + p.idx*8) % 360;
+            const petalLen = maxR * 0.85;
+            const petalWid = maxR * 0.45;
+            const flutter = 0.4 + 0.6*Math.abs(Math.cos(time*p.flutterFreq + p.flutterPhase));
+            this._drawPetal(o, p.wx, p.wy, p.rotation, petalLen, petalWid, hue, p.life, flutter);
+        });
+    }
+
+    _drawFlyingFruit(o){
+        const f = this.fruit;
+        if(!f.released || f.life <= 0.01) return;
+        const maxR = this.w * 0.25;
+        const dislocate = 1 - f.life;
+        
+        o.save();
+        o.translate(f.wx, f.wy);
+        o.rotate(f.rotation);
+        
+        const PIX = 2; // small pixel size, like original screen
+        const R = maxR * 1.1;
+        for(let py=-R; py<R; py+=PIX){
+            for(let px=-R; px<R; px+=PIX){
+                const d = Math.sqrt(px*px + py*py);
+                if(d > maxR) continue;
+                const ringIdx = Math.floor((d/maxR)*6);
+                const hue = (this.screenHue + ringIdx*30 + time*25) % 360;
+                const lit = 50 + ringIdx*3;
+                
+                const seed = (px*73 + py*131);
+                const offAng = prand(seed)*Math.PI*2;
+                const offMag = prand(seed+1) * PIX*15 * dislocate;
+                const ox = Math.cos(offAng)*offMag;
+                const oy = Math.sin(offAng)*offMag + dislocate*dislocate*20;
+                
+                o.fillStyle = `hsla(${hue},100%,${lit}%,${f.life})`;
+                o.fillRect(px+ox, py+oy, PIX, PIX);
+            }
+        }
+        o.restore();
+    }
+
+    _pixelIn(o, sx, sy, sw, sh, phPct){
+        const pw = sw/this.PX, ph = sh/this.PY;
+        const scx = sx + sw/2, scy = sy + sh/2;
+        // SMPTE-style color bars (7 bands): white, yellow, cyan, green, magenta, red, blue
+        const BARS = [
+            [255,255,255], [255,255,0], [0,255,255], [0,255,0],
+            [255,0,255], [255,0,0], [0,0,255]
+        ];
+        this.pixels.forEach(p=>{
+            const globalStart = p.delay * 0.7;
+            if(phPct < globalStart) return;
+            const travelDur = 0.55;
+            const localT = Math.min(1, (phPct - globalStart) / travelDur);
+            const et = easeInOut(localT);
+            const inv = 1 - et;
+            const dx = sx + p.gx*pw + pw/2;
+            const dy = sy + p.gy*ph + ph/2;
+            const startDist = S * 1.8;
+            const spinAmount = p.spiralDir * inv * Math.PI * p.spiralTurns;
+            const curAngle = p.spawnAngle + spinAmount;
+            const curDist = startDist * inv;
+            const pathX = scx + Math.cos(curAngle) * curDist;
+            const pathY = scy + Math.sin(curAngle) * curDist;
+            let cx, cy;
+            const SETTLE = 0.85;
+            if(et < SETTLE){
+                cx = pathX; cy = pathY;
+            } else {
+                const st = (et - SETTLE)/(1 - SETTLE);
+                const se = st*st*(3-2*st);
+                cx = pathX*(1-se) + dx*se;
+                cy = pathY*(1-se) + dy*se;
+            }
+            // color from SMPTE bars based on column position
+            const barIdx = Math.floor((p.gx / this.PX) * BARS.length);
+            const [r,g,b] = BARS[Math.min(BARS.length-1, barIdx)];
+            const sizeScale = 0.25 + 0.9 * easeOut(et);
+            const pixelW = pw * sizeScale;
+            const pixelH = ph * sizeScale;
+            o.save();
+            o.translate(cx, cy);
+            o.shadowColor = `rgb(${r},${g},${b})`;
+            o.shadowBlur = 4 + 10*et;
+            o.fillStyle = `rgb(${r},${g},${b})`;
+            o.fillRect(-pixelW/2, -pixelH/2, pixelW, pixelH);
+            o.shadowBlur = 0;
+            // brighter inner core
+            o.fillStyle = `rgba(255,255,255,${0.4*et})`;
+            o.fillRect(-pixelW/3, -pixelH/3, pixelW*0.66, pixelH*0.66);
+            o.restore();
+        });
+    }
+
+    _fruit(o, sx, sy, sw, sh){
+        const cx=sx+sw/2, cy=sy+sh/2, maxR=Math.min(sw,sh)*0.42;
+        o.fillStyle='#0a0510'; o.fillRect(sx,sy,sw,sh);
+        for(let i=6;i>=0;i--){
+            const r=maxR*(i/6)*(0.82+0.18*Math.sin(time*1.8+i*0.7));
+            const hue=(this.screenHue+i*30+time*25)%360;
+            o.beginPath(); o.arc(cx,cy,r,0,Math.PI*2);
+            o.fillStyle=`hsl(${hue},100%,${50+i*3}%)`;
+            o.shadowColor=`hsl(${hue},100%,65%)`; 
+            o.shadowBlur=10; 
+            o.fill(); 
+        }
+        o.shadowBlur=0;
+        o.beginPath(); o.arc(cx-maxR*0.15,cy-maxR*0.15,maxR*0.15,0,Math.PI*2);
+        o.fillStyle='rgba(255,255,255,0.7)'; o.fill();
+    }
+
+    _static(o, sx, sy, sw, sh, phPct){
+        const cols=Math.ceil(sw/2.5), rows=Math.ceil(sh/2.5);
+        for(let r=0;r<rows;r++) for(let c=0;c<cols;c++){
+            const br=Math.floor(Math.random()*220);
+            if(Math.random()<0.08){
+                o.fillStyle=`hsl(${ri(0,360)},85%,55%)`;
+            } else {
+                o.fillStyle=`rgb(${br},${br},${br})`;
+            }
+            o.fillRect(sx+c*2.5,sy+r*2.5,2.5,2.5);
+        }
+        o.fillStyle='rgba(255,255,255,0.1)'; 
+        o.fillRect(sx,sy+(time*100)%sh,sw,4);
+        if(Math.random()<0.3){
+            o.fillStyle='rgba(255,255,255,0.15)';
+            o.fillRect(sx,sy+rnd(0,sh),sw,rnd(1,3));
+        }
+    }
+}
+
+// ── Branch ────────────────────────────────────────────────────────
+const allTVs=[];
+
+class Branch {
+    constructor(x,y,angle,length,depth,width,noTV=false,parent=null,attachT=1){
+        this.parent=parent;
+        this.attachT=attachT;
+        this._x=x; this._y=y; 
+        this.angle=angle; this.length=length; this.depth=depth; this.width=width;
+        this.grown=0; this.growSpeed=rnd(0.4,0.8);
+        this.children=[]; this.sprouted=false;
+        this.swayPhase=rnd(0,Math.PI*2); 
+        this.swayAmp=rnd(0.025,0.09)/(depth+1);
+        this.curves = [];
+        const segs = Math.max(2, Math.floor(3 + depth*0.5));
+        for(let i=0; i<segs; i++){
+            this.curves.push({
+                t: (i+1)/segs,
+                offset: rnd(-0.25, 0.25)
+            });
+        }
+        this.tv=(!noTV&&depth===0&&Math.random()<0.035)?new TV():null;
+        if(this.tv) allTVs.push(this.tv);
+        this.postSprouted=false; this.postTimer=0; this.postDelay=rnd(3000,8000);
+    }
+    get sway(){ 
+        return Math.sin(this.swayPhase+time*1.6)*this.swayAmp + Math.sin(this.swayPhase*2.3+time*4.5)*this.swayAmp*0.3;
+    }
+    // origin follows parent's current tip; cached per frame
+    get x(){ 
+        if(!this.parent) return this._x;
+        if(this._cacheFrame !== time){
+            const pt = this.parent._pointAt(this.attachT);
+            this._cacheX = pt.x; this._cacheY = pt.y;
+            this._cacheFrame = time;
+        }
+        return this._cacheX;
+    }
+    get y(){ 
+        if(!this.parent) return this._y;
+        if(this._cacheFrame !== time){
+            const pt = this.parent._pointAt(this.attachT);
+            this._cacheX = pt.x; this._cacheY = pt.y;
+            this._cacheFrame = time;
+        }
+        return this._cacheY;
+    }
+    get ex(){ return this.x+Math.cos(this.angle+this.sway)*this.length*this.grown; }
+    get ey(){ return this.y+Math.sin(this.angle+this.sway)*this.length*this.grown; }
+
+    update(dt){
+        if(this.grown<1){
+            this.grown=Math.min(1,this.grown+this.growSpeed*dt);
+            if(this.grown>=1&&this.depth>0&&!this.sprouted){ this.sprouted=true; this._sprout(); }
+        } else if(this.depth>0&&!this.postSprouted){
+            this.postTimer+=dt*1000;
+            if(this.postTimer>=this.postDelay){ this.postSprouted=true; this._sproutMid(); }
+        }
+        this.children.forEach(c=>c.update(dt));
+        if(this.tv) this.tv.update(dt);
+    }
+    _sprout(){
+        const nb=ri(2,3);
+        const ba=nb===2?[-rnd(0.5,0.9),rnd(0.5,0.9)]:[-rnd(0.6,1.0),rnd(-0.1,0.1),rnd(0.6,1.0)];
+        for(let i=0;i<nb;i++){
+            const lf=0.55+(i===1&&nb===3?0.15:0);
+            this.children.push(new Branch(this.ex,this.ey,this.angle+ba[i]+rnd(-0.15,0.15),this.length*rnd(0.72,0.88)*lf,this.depth-1,this.width*0.58,false,this,1));
+        }
+    }
+    _sproutMid(){
+        for(let i=0;i<ri(1,2);i++){
+            const t=rnd(0.25,0.75);
+            const pt = this._pointAt(t);
+            this.children.push(new Branch(pt.x,pt.y,this.angle+(Math.random()<0.5?-1:1)*rnd(0.45,1.05)+rnd(-0.12,0.12),this.length*rnd(0.3,0.55),0,this.width*0.42,true,this,t));
+        }
+    }
+    _pointAt(t){
+        const baseA = this.angle + this.sway;
+        const perpA = baseA + Math.PI/2;
+        const sx = this.x + Math.cos(baseA) * this.length * this.grown * t;
+        const sy = this.y + Math.sin(baseA) * this.length * this.grown * t;
+        let disp = 0;
+        let prevT = 0, prevO = 0;
+        for(const c of this.curves){
+            if(t <= c.t){
+                const lt = (t - prevT) / (c.t - prevT || 1);
+                const bell = Math.sin(lt * Math.PI);
+                disp = prevO*(1-lt) + c.offset*lt;
+                disp += (c.offset) * bell * 0.5;
+                break;
+            }
+            prevT = c.t; prevO = c.offset;
+        }
+        const dispPx = disp * this.length * this.grown * 0.15;
+        return {
+            x: sx + Math.cos(perpA) * dispPx,
+            y: sy + Math.sin(perpA) * dispPx
+        };
+    }
+    draw(o){
+        if(this.grown<=0) return;
+        const lw=Math.max(0.5,this.width*this.grown);
+        const pulse=0.6+0.4*Math.abs(Math.sin(time*2.2+this.swayPhase));
+        const SAMPLES = 12;
+        const pts = [];
+        for(let i=0; i<=SAMPLES; i++){
+            pts.push(this._pointAt(i/SAMPLES));
+        }
+        const drawPath = (ox, oy) => {
+            o.beginPath();
+            o.moveTo(pts[0].x+ox, pts[0].y+oy);
+            for(let i=1; i<pts.length-1; i++){
+                const mx = (pts[i].x + pts[i+1].x)/2;
+                const my = (pts[i].y + pts[i+1].y)/2;
+                o.quadraticCurveTo(pts[i].x+ox, pts[i].y+oy, mx+ox, my+oy);
+            }
+            o.lineTo(pts[pts.length-1].x+ox, pts[pts.length-1].y+oy);
+        };
+        const BRANCH_COLOR = '45,38,32';
+        if(lw>2.5){
+            drawPath(2, 2.5);
+            o.strokeStyle=`rgba(0,0,0,0.3)`;
+            o.lineWidth=lw*0.95;
+            o.lineCap='round';
+            o.stroke();
+        }
+        drawPath(0, 0);
+        o.strokeStyle=`rgba(${BRANCH_COLOR},${pulse})`;
+        o.lineWidth=lw;
+        o.lineCap='round';
+        o.lineJoin='round';
+        o.stroke();
+        if(lw > 2){
+            drawPath(0.4, 0.6);
+            o.strokeStyle=`rgba(20,15,12,${pulse*0.4})`;
+            o.lineWidth=lw*0.5;
+            o.stroke();
+        }
+        this.children.forEach(c=>c.draw(o));
+        if(this.tv) this.tv.draw(o, pts[pts.length-1].x, pts[pts.length-1].y);
+    }
+}
+
+// ── Init ──────────────────────────────────────────────────────────
+const trunk=new Branch(S*0.5,S*0.82,-Math.PI/2,S*0.12,7,S*0.014);
+trunk._sprout=function(){
+    [-0.9,-0.1,0.9].forEach((a,i)=>{
+        this.children.push(new Branch(this.ex,this.ey,this.angle+a,[S*0.28,S*0.24,S*0.28][i],this.depth-1,this.width*0.7,false,this,1));
+    });
+    this.sprouted=true;
+};
+let t0=null;
+for(let i=0;i<80;i++) trunk.update(0.016);
+
+const treeC=document.createElement('canvas'); treeC.width=treeC.height=S;
+const treeX=treeC.getContext('2d');
+
+function loop(ts){
+    if(!t0) t0=ts;
+    const dt=Math.min((ts-t0)/1000, 0.05);
+    t0=ts;
+    time+=dt;
+    now=ts;
+
+    if(tvStartMs<0 && allTVs.length>0 && allTVs.every(tv=>tv.appeared)){
+        tvStartMs=ts;
+    }
+
+    const {s1,s2,bl}=getSeason();
+    drawBg(s1,s2,bl);
+
+    trunk.update(dt);
+    treeX.clearRect(0,0,S,S);
+    trunk.draw(treeX);
+
+    ctx.clearRect(0,0,S,S);
+    ctx.drawImage(bgC,0,0);
+    ctx.drawImage(treeC,0,0);
+    
+    allTVs.forEach(tv=>{ 
+        tv._drawFlyingPetals(ctx); 
+        tv._drawFlyingFruit(ctx);
+    });
+    
+    requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

@@ -1,0 +1,1251 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Calligraphie</title>
+<script src="https://cdn.jsdelivr.net/npm/hanzi-writer@3.5/dist/hanzi-writer.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(135deg, #0f0e0d 0%, #1a1715 50%, #0f0e0d 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: system-ui, sans-serif;
+    overflow: hidden;
+  }
+  #wrap {
+    position: relative;
+    width: min(92vw, 92vh);
+    aspect-ratio: 1 / 1;
+  }
+  #wrap::before {
+    content: '';
+    position: absolute;
+    inset: -1rem;
+    background: linear-gradient(to bottom, rgba(180, 60, 50, 0.12), rgba(40, 70, 130, 0.12));
+    border-radius: 1rem;
+    filter: blur(1.2rem);
+    z-index: -1;
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: 0.5rem;
+    position: relative;
+    z-index: 1;
+  }
+  #paper-bg {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    border-radius: 0.5rem;
+    pointer-events: none;
+    width: 100%;
+    height: 100%;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+  }
+  #central-seal {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 2;
+    pointer-events: none;
+  }
+  #central-seal > svg.borders { display: block; position: absolute; top: 0; left: 0; }
+  #central-seal-hanzi {
+    position: absolute;
+    pointer-events: none;
+    transition: opacity 0.5s ease;
+  }
+  #central-seal-hanzi svg {
+    overflow: visible;
+    width: 100%;
+    height: 100%;
+  }
+  #hanzi-host {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 3;
+    overflow: hidden;
+    border-radius: 0.5rem;
+  }
+  .char-slot {
+    position: absolute;
+    pointer-events: none;
+    filter: url(#brush-filter);
+    mix-blend-mode: multiply;
+    transition: opacity 2.5s ease-out;
+    contain: layout paint style;
+  }
+  .char-slot.dissolving {
+    filter: contrast(1.05) brightness(1.6) opacity(0.85);
+  }
+  .char-slot canvas.rasterized {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+  .char-slot svg { overflow: visible; }
+  .char-slot path,
+  .char-slot circle {
+    fill: var(--ink-color, #1a1310);
+    stroke: var(--ink-color, #1a1310);
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="paper-bg"></canvas>
+  <canvas id="c"></canvas>
+  <svg width="0" height="0" style="position:absolute;">
+    <defs>
+      <filter id="brush-filter" x="-20%" y="-20%" width="140%" height="140%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="3" result="noise"/>
+        <feDisplacementMap in="SourceGraphic" in2="noise" scale="2.5" xChannelSelector="R" yChannelSelector="G" result="displaced"/>
+        <feGaussianBlur in="displaced" stdDeviation="0.4" result="blurred"/>
+        <feTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="3" seed="5" result="grain"/>
+        <feColorMatrix in="grain" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.7 0" result="grainAlpha"/>
+        <feComposite in="grainAlpha" in2="blurred" operator="in" result="texturedGrain"/>
+        <feComposite in="blurred" in2="texturedGrain" operator="out" result="final"/>
+      </filter>
+    </defs>
+  </svg>
+  <div id="central-seal"></div>
+  <div id="hanzi-host"></div>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const paperBg = document.getElementById('paper-bg');
+const paperCtx = paperBg.getContext('2d');
+const wrap = document.getElementById('wrap');
+const hanziHost = document.getElementById('hanzi-host');
+const centralSealEl = document.getElementById('central-seal');
+
+let centralSealChar = '福';
+const centralSealCharsPool = ['福', '禄', '寿', '喜', '財', '吉', '祥', '愛', '和', '康'];
+
+let W, H, DPR;
+let seals = [];
+let activeChars = [];
+let paperCanvas = null;
+
+// ---------- timings (ms) ----------
+const CHAR_LIFETIME_MS = 4000;
+const CHAR_FADE_MS = 1700;
+const CHAR_SPAWN_MIN_MS = 800;
+const CHAR_SPAWN_MAX_MS = 1400;
+const CHAR_SPAWN_RETRY_MS = 200;
+const TARGET_VISIBLE = 6;
+
+const SEAL_SPAWN_MIN_MS = 3500;
+const SEAL_SPAWN_MAX_MS = 6000;
+const SEAL_FADE_IN_MS = 600;
+const SEAL_FADE_OUT_MS = 1200;
+const SEAL_LIFE_MIN_MS = 4500;
+const SEAL_LIFE_MAX_MS = 6000;
+const SEAL_DRAW_DURATION_MS = 250;
+const SEAL_MAX_VISIBLE = 3;
+
+const CENTRAL_CHAR_CHANGE_MS = 8000;
+
+// rayon de la zone d'exclusion centrale (en fraction de min(W,H))
+// le sceau central fait 0.55 * min(W,H), donc rayon = 0.275 ; on ajoute une marge
+const CENTRAL_EXCLUSION_RADIUS_FRAC = 0.31;
+
+// ---------- characters ----------
+const chineseChars = [
+  '福', '禄', '寿', '喜', '財', '富', '吉', '祥', '安', '康',
+  '順', '和', '愛', '美', '德', '貴', '榮', '恩', '緣', '心',
+  '夢', '靜', '禪', '永', '龍', '鳳', '春', '光', '神', '道',
+  '茶', '楽'
+];
+
+const luckySealChars = ['福', '禄', '寿', '喜', '財', '吉', '祥', '安', '康', '富'];
+
+// ---------- resize ----------
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  const rect = wrap.getBoundingClientRect();
+  W = rect.width;
+  H = rect.height;
+  canvas.width = W * DPR;
+  canvas.height = H * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  paperBg.width = W * DPR;
+  paperBg.height = H * DPR;
+  paperCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  paperCanvas = null;
+  buildCentralSeal();
+  buildPaperTexture();
+  paperCtx.drawImage(paperCanvas, 0, 0, W, H);
+}
+
+// ---------- paper texture ----------
+function buildPaperTexture() {
+  paperCanvas = document.createElement('canvas');
+  paperCanvas.width = W * DPR;
+  paperCanvas.height = H * DPR;
+  const pctx = paperCanvas.getContext('2d');
+  pctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+  // ---- 1. Couches de couleur de base ----
+  // dégradé radial chaud avec un offset pour casser la symétrie
+  const offsetX = W * (0.4 + Math.random() * 0.2);
+  const offsetY = H * (0.35 + Math.random() * 0.2);
+  const grad = pctx.createRadialGradient(offsetX, offsetY, W * 0.05, W / 2, H / 2, W * 0.95);
+  grad.addColorStop(0, '#f5ead0');
+  grad.addColorStop(0.4, '#ecdcaf');
+  grad.addColorStop(0.75, '#d9c089');
+  grad.addColorStop(1, '#b89a64');
+  pctx.fillStyle = grad;
+  pctx.fillRect(0, 0, W, H);
+
+  // dégradé linéaire diagonal en multiply pour ajouter de la profondeur
+  const diagGrad = pctx.createLinearGradient(0, 0, W, H);
+  diagGrad.addColorStop(0, 'rgba(255, 240, 200, 0.15)');
+  diagGrad.addColorStop(0.5, 'rgba(0, 0, 0, 0)');
+  diagGrad.addColorStop(1, 'rgba(120, 70, 30, 0.1)');
+  pctx.fillStyle = diagGrad;
+  pctx.fillRect(0, 0, W, H);
+
+  // ---- 2. Bruit pixel-par-pixel pour le grain de fibre ----
+  const imgData = pctx.getImageData(0, 0, W * DPR, H * DPR);
+  const data = imgData.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const n = (Math.random() - 0.5) * 12;
+    data[i]   = Math.max(0, Math.min(255, data[i]   + n));
+    data[i+1] = Math.max(0, Math.min(255, data[i+1] + n));
+    data[i+2] = Math.max(0, Math.min(255, data[i+2] + n * 0.85));
+  }
+  pctx.putImageData(imgData, 0, 0);
+
+  // ---- 3. Fibres longues (laid lines) — papier washi ----
+  // longues lignes horizontales irrégulières comme dans le vrai papier asiatique
+  const fiberCount = Math.floor(H / 6);
+  for (let i = 0; i < fiberCount; i++) {
+    const y = Math.random() * H;
+    const length = W * (0.2 + Math.random() * 0.8);
+    const startX = Math.random() * W - length * 0.3;
+    pctx.strokeStyle = `rgba(120, 90, 50, ${0.015 + Math.random() * 0.025})`;
+    pctx.lineWidth = 0.3 + Math.random() * 0.5;
+    pctx.beginPath();
+    // ligne légèrement ondulante
+    const segments = 8;
+    pctx.moveTo(startX, y);
+    for (let j = 1; j <= segments; j++) {
+      const x = startX + (length / segments) * j;
+      const wob = (Math.random() - 0.5) * 1.5;
+      pctx.lineTo(x, y + wob);
+    }
+    pctx.stroke();
+  }
+
+  // ---- 4. Trame croisée diagonale (très subtile) ----
+  const spacing = 5;
+  const diag = Math.sqrt(W * W + H * H);
+  for (const angle of [Math.PI / 4, -Math.PI / 4]) {
+    const sy = angle > 0 ? -diag : diag;
+    for (let d = -diag; d < diag; d += spacing) {
+      const jitter = (Math.random() - 0.5) * 3;
+      pctx.strokeStyle = `rgba(140, 110, 70, ${0.008 + Math.random() * 0.015})`;
+      pctx.lineWidth = 0.25 + Math.random() * 0.25;
+      pctx.beginPath();
+      pctx.moveTo(d + jitter, sy);
+      pctx.lineTo(d + jitter + Math.cos(angle) * diag * 2, sy + Math.sin(angle) * diag * 2);
+      pctx.stroke();
+    }
+  }
+
+  // ---- 5. Inclusions de fibres végétales (papier artisanal) ----
+  // petites particules sombres et claires comme dans le mulberry paper
+  const inclusionCount = Math.floor(W * H / 12000);
+  for (let i = 0; i < inclusionCount; i++) {
+    const x = Math.random() * W;
+    const y = Math.random() * H;
+    const len = 3 + Math.random() * 18;
+    const angle = Math.random() * Math.PI * 2;
+    const dark = Math.random() < 0.7;
+    pctx.strokeStyle = dark
+      ? `rgba(80, 55, 25, ${0.15 + Math.random() * 0.2})`
+      : `rgba(220, 200, 160, ${0.2 + Math.random() * 0.25})`;
+    pctx.lineWidth = 0.4 + Math.random() * 0.7;
+    pctx.lineCap = 'round';
+    pctx.beginPath();
+    pctx.moveTo(x, y);
+    // fibre légèrement courbée
+    const cx = x + Math.cos(angle + 0.3) * len * 0.5;
+    const cy = y + Math.sin(angle + 0.3) * len * 0.5;
+    const ex = x + Math.cos(angle) * len;
+    const ey = y + Math.sin(angle) * len;
+    pctx.quadraticCurveTo(cx, cy, ex, ey);
+    pctx.stroke();
+  }
+
+  // ---- 6. Plis et marques de pliage subtiles ----
+  const foldCount = 2 + Math.floor(Math.random() * 3);
+  for (let i = 0; i < foldCount; i++) {
+    const horizontal = Math.random() < 0.5;
+    const pos = 0.2 + Math.random() * 0.6;
+    pctx.save();
+    if (horizontal) {
+      const y = H * pos;
+      const foldGrad = pctx.createLinearGradient(0, y - 8, 0, y + 8);
+      foldGrad.addColorStop(0, 'rgba(80, 50, 20, 0)');
+      foldGrad.addColorStop(0.4, 'rgba(80, 50, 20, 0.06)');
+      foldGrad.addColorStop(0.5, 'rgba(80, 50, 20, 0.1)');
+      foldGrad.addColorStop(0.6, 'rgba(80, 50, 20, 0.06)');
+      foldGrad.addColorStop(1, 'rgba(80, 50, 20, 0)');
+      pctx.fillStyle = foldGrad;
+      pctx.fillRect(0, y - 8, W, 16);
+    } else {
+      const x = W * pos;
+      const foldGrad = pctx.createLinearGradient(x - 8, 0, x + 8, 0);
+      foldGrad.addColorStop(0, 'rgba(80, 50, 20, 0)');
+      foldGrad.addColorStop(0.4, 'rgba(80, 50, 20, 0.06)');
+      foldGrad.addColorStop(0.5, 'rgba(80, 50, 20, 0.1)');
+      foldGrad.addColorStop(0.6, 'rgba(80, 50, 20, 0.06)');
+      foldGrad.addColorStop(1, 'rgba(80, 50, 20, 0)');
+      pctx.fillStyle = foldGrad;
+      pctx.fillRect(x - 8, 0, 16, H);
+    }
+    pctx.restore();
+  }
+
+  // ---- 7. Taches d'eau / marques de mouillage ----
+  // anciennes auréoles d'humidité avec un anneau sombre caractéristique
+  const stainCount = 3 + Math.floor(Math.random() * 3);
+  for (let i = 0; i < stainCount; i++) {
+    const x = Math.random() * W;
+    const y = Math.random() * H;
+    const r = 40 + Math.random() * 100;
+
+    // halo extérieur clair
+    const haloGrad = pctx.createRadialGradient(x, y, r * 0.3, x, y, r);
+    haloGrad.addColorStop(0, 'rgba(180, 130, 70, 0)');
+    haloGrad.addColorStop(0.7, 'rgba(180, 130, 70, 0.04)');
+    haloGrad.addColorStop(0.9, 'rgba(140, 90, 40, 0.09)');
+    haloGrad.addColorStop(1, 'rgba(140, 90, 40, 0)');
+    pctx.fillStyle = haloGrad;
+    pctx.beginPath();
+    pctx.arc(x, y, r, 0, Math.PI * 2);
+    pctx.fill();
+
+    // anneau intérieur plus sombre
+    pctx.strokeStyle = `rgba(120, 80, 30, ${0.06 + Math.random() * 0.04})`;
+    pctx.lineWidth = 1.5;
+    pctx.beginPath();
+    // cercle imparfait
+    const segs = 30;
+    for (let j = 0; j <= segs; j++) {
+      const a = (j / segs) * Math.PI * 2;
+      const wobble = Math.sin(a * 3) * 2 + (Math.random() - 0.5) * 2;
+      const rr = r * 0.85 + wobble;
+      const px = x + Math.cos(a) * rr;
+      const py = y + Math.sin(a) * rr;
+      if (j === 0) pctx.moveTo(px, py);
+      else pctx.lineTo(px, py);
+    }
+    pctx.stroke();
+  }
+
+  // ---- 8. Petites taches sombres (foxing) ----
+  const speckCount = Math.floor(W * H / 35000);
+  for (let i = 0; i < speckCount; i++) {
+    pctx.fillStyle = `rgba(120, 70, 30, ${0.18 + Math.random() * 0.25})`;
+    pctx.beginPath();
+    pctx.arc(Math.random() * W, Math.random() * H, 0.3 + Math.random() * 0.7, 0, Math.PI * 2);
+    pctx.fill();
+  }
+
+  // ---- 9. Patches chauds (vieillissement) ----
+  const patchCount = Math.floor(W * H / 30000);
+  for (let i = 0; i < patchCount; i++) {
+    const x = Math.random() * W;
+    const y = Math.random() * H;
+    const r = 30 + Math.random() * 80;
+    const pg = pctx.createRadialGradient(x, y, 0, x, y, r);
+    pg.addColorStop(0, `rgba(180, 130, 70, ${0.04 + Math.random() * 0.04})`);
+    pg.addColorStop(1, 'rgba(180, 130, 70, 0)');
+    pctx.fillStyle = pg;
+    pctx.beginPath();
+    pctx.arc(x, y, r, 0, Math.PI * 2);
+    pctx.fill();
+  }
+
+  // ---- 10. Bord du papier — bord déchiré subtil ----
+  const edgeWidth = Math.min(W, H) * 0.012;
+  pctx.save();
+  pctx.globalCompositeOperation = 'multiply';
+  // ombre intérieure progressive sur les 4 bords
+  const edgeGrads = [
+    { gradient: pctx.createLinearGradient(0, 0, 0, edgeWidth * 4), x: 0, y: 0, w: W, h: edgeWidth * 4 },
+    { gradient: pctx.createLinearGradient(0, H, 0, H - edgeWidth * 4), x: 0, y: H - edgeWidth * 4, w: W, h: edgeWidth * 4 },
+    { gradient: pctx.createLinearGradient(0, 0, edgeWidth * 4, 0), x: 0, y: 0, w: edgeWidth * 4, h: H },
+    { gradient: pctx.createLinearGradient(W, 0, W - edgeWidth * 4, 0), x: W - edgeWidth * 4, y: 0, w: edgeWidth * 4, h: H }
+  ];
+  for (const eg of edgeGrads) {
+    eg.gradient.addColorStop(0, 'rgba(80, 50, 20, 0.25)');
+    eg.gradient.addColorStop(0.5, 'rgba(80, 50, 20, 0.08)');
+    eg.gradient.addColorStop(1, 'rgba(80, 50, 20, 0)');
+    pctx.fillStyle = eg.gradient;
+    pctx.fillRect(eg.x, eg.y, eg.w, eg.h);
+  }
+  pctx.restore();
+
+  // ---- 11. Vignette finale ----
+  const vignette = pctx.createRadialGradient(W/2, H/2, W*0.3, W/2, H/2, W*0.85);
+  vignette.addColorStop(0, 'rgba(80, 50, 20, 0)');
+  vignette.addColorStop(0.6, 'rgba(70, 40, 15, 0.05)');
+  vignette.addColorStop(1, 'rgba(50, 25, 10, 0.35)');
+  pctx.fillStyle = vignette;
+  pctx.fillRect(0, 0, W, H);
+
+  // ---- 12. Branche de cerisier avec fleurs (génératif) ----
+  drawCherryBranch(pctx);
+}
+
+// ---- branche + fleurs de cerisier en filigrane ----
+function drawCherryBranch(pctx) {
+  // point d'origine : un coin du canvas, choisi aléatoirement
+  const corner = Math.floor(Math.random() * 4);
+  let startX, startY, baseAngle;
+  switch (corner) {
+    case 0: startX = -W * 0.05; startY = H * (0.6 + Math.random() * 0.3); baseAngle = -Math.PI * 0.15 + Math.random() * Math.PI * 0.1; break; // bas-gauche → vers haut-droite
+    case 1: startX = W * 1.05;  startY = H * (0.6 + Math.random() * 0.3); baseAngle = Math.PI + Math.PI * 0.15 - Math.random() * Math.PI * 0.1; break; // bas-droite → vers haut-gauche
+    case 2: startX = W * (0.1 + Math.random() * 0.3); startY = -H * 0.05; baseAngle = Math.PI * 0.4 + Math.random() * Math.PI * 0.1; break; // haut-gauche → vers bas-droite
+    case 3: startX = W * (0.6 + Math.random() * 0.3); startY = H * 1.05; baseAngle = -Math.PI * 0.6 + Math.random() * Math.PI * 0.1; break; // bas → vers haut
+  }
+
+  const blossoms = []; // collectées pendant le tracé pour être dessinées par-dessus
+
+  // récursion : tronc + branches secondaires + brindilles
+  function drawBranch(x, y, angle, length, thickness, depth) {
+    if (length < 6 || thickness < 0.4) return;
+
+    // segments courbés pour l'effet pinceau organique
+    const segments = Math.max(8, Math.floor(length / 8));
+    let cx = x, cy = y;
+    let curAngle = angle;
+
+    pctx.save();
+    pctx.lineCap = 'round';
+    pctx.lineJoin = 'round';
+
+    for (let i = 0; i < segments; i++) {
+      // courbure progressive (gravité + dérive aléatoire)
+      curAngle += (Math.random() - 0.5) * 0.08 + 0.005;
+      const segLen = length / segments;
+      const nx = cx + Math.cos(curAngle) * segLen;
+      const ny = cy + Math.sin(curAngle) * segLen;
+
+      // épaisseur qui s'amincit progressivement
+      const t = i / segments;
+      const w = thickness * (1 - t * 0.4);
+
+      // couleur de l'écorce — brun foncé semi-transparent
+      const alpha = 0.18 + Math.random() * 0.1;
+      pctx.strokeStyle = `rgba(60, 35, 20, ${alpha})`;
+      pctx.lineWidth = w;
+      pctx.beginPath();
+      pctx.moveTo(cx, cy);
+      // léger contrôle quadratique pour la fluidité
+      const mx = (cx + nx) / 2 + (Math.random() - 0.5) * w;
+      const my = (cy + ny) / 2 + (Math.random() - 0.5) * w;
+      pctx.quadraticCurveTo(mx, my, nx, ny);
+      pctx.stroke();
+
+      // texture pinceau : double trait plus clair décalé
+      if (Math.random() < 0.5) {
+        pctx.strokeStyle = `rgba(40, 25, 15, ${alpha * 0.6})`;
+        pctx.lineWidth = w * 0.4;
+        pctx.beginPath();
+        pctx.moveTo(cx + 0.3, cy + 0.3);
+        pctx.quadraticCurveTo(mx + 0.3, my + 0.3, nx + 0.3, ny + 0.3);
+        pctx.stroke();
+      }
+
+      cx = nx;
+      cy = ny;
+
+      // bourgeons / fleurs le long de la branche
+      if (depth >= 1 && Math.random() < 0.12) {
+        blossoms.push({
+          x: cx + (Math.random() - 0.5) * 6,
+          y: cy + (Math.random() - 0.5) * 6,
+          size: 4 + Math.random() * 7,
+          tone: Math.random()
+        });
+      }
+
+      // branche secondaire qui part d'un nœud
+      if (depth < 3 && i > segments * 0.3 && Math.random() < 0.15) {
+        const branchAngle = curAngle + (Math.random() < 0.5 ? -1 : 1) * (0.5 + Math.random() * 0.7);
+        const branchLength = length * (0.4 + Math.random() * 0.35);
+        const branchThickness = w * (0.55 + Math.random() * 0.2);
+        drawBranch(cx, cy, branchAngle, branchLength, branchThickness, depth + 1);
+      }
+    }
+
+    pctx.restore();
+
+    // à la fin de la brindille (si fine) : grappe de fleurs
+    if (depth >= 2 && thickness < 1.5) {
+      const cluster = 2 + Math.floor(Math.random() * 4);
+      for (let i = 0; i < cluster; i++) {
+        blossoms.push({
+          x: cx + (Math.random() - 0.5) * 12,
+          y: cy + (Math.random() - 0.5) * 12,
+          size: 5 + Math.random() * 8,
+          tone: Math.random()
+        });
+      }
+    }
+  }
+
+  // tronc principal — long et épais, depuis le coin
+  const trunkLength = Math.hypot(W, H) * (0.45 + Math.random() * 0.25);
+  drawBranch(startX, startY, baseAngle, trunkLength, 3.5 + Math.random() * 1.5, 0);
+
+  // dessine les fleurs collectées (par-dessus les branches)
+  for (const b of blossoms) {
+    drawBlossom(pctx, b.x, b.y, b.size, b.tone);
+  }
+}
+
+function drawBlossom(pctx, x, y, size, tone) {
+  // 5 pétales disposés en éventail autour d'un centre
+  const petalCount = 5;
+  const baseAngle = Math.random() * Math.PI * 2;
+
+  // teintes de rose subtiles : du blush pâle au rose plus prononcé
+  // tone ∈ [0,1] choisit la teinte
+  const colors = tone < 0.4
+    ? { petal: `rgba(245, 200, 200, ${0.35 + Math.random() * 0.15})`, deeper: `rgba(220, 140, 150, ${0.25})` }
+    : tone < 0.75
+    ? { petal: `rgba(240, 180, 190, ${0.4 + Math.random() * 0.15})`, deeper: `rgba(210, 120, 140, ${0.3})` }
+    : { petal: `rgba(230, 160, 175, ${0.45 + Math.random() * 0.15})`, deeper: `rgba(190, 100, 125, ${0.35})` };
+
+  pctx.save();
+  pctx.translate(x, y);
+  pctx.rotate(baseAngle);
+
+  // pétales — forme arrondie avec une encoche subtile au sommet
+  for (let i = 0; i < petalCount; i++) {
+    const a = (i / petalCount) * Math.PI * 2;
+    const px = Math.cos(a) * size * 0.35;
+    const py = Math.sin(a) * size * 0.35;
+
+    pctx.save();
+    pctx.translate(px, py);
+    pctx.rotate(a);
+
+    // pétale : ovale légèrement asymétrique
+    pctx.fillStyle = colors.petal;
+    pctx.beginPath();
+    pctx.ellipse(size * 0.25, 0, size * 0.45, size * 0.32, 0, 0, Math.PI * 2);
+    pctx.fill();
+
+    // ombre subtile à la base du pétale
+    pctx.fillStyle = colors.deeper;
+    pctx.beginPath();
+    pctx.ellipse(size * 0.05, 0, size * 0.18, size * 0.15, 0, 0, Math.PI * 2);
+    pctx.fill();
+
+    pctx.restore();
+  }
+
+  // cœur de la fleur — petit point doré
+  pctx.fillStyle = `rgba(180, 130, 60, ${0.6})`;
+  pctx.beginPath();
+  pctx.arc(0, 0, size * 0.12, 0, Math.PI * 2);
+  pctx.fill();
+
+  // étamines : 3-4 petits traits qui rayonnent
+  const stamenCount = 3 + Math.floor(Math.random() * 2);
+  pctx.strokeStyle = `rgba(160, 110, 50, 0.5)`;
+  pctx.lineWidth = 0.5;
+  for (let i = 0; i < stamenCount; i++) {
+    const sa = (i / stamenCount) * Math.PI * 2 + Math.random() * 0.3;
+    const sx = Math.cos(sa) * size * 0.25;
+    const sy = Math.sin(sa) * size * 0.25;
+    pctx.beginPath();
+    pctx.moveTo(0, 0);
+    pctx.lineTo(sx, sy);
+    pctx.stroke();
+    // anthère au bout
+    pctx.fillStyle = 'rgba(180, 140, 70, 0.7)';
+    pctx.beginPath();
+    pctx.arc(sx, sy, 0.7, 0, Math.PI * 2);
+    pctx.fill();
+  }
+
+  pctx.restore();
+}
+
+// ---------- central seal (animated wavy borders + Hanzi Writer center) ----------
+const SEAL_SVG_NS = 'http://www.w3.org/2000/svg';
+const SEAL_SAMPLE_POINTS = 48;
+const SEAL_WAVE_SPEED = 0.003;
+const SEAL_WAVE_AMPLITUDE = 0.025;
+
+let centralSealBordersSvg, centralSealOuterPath, centralSealInnerPath;
+let centralSealHanziHost;
+let centralSealCurrentWriter;
+let centralSealSize = 0;
+let outerPathParts, innerPathParts;
+let precomputedAngles, precomputedCos, precomputedSin;
+
+function buildCentralSeal() {
+  centralSealEl.innerHTML = '';
+  centralSealSize = Math.min(W, H) * 0.55;
+  const s = centralSealSize;
+
+  centralSealEl.style.width = s + 'px';
+  centralSealEl.style.height = s + 'px';
+
+  // SVG des bords (cercles fixes, pas d'animation)
+  centralSealBordersSvg = document.createElementNS(SEAL_SVG_NS, 'svg');
+  centralSealBordersSvg.setAttribute('class', 'borders');
+  centralSealBordersSvg.setAttribute('width', s);
+  centralSealBordersSvg.setAttribute('height', s);
+  centralSealBordersSvg.setAttribute('viewBox', `0 0 ${s} ${s}`);
+
+  // pas de bords — juste le caractère central
+  centralSealEl.appendChild(centralSealBordersSvg);
+
+  // Host pour Hanzi Writer (centré dans le sceau)
+  const hwSize = s * 0.6;
+  centralSealHanziHost = document.createElement('div');
+  centralSealHanziHost.id = 'central-seal-hanzi';
+  centralSealHanziHost.style.left = ((s - hwSize) / 2) + 'px';
+  centralSealHanziHost.style.top = ((s - hwSize) / 2) + 'px';
+  centralSealHanziHost.style.width = hwSize + 'px';
+  centralSealHanziHost.style.height = hwSize + 'px';
+  centralSealHanziHost.style.opacity = '1';
+  centralSealEl.appendChild(centralSealHanziHost);
+
+  drawCentralChar(centralSealChar);
+}
+
+function updateCentralSeal(now) {
+  // bords statiques — plus d'animation à faire
+}
+
+let centralCharAnimating = false;
+
+function drawCentralChar(char) {
+  if (!centralSealHanziHost) return;
+  centralSealHanziHost.innerHTML = '';
+  centralSealCurrentWriter = null;
+  centralCharAnimating = true;
+
+  const hwSize = parseFloat(centralSealHanziHost.style.width);
+
+  try {
+    centralSealCurrentWriter = HanziWriter.create(centralSealHanziHost, char, {
+      width: hwSize,
+      height: hwSize,
+      padding: 5,
+      strokeColor: '#b03020',
+      strokeAnimationSpeed: 0.5,
+      delayBetweenStrokes: 400,
+      showOutline: false,
+      showCharacter: false
+    });
+    centralSealCurrentWriter.animateCharacter({
+      onComplete: () => { centralCharAnimating = false; }
+    });
+  } catch (e) {
+    centralSealHanziHost.innerHTML =
+      `<div style="font-size:${hwSize * 0.85}px; font-family:'STKaiti','Kaiti SC',serif; ` +
+      `font-weight:bold; color:#b03020; text-align:center; line-height:${hwSize}px;">${char}</div>`;
+    centralCharAnimating = false;
+  }
+}
+
+function changeCentralChar(newChar) {
+  centralSealChar = newChar;
+  if (!centralSealHanziHost) return;
+  centralSealHanziHost.style.opacity = '0';
+  setTimeout(() => {
+    drawCentralChar(newChar);
+    centralSealHanziHost.style.opacity = '1';
+  }, 600);
+}
+
+function buildWavyCirclePath() { return ''; }
+
+// ---------- side seals ----------
+function createSeal(now) {
+  const x = W * 0.08 + Math.random() * W * 0.84;
+  const y = H * 0.08 + Math.random() * H * 0.84;
+  const size = Math.min(W, H) * (0.06 + Math.random() * 0.05);
+
+  const absences = [];
+  for (let i = 0; i < 4 + Math.floor(Math.random() * 6); i++) {
+    absences.push({ x: Math.random(), y: Math.random(), r: 0.05 + Math.random() * 0.15 });
+  }
+
+  const reds = ['#b8211f', '#c92a25', '#a51d1c', '#bd2622', '#a82420'];
+
+  const seal = {
+    x, y, size,
+    rotation: (Math.random() - 0.5) * 0.5,
+    luckyChar: luckySealChars[Math.floor(Math.random() * luckySealChars.length)],
+    color: reds[Math.floor(Math.random() * reds.length)],
+    absences,
+    doubleBorder: Math.random() < 0.4,
+    spawnTime: now,
+    maxLife: SEAL_LIFE_MIN_MS + Math.random() * (SEAL_LIFE_MAX_MS - SEAL_LIFE_MIN_MS),
+    cachedCanvas: null
+  };
+
+  prerenderSealCanvas(seal);
+  return seal;
+}
+
+function prerenderSealCanvas(s) {
+  const sealCanvas = document.createElement('canvas');
+  const cs = Math.ceil(s.size * DPR * 1.4);
+  sealCanvas.width = cs;
+  sealCanvas.height = cs;
+  const sctx = sealCanvas.getContext('2d');
+  sctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+  const offset = s.size * 0.2;
+  sctx.translate(offset, offset);
+
+  sctx.fillStyle = s.color;
+  const borderWidth = s.size * 0.06;
+  sctx.fillRect(0, 0, s.size, s.size);
+
+  sctx.save();
+  sctx.globalCompositeOperation = 'destination-out';
+  sctx.fillStyle = '#000';
+  sctx.fillRect(borderWidth, borderWidth, s.size - borderWidth * 2, s.size - borderWidth * 2);
+  sctx.restore();
+
+  if (s.doubleBorder) {
+    const innerMargin = s.size * 0.12;
+    const innerBorder = s.size * 0.025;
+    sctx.fillStyle = s.color;
+    sctx.fillRect(innerMargin, innerMargin, s.size - innerMargin * 2, s.size - innerMargin * 2);
+    sctx.save();
+    sctx.globalCompositeOperation = 'destination-out';
+    sctx.fillStyle = '#000';
+    sctx.fillRect(innerMargin + innerBorder, innerMargin + innerBorder,
+                  s.size - innerMargin * 2 - innerBorder * 2,
+                  s.size - innerMargin * 2 - innerBorder * 2);
+    sctx.restore();
+  }
+
+  sctx.fillStyle = s.color;
+  sctx.font = `bold ${s.size * 0.62}px "STKaiti", "Kaiti SC", "Songti SC", "SimSun", serif`;
+  sctx.textAlign = 'center';
+  sctx.textBaseline = 'middle';
+  sctx.fillText(s.luckyChar, s.size / 2, s.size / 2 + s.size * 0.02);
+
+  sctx.save();
+  sctx.globalCompositeOperation = 'destination-out';
+  for (const a of s.absences) {
+    const ax = a.x * s.size;
+    const ay = a.y * s.size;
+    const ar = a.r * s.size;
+    const grad = sctx.createRadialGradient(ax, ay, 0, ax, ay, ar);
+    grad.addColorStop(0, 'rgba(0,0,0,0.9)');
+    grad.addColorStop(0.6, 'rgba(0,0,0,0.5)');
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    sctx.fillStyle = grad;
+    sctx.beginPath();
+    sctx.arc(ax, ay, ar, 0, Math.PI * 2);
+    sctx.fill();
+  }
+  for (let i = 0; i < Math.floor(s.size * 4); i++) {
+    sctx.fillStyle = `rgba(0,0,0,${0.15 + Math.random() * 0.3})`;
+    sctx.beginPath();
+    sctx.arc(Math.random() * s.size, Math.random() * s.size, 0.3 + Math.random() * 0.8, 0, Math.PI * 2);
+    sctx.fill();
+  }
+  sctx.restore();
+
+  s.cachedCanvas = sealCanvas;
+  s.cacheOffset = offset;
+}
+
+function drawSeal(s, now) {
+  const elapsed = now - s.spawnTime;
+  if (elapsed >= s.maxLife) return false;
+
+  let alpha;
+  if (elapsed < SEAL_FADE_IN_MS) alpha = elapsed / SEAL_FADE_IN_MS;
+  else if (elapsed > s.maxLife - SEAL_FADE_OUT_MS) alpha = (s.maxLife - elapsed) / SEAL_FADE_OUT_MS;
+  else alpha = 1;
+
+  const prog = Math.min(1, elapsed / SEAL_DRAW_DURATION_MS);
+  if (prog <= 0 || alpha <= 0 || !s.cachedCanvas) return true;
+
+  ctx.save();
+  ctx.translate(s.x, s.y);
+  ctx.rotate(s.rotation);
+  ctx.globalAlpha = alpha * prog;
+  ctx.globalCompositeOperation = 'source-over';
+  const half = s.size / 2;
+  ctx.drawImage(
+    s.cachedCanvas,
+    -half - s.cacheOffset, -half - s.cacheOffset,
+    s.size * 1.4, s.size * 1.4
+  );
+  ctx.restore();
+  return true;
+}
+
+// ---------- characters (Hanzi Writer) ----------
+// échantillonne K candidats et retourne celui qui maximise la distance minimale
+// aux caractères existants et aux bords (best-candidate / Mitchell's algorithm)
+function pickBestPosition(size) {
+  const cx = W / 2;
+  const cy = H / 2;
+  const exclusionRadius = Math.min(W, H) * CENTRAL_EXCLUSION_RADIUS_FRAC;
+  const margin = size * 0.55;
+  const minX = margin, maxX = W - margin;
+  const minY = margin, maxY = H - margin;
+
+  const K = 25;                      // nombre de candidats par essai
+  const HARD_GAP = size * 0.15;      // espacement minimum dur entre caractères
+  let best = null;
+  let bestScore = -Infinity;
+
+  for (let i = 0; i < K; i++) {
+    const x = minX + Math.random() * (maxX - minX);
+    const y = minY + Math.random() * (maxY - minY);
+
+    // contrainte dure : zone centrale
+    if (Math.hypot(x - cx, y - cy) - size * 0.5 < exclusionRadius) continue;
+
+    // distance min aux caractères existants (frais ET en cours de fade)
+    let minDistChar = Infinity;
+    let hardConflict = false;
+    for (const ac of activeChars) {
+      const d = Math.hypot(x - ac.x, y - ac.y) - (size + ac.size) * 0.5;
+      if (!ac.fading && d < HARD_GAP) { hardConflict = true; break; }
+      if (d < minDistChar) minDistChar = d;
+    }
+    if (hardConflict) continue;
+
+    // distance min aux bords
+    const minDistEdge = Math.min(x - margin, W - margin - x, y - margin, H - margin - y);
+    // distance au cercle d'exclusion central (positive = à l'extérieur)
+    const distCenter = Math.hypot(x - cx, y - cy) - exclusionRadius - size * 0.5;
+
+    // score : maximiser la plus petite des contraintes (équilibre l'espace)
+    // on pondère un peu plus les autres caractères pour étaler la composition
+    const score = Math.min(minDistChar * 1.0, minDistEdge * 1.2, distCenter * 0.9);
+
+    if (score > bestScore) {
+      bestScore = score;
+      best = { x, y };
+    }
+  }
+
+  // si aucun candidat ne passe les contraintes dures, on abandonne ce tour
+  if (!best) return null;
+  return best;
+}
+
+function spawnCharacter(now) {
+  const char = chineseChars[Math.floor(Math.random() * chineseChars.length)];
+
+  const r = Math.random();
+  let size;
+  if (r < 0.4) size = Math.min(W, H) * (0.1 + Math.random() * 0.06);
+  else if (r < 0.8) size = Math.min(W, H) * (0.16 + Math.random() * 0.1);
+  else size = Math.min(W, H) * (0.26 + Math.random() * 0.14);
+
+  const pos = pickBestPosition(size);
+  if (!pos) return null;
+  const x = pos.x;
+  const y = pos.y;
+
+  const rotation = (Math.random() - 0.5) * 0.4;
+  const inks = ['#1a1310', '#1f1815', '#161210', '#231a14', '#1c1410', '#2a1f18'];
+  const ink = inks[Math.floor(Math.random() * inks.length)];
+
+  const slot = document.createElement('div');
+  slot.className = 'char-slot';
+  slot.style.width = size + 'px';
+  slot.style.height = size + 'px';
+  slot.style.left = (x - size / 2) + 'px';
+  slot.style.top = (y - size / 2) + 'px';
+  slot.style.transform = `rotate(${rotation}rad)`;
+  slot.style.opacity = (0.78 + Math.random() * 0.18).toFixed(2);
+  slot.style.setProperty('--ink-color', ink);
+  hanziHost.appendChild(slot);
+
+  const charObj = {
+    slotEl: slot,
+    x, y, size,
+    spawnTime: now,
+    completed: false,
+    completionTime: 0,
+    fading: false,
+    rasterized: false,
+    bitmapEl: null
+  };
+
+  try {
+    const writer = HanziWriter.create(slot, char, {
+      width: size,
+      height: size,
+      padding: Math.max(2, size * 0.04),
+      strokeColor: ink,
+      strokeAnimationSpeed: 100,
+      delayBetweenStrokes: 80 + Math.random() * 80,
+      showOutline: false,
+      showCharacter: false
+    });
+    writer.animateCharacter({
+      onComplete: () => {
+        charObj.completed = true;
+        charObj.completionTime = performance.now();
+        addBrushImperfections(slot.querySelector('svg'), size);
+        const svgEl = slot.querySelector('svg');
+        if (svgEl) {
+          const paths = svgEl.querySelectorAll('path');
+          paths.forEach(p => {
+            try { p._cachedBBox = p.getBBox(); } catch (e) {}
+          });
+        }
+        setTimeout(() => rasterizeCharSlot(charObj), 1200);
+      }
+    });
+  } catch (e) {
+    slot.innerHTML = `<div style="font-size:${size * 0.85}px; font-family: 'STKaiti', 'Kaiti SC', serif; color: ${ink}; text-align: center; line-height: ${size}px; width: ${size}px;">${char}</div>`;
+    charObj.completed = true;
+    charObj.completionTime = now;
+  }
+
+  activeChars.push(charObj);
+  return charObj;
+}
+
+function addBrushImperfections(svg, size) {
+  if (!svg) return;
+  const svgNS = 'http://www.w3.org/2000/svg';
+
+  let vbW = size, vbH = size;
+  const vb = svg.getAttribute('viewBox');
+  if (vb) {
+    const parts = vb.split(/\s+/).map(parseFloat);
+    if (parts.length === 4) { vbW = parts[2]; vbH = parts[3]; }
+  }
+
+  const g = document.createElementNS(svgNS, 'g');
+  g.setAttribute('opacity', '0');
+  g.style.transition = 'opacity 1s ease';
+
+  const paths = svg.querySelectorAll('path');
+  for (let i = 0; i < 4 + Math.floor(Math.random() * 4); i++) {
+    if (paths.length === 0) break;
+    const target = paths[Math.floor(Math.random() * paths.length)];
+    let pt;
+    try {
+      pt = target.getPointAtLength(Math.random() * target.getTotalLength());
+    } catch (e) { continue; }
+
+    const blob = document.createElementNS(svgNS, 'circle');
+    blob.setAttribute('cx', pt.x + (Math.random() - 0.5) * vbW * 0.04);
+    blob.setAttribute('cy', pt.y + (Math.random() - 0.5) * vbH * 0.04);
+    blob.setAttribute('r', vbW * (0.005 + Math.random() * 0.012));
+    blob.setAttribute('fill', '#1a1310');
+    blob.setAttribute('opacity', 0.4 + Math.random() * 0.4);
+    g.appendChild(blob);
+  }
+
+  for (let i = 0; i < 5 + Math.floor(Math.random() * 7); i++) {
+    const sp = document.createElementNS(svgNS, 'circle');
+    sp.setAttribute('cx', Math.random() * vbW);
+    sp.setAttribute('cy', Math.random() * vbH);
+    sp.setAttribute('r', vbW * (0.001 + Math.random() * 0.004));
+    sp.setAttribute('fill', '#1a1310');
+    sp.setAttribute('opacity', 0.3 + Math.random() * 0.4);
+    g.appendChild(sp);
+  }
+
+  svg.appendChild(g);
+  requestAnimationFrame(() => { g.setAttribute('opacity', '1'); });
+}
+
+async function rasterizeCharSlot(charObj) {
+  if (charObj.rasterized || !charObj.slotEl || charObj.fading) return;
+  const slot = charObj.slotEl;
+  const svg = slot.querySelector('svg');
+  if (!svg) return;
+
+  try {
+    let vbW = charObj.size, vbH = charObj.size;
+    const vb = svg.getAttribute('viewBox');
+    if (vb) {
+      const parts = vb.split(/\s+/).map(parseFloat);
+      if (parts.length === 4) { vbW = parts[2]; vbH = parts[3]; }
+    }
+
+    const svgClone = svg.cloneNode(true);
+    svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    svgClone.setAttribute('width', vbW);
+    svgClone.setAttribute('height', vbH);
+    const ink = getComputedStyle(slot).getPropertyValue('--ink-color').trim() || '#1a1310';
+    const paths = svgClone.querySelectorAll('path, circle');
+    paths.forEach(p => {
+      p.setAttribute('fill', ink);
+      p.setAttribute('stroke', ink);
+    });
+
+    const svgStr = new XMLSerializer().serializeToString(svgClone);
+    const blob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+      img.src = url;
+    });
+
+    const bitmapCanvas = document.createElement('canvas');
+    bitmapCanvas.className = 'rasterized';
+    const px = Math.ceil(charObj.size * DPR);
+    bitmapCanvas.width = px;
+    bitmapCanvas.height = px;
+    const bctx = bitmapCanvas.getContext('2d');
+    bctx.drawImage(img, 0, 0, px, px);
+    URL.revokeObjectURL(url);
+
+    if (!slot.parentNode || charObj.fading) return;
+
+    slot.replaceChild(bitmapCanvas, svg);
+    charObj.rasterized = true;
+    charObj.bitmapEl = bitmapCanvas;
+  } catch (e) {}
+}
+
+function fadeOutCharacter(charObj) {
+  if (charObj.fading) return;
+  charObj.fading = true;
+  charObj.slotEl.classList.add('dissolving');
+
+  const EJECT_DURATION_MS = 1700;
+
+  if (charObj.rasterized && charObj.bitmapEl) {
+    const angle = Math.random() * Math.PI * 2;
+    const dist = charObj.size * 0.6;
+    const tx = Math.cos(angle) * dist;
+    const ty = Math.sin(angle) * dist;
+    const rot = (Math.random() - 0.5) * 0.6;
+
+    charObj.bitmapEl.animate(
+      [
+        { transform: 'translate(0, 0) rotate(0) scale(1)', opacity: 1 },
+        { transform: `translate(${tx}px, ${ty}px) rotate(${rot}rad) scale(1.15)`, opacity: 0 }
+      ],
+      {
+        duration: EJECT_DURATION_MS,
+        easing: 'cubic-bezier(0.2, 0.6, 0.4, 1)',
+        fill: 'forwards'
+      }
+    );
+
+    setTimeout(() => {
+      if (charObj.slotEl.parentNode) {
+        charObj.slotEl.parentNode.removeChild(charObj.slotEl);
+      }
+      activeChars = activeChars.filter(c => c !== charObj);
+    }, EJECT_DURATION_MS + 200);
+    return;
+  }
+
+  // fallback : SVG (rasterisation pas encore faite)
+  const svg = charObj.slotEl.querySelector('svg');
+  if (svg) {
+    let vbW = charObj.size, vbH = charObj.size;
+    const vb = svg.getAttribute('viewBox');
+    if (vb) {
+      const parts = vb.split(/\s+/).map(parseFloat);
+      if (parts.length === 4) { vbW = parts[2]; vbH = parts[3]; }
+    }
+    const cx = vbW / 2;
+    const cy = vbH / 2;
+
+    const elements = svg.querySelectorAll('path');
+    const ejectStrength = Math.max(vbW, vbH) * 1.0;
+
+    elements.forEach((el) => {
+      let bbox = el._cachedBBox;
+      if (!bbox) {
+        try { bbox = el.getBBox(); } catch (e) { return; }
+      }
+      if (!bbox || (bbox.width === 0 && bbox.height === 0)) return;
+
+      const computed = getComputedStyle(el);
+      const currentFill = el.getAttribute('fill') || computed.fill;
+      const currentStroke = el.getAttribute('stroke') || computed.stroke;
+      if (currentFill && currentFill !== 'none') el.setAttribute('fill', currentFill);
+      if (currentStroke && currentStroke !== 'none') el.setAttribute('stroke', currentStroke);
+
+      const ex = bbox.x + bbox.width / 2;
+      const ey = bbox.y + bbox.height / 2;
+      let dx = ex - cx;
+      let dy = ey - cy;
+      const dist = Math.hypot(dx, dy);
+      if (dist < 1) {
+        const a = Math.random() * Math.PI * 2;
+        dx = Math.cos(a);
+        dy = Math.sin(a);
+      } else {
+        dx /= dist;
+        dy /= dist;
+      }
+
+      const tx = dx * ejectStrength;
+      const ty = dy * ejectStrength;
+      const rot = (Math.random() - 0.5) * 1.2;
+      const startTransform = el.getAttribute('transform') || '';
+
+      el.animate(
+        [
+          { transform: `${startTransform} translate(0px, 0px) rotate(0rad)`, opacity: 1 },
+          { transform: `${startTransform} translate(${tx}px, ${ty}px) rotate(${rot}rad)`, opacity: 0 }
+        ],
+        { duration: EJECT_DURATION_MS, easing: 'cubic-bezier(0.2, 0.6, 0.4, 1)', fill: 'forwards' }
+      );
+    });
+
+    const circles = svg.querySelectorAll('circle');
+    circles.forEach((el) => {
+      const currentFill = el.getAttribute('fill');
+      if (currentFill) el.setAttribute('fill', currentFill);
+
+      const cxv = parseFloat(el.getAttribute('cx')) || 0;
+      const cyv = parseFloat(el.getAttribute('cy')) || 0;
+      let dx = cxv - cx;
+      let dy = cyv - cy;
+      const dist = Math.hypot(dx, dy);
+      if (dist < 1) {
+        const a = Math.random() * Math.PI * 2;
+        dx = Math.cos(a);
+        dy = Math.sin(a);
+      } else {
+        dx /= dist;
+        dy /= dist;
+      }
+      const tx = dx * ejectStrength * (0.8 + Math.random() * 0.6);
+      const ty = dy * ejectStrength * (0.8 + Math.random() * 0.6);
+      el.animate(
+        [
+          { transform: 'translate(0px, 0px)', opacity: el.getAttribute('opacity') || 1 },
+          { transform: `translate(${tx}px, ${ty}px)`, opacity: 0 }
+        ],
+        { duration: EJECT_DURATION_MS, easing: 'cubic-bezier(0.2, 0.6, 0.4, 1)', fill: 'forwards' }
+      );
+    });
+  }
+
+  setTimeout(() => {
+    charObj.slotEl.style.opacity = '0';
+  }, EJECT_DURATION_MS - 250);
+
+  setTimeout(() => {
+    if (charObj.slotEl.parentNode) {
+      charObj.slotEl.parentNode.removeChild(charObj.slotEl);
+    }
+    activeChars = activeChars.filter(c => c !== charObj);
+  }, EJECT_DURATION_MS + 200);
+}
+
+// ---------- main loop ----------
+let lastSpawnAttempt = 0;
+let nextSpawnDelay = CHAR_SPAWN_MIN_MS;
+let lastSealSpawn = 0;
+let nextSealDelay = SEAL_SPAWN_MIN_MS;
+let lastCharChange = 0;
+
+function loop(now) {
+  // changement périodique du caractère central — uniquement si le tracé est terminé
+  if (!centralCharAnimating && now - lastCharChange > CENTRAL_CHAR_CHANGE_MS) {
+    let newChar;
+    do {
+      newChar = centralSealCharsPool[Math.floor(Math.random() * centralSealCharsPool.length)];
+    } while (newChar === centralSealChar && centralSealCharsPool.length > 1);
+    changeCentralChar(newChar);
+    lastCharChange = now;
+  }
+
+  updateCentralSeal(now);
+
+  // fade-out d'un seul caractère à la fois (le plus vieux éligible)
+  const anyFading = activeChars.some(c => c.fading);
+  if (!anyFading) {
+    let oldest = null;
+    for (let i = 0; i < activeChars.length; i++) {
+      const c = activeChars[i];
+      if (!c.fading && c.completed && now - c.completionTime > CHAR_LIFETIME_MS) {
+        if (!oldest || c.completionTime < oldest.completionTime) oldest = c;
+      }
+    }
+    if (oldest) fadeOutCharacter(oldest);
+  }
+
+  // spawn de nouveaux caractères
+  let freshCount = 0;
+  for (let i = 0; i < activeChars.length; i++) {
+    if (!activeChars[i].fading) freshCount++;
+  }
+  if (now - lastSpawnAttempt > nextSpawnDelay) {
+    if (freshCount < TARGET_VISIBLE) {
+      const result = spawnCharacter(now);
+      if (result) {
+        nextSpawnDelay = CHAR_SPAWN_MIN_MS + Math.random() * (CHAR_SPAWN_MAX_MS - CHAR_SPAWN_MIN_MS);
+      } else {
+        nextSpawnDelay = CHAR_SPAWN_RETRY_MS;
+      }
+    } else {
+      nextSpawnDelay = 500;
+    }
+    lastSpawnAttempt = now;
+  }
+
+  // spawn des sceaux
+  if (now - lastSealSpawn > nextSealDelay && seals.length < SEAL_MAX_VISIBLE) {
+    seals.push(createSeal(now));
+    lastSealSpawn = now;
+    nextSealDelay = SEAL_SPAWN_MIN_MS + Math.random() * (SEAL_SPAWN_MAX_MS - SEAL_SPAWN_MIN_MS);
+  }
+
+  // rendu canvas
+  ctx.clearRect(0, 0, W, H);
+  let writeIdx = 0;
+  for (let i = 0; i < seals.length; i++) {
+    if (drawSeal(seals[i], now)) {
+      seals[writeIdx++] = seals[i];
+    }
+  }
+  seals.length = writeIdx;
+
+  requestAnimationFrame(loop);
+}
+
+window.addEventListener('resize', resize);
+resize();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

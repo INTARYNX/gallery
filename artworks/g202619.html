@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Genuary 2026 #19</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: #000;
+            overflow: hidden;
+        }
+        canvas {
+            border: none;
+            max-width: 100%;
+            max-height: 100vh;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        function resize() {
+            const size = Math.min(window.innerWidth, window.innerHeight);
+            canvas.width = size;
+            canvas.height = size;
+        }
+        
+        resize();
+        window.addEventListener('resize', resize);
+        
+        const dotCount = 16;
+        const lineCount = 16;
+        const dotSize = 2;
+        
+        function animate() {
+            const spacing = canvas.width / (dotCount + 1);
+            const centerY = canvas.height / 2;
+            
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            const time = Date.now() * 0.001;
+            const cycleHue = (time * 30) % 360;
+            
+            // Draw blinking squares
+            for (let row = 0; row < lineCount - 1; row++) {
+                for (let col = 0; col < dotCount; col++) {
+                    const seed = row * dotCount + col;
+                    const random = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
+                    const offset = (random - Math.floor(random)) * Math.PI * 2;
+                    const blinkPhase = offset + time * (2 + Math.sin(seed) * 1.5);
+                    const brightness = (Math.sin(blinkPhase) + 1) / 2;
+                    
+                    const z0 = row / lineCount;
+                    const z1 = (row + 1) / lineCount;
+                    
+                    const scale0Front = 0.5;
+                    const scale0Back = 0.5 + ((lineCount - 1) / lineCount) * 0.5;
+                    const y0Front = centerY + (0 - lineCount / 2) * (canvas.height / lineCount) * 0.6 * scale0Front;
+                    const y0Back = centerY + ((lineCount - 1) - lineCount / 2) * (canvas.height / lineCount) * 0.6 * scale0Back;
+                    
+                    const scaleRow0 = 0.5 + z0 * 0.5;
+                    const scaleRow1 = 0.5 + z1 * 0.5;
+                    const y0 = centerY + (row - lineCount / 2) * (canvas.height / lineCount) * 0.6 * scaleRow0;
+                    const y1 = centerY + ((row + 1) - lineCount / 2) * (canvas.height / lineCount) * 0.6 * scaleRow1;
+                    
+                    const t0 = (y0 - y0Front) / (y0Back - y0Front);
+                    const t1 = (y1 - y0Front) / (y0Back - y0Front);
+                    
+                    const baseXLeft = spacing * (col + 1);
+                    const baseXRight = spacing * (col + 2);
+                    
+                    const x0Left = centerY + (baseXLeft - centerY) * scale0Front;
+                    const x1Left = centerY + (baseXLeft - centerY) * scale0Back;
+                    const x0Right = centerY + (baseXRight - centerY) * scale0Front;
+                    const x1Right = centerY + (baseXRight - centerY) * scale0Back;
+                    
+                    const topLeft = x0Left + t0 * (x1Left - x0Left);
+                    const topRight = x0Right + t0 * (x1Right - x0Right);
+                    const bottomLeft = x0Left + t1 * (x1Left - x0Left);
+                    const bottomRight = x0Right + t1 * (x1Right - x0Right);
+                    
+                    ctx.fillStyle = `hsla(${(cycleHue + 180) % 360}, 100%, ${brightness * 20}%, ${brightness * 0.4})`;
+                    ctx.beginPath();
+                    ctx.moveTo(topLeft, y0);
+                    ctx.lineTo(topRight, y0);
+                    ctx.lineTo(bottomRight, y1);
+                    ctx.lineTo(bottomLeft, y1);
+                    ctx.closePath();
+                    ctx.fill();
+                }
+            }
+            
+            // Draw grid
+            ctx.strokeStyle = `rgba(0, 0, 0, 0.8)`;
+            ctx.lineWidth = 2;
+            
+            // Draw 17 vertical lines
+            for (let i = 0; i <= dotCount; i++) {
+                const baseX = spacing * (i + 1);
+                ctx.beginPath();
+                
+                const z0 = 0;
+                const scale0 = 0.5 + z0 * 0.5;
+                const y0 = centerY + (0 - lineCount / 2) * (canvas.height / lineCount) * 0.6 * scale0;
+                const x0 = centerY + (baseX - centerY) * scale0;
+                ctx.moveTo(x0, y0);
+                
+                const z1 = (lineCount - 1) / lineCount;
+                const scale1 = 0.5 + z1 * 0.5;
+                const y1 = centerY + ((lineCount - 1) - lineCount / 2) * (canvas.height / lineCount) * 0.6 * scale1;
+                const x1 = centerY + (baseX - centerY) * scale1;
+                ctx.lineTo(x1, y1);
+                
+                ctx.stroke();
+            }
+            
+            // Draw 16 horizontal lines
+            for (let line = 0; line < lineCount; line++) {
+                const z = line / lineCount;
+                const scale = 0.5 + z * 0.5;
+                const perspectiveY = centerY + (line - lineCount / 2) * (canvas.height / lineCount) * 0.6 * scale;
+                
+                const z0 = 0;
+                const scale0 = 0.5 + z0 * 0.5;
+                const x0First = centerY + (spacing * 1 - centerY) * scale0;
+                const y0 = centerY + (0 - lineCount / 2) * (canvas.height / lineCount) * 0.6 * scale0;
+                
+                const z1 = (lineCount - 1) / lineCount;
+                const scale1 = 0.5 + z1 * 0.5;
+                const x1First = centerY + (spacing * 1 - centerY) * scale1;
+                const y1 = centerY + ((lineCount - 1) - lineCount / 2) * (canvas.height / lineCount) * 0.6 * scale1;
+                
+                const t = (perspectiveY - y0) / (y1 - y0);
+                const xFirst = x0First + t * (x1First - x0First);
+                
+                const x0Last = centerY + (spacing * (dotCount + 1) - centerY) * scale0;
+                const x1Last = centerY + (spacing * (dotCount + 1) - centerY) * scale1;
+                const xLast = x0Last + t * (x1Last - x0Last);
+                
+                ctx.beginPath();
+                ctx.moveTo(xFirst, perspectiveY);
+                ctx.lineTo(xLast, perspectiveY);
+                ctx.stroke();
+            }
+            
+            const verticalSpread = Math.abs(Math.sin(time * 0.15 - Math.PI / 2)) * Math.min(canvas.height * 0.4, 200);
+            
+            for (let line = 0; line < lineCount; line++) {
+                const frequency = 0.5 + line * 0.3;
+                const phase = (line * Math.PI * 2) / lineCount;
+                const amplitude = verticalSpread * (1 - line / lineCount * 0.5);
+                const scrollSpeed = 10 + line * 5;
+                
+                const z = line / lineCount;
+                const scale = 0.5 + z * 0.5;
+                const perspectiveY = centerY + (line - lineCount / 2) * (canvas.height / lineCount) * 0.6 * scale;
+                
+                const brightness = 40 + z * 40;
+                ctx.fillStyle = `hsl(${cycleHue}, 100%, ${brightness}%)`;
+                
+                const offsetX = Math.sin(time * scrollSpeed * 0.01) * (canvas.width * 0.3);
+                
+                for (let i = 0; i < dotCount; i++) {
+                    const baseX = spacing * (i + 1);
+                    const horizontalWave = Math.sin(time * scrollSpeed * 0.01) * (canvas.width * 0.3);
+                    const verticalWave = Math.sin(time * frequency + phase + i * 0.5) * amplitude;
+                    const x = centerY + (baseX - centerY) * scale + horizontalWave * scale;
+                    const waveY = verticalWave * scale;
+                    const y = perspectiveY + waveY;
+                    
+                    const size = dotSize * (0.4 + z * 0.6);
+                    ctx.beginPath();
+                    ctx.arc(x, y, size, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+            
+            requestAnimationFrame(animate);
+        }
+        
+        animate();
+    </script>
+</body>
+</html>

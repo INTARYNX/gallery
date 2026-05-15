@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dance Floor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: #000;
+            overflow: hidden;
+        }
+        canvas {
+            border: 2px solid #333;
+            max-width: 100%;
+            max-height: 100vh;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        function resize() {
+            const size = Math.min(window.innerWidth, window.innerHeight);
+            canvas.width = size;
+            canvas.height = size;
+        }
+        
+        resize();
+        window.addEventListener('resize', resize);
+        
+        const dotCount = 16;
+        const lineCount = 16;
+        const startTime = Date.now();
+        const introDuration = 3.2;
+        
+        function getQuadCoords(row, col, spacing, centerY, layerOffset) {
+            const z0 = row / lineCount;
+            const z1 = (row + 1) / lineCount;
+            
+            const scale0Front = 0.5;
+            const scale0Back = 0.5 + ((lineCount - 1) / lineCount) * 0.5;
+            const y0Front = centerY + (0 - lineCount / 2) * (canvas.height / lineCount) * 0.6 * scale0Front - layerOffset;
+            const y0Back = centerY + ((lineCount - 1) - lineCount / 2) * (canvas.height / lineCount) * 0.6 * scale0Back - layerOffset;
+            
+            const scaleRow0 = 0.5 + z0 * 0.5;
+            const scaleRow1 = 0.5 + z1 * 0.5;
+            const y0 = centerY + (row - lineCount / 2) * (canvas.height / lineCount) * 0.6 * scaleRow0 - layerOffset;
+            const y1 = centerY + ((row + 1) - lineCount / 2) * (canvas.height / lineCount) * 0.6 * scaleRow1 - layerOffset;
+            
+            const t0 = (y0 - y0Front) / (y0Back - y0Front);
+            const t1 = (y1 - y0Front) / (y0Back - y0Front);
+            
+            const baseXLeft = spacing * (col + 1) - 10;
+            const baseXRight = spacing * (col + 2) - 10;
+            
+            const x0Left = centerY + (baseXLeft - centerY) * scale0Front;
+            const x1Left = centerY + (baseXLeft - centerY) * scale0Back;
+            const x0Right = centerY + (baseXRight - centerY) * scale0Front;
+            const x1Right = centerY + (baseXRight - centerY) * scale0Back;
+            
+            return {
+                topLeft: x0Left + t0 * (x1Left - x0Left),
+                topRight: x0Right + t0 * (x1Right - x0Right),
+                bottomLeft: x0Left + t1 * (x1Left - x0Left),
+                bottomRight: x0Right + t1 * (x1Right - x0Right),
+                y0, y1
+            };
+        }
+        
+        function animate() {
+            const spacing = canvas.width / (dotCount + 1);
+            const centerY = canvas.height / 2;
+            
+            const time = Date.now() * 0.001;
+            const elapsed = time - startTime * 0.001;
+            const introProgress = Math.min(elapsed / introDuration, 1);
+            const allTilesArrived = introProgress >= 1;
+            
+            const flashDuration = 0.3;
+            const flashProgress = allTilesArrived ? Math.min((elapsed - introDuration) / flashDuration, 1) : 0;
+            const flashIntensity = flashProgress < 1 ? 1 - flashProgress : 0;
+            
+            const animTime = allTilesArrived && flashProgress >= 1 ? elapsed - introDuration - flashDuration : 0;
+            const cycleHue = 220 + Math.sin(animTime * 0.2) * 30; // Cycle lent entre bleu et cyan
+            
+            const gradient = ctx.createRadialGradient(
+                canvas.width / 2, canvas.height / 2, 0,
+                canvas.width / 2, canvas.height / 2, canvas.width * 0.7
+            );
+            gradient.addColorStop(0, `hsla(${cycleHue}, 20%, 15%, 0.3)`);
+            gradient.addColorStop(1, 'rgba(0, 0, 0, 0.3)');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Background checker
+            const checkSize = 20;
+            for (let cy = 0; cy < canvas.height; cy += checkSize) {
+                for (let cx = 0; cx < canvas.width; cx += checkSize) {
+                    if ((Math.floor(cx / checkSize) + Math.floor(cy / checkSize)) % 2 === 0) {
+                        ctx.fillStyle = 'rgba(255, 255, 255, 0.003)';
+                        ctx.fillRect(cx, cy, checkSize, checkSize);
+                    }
+                }
+            }
+            
+            const explosionScale = animTime > 0 ? 1 + Math.sin(animTime * 0.3) * 0.5 : 1;
+            const breathingScale = animTime > 0 ? 1 + Math.sin(animTime * 0.5) * 0.3 : 1;
+            const burstScale = animTime > 0 ? 1 + Math.sin(animTime * 0.8) * 0.4 : 1;
+            
+            for (let layer = 0; layer < 10; layer++) {
+                const baseLayerOffset = layer * canvas.height * 0.05 - canvas.height * 0.15;
+                const layerOffset = baseLayerOffset * explosionScale * breathingScale * burstScale;
+                const layerHue = cycleHue + (layer - 5) * 3; // Variation subtile autour du bleu
+                
+                for (let row = 0; row < lineCount - 1; row++) {
+                    for (let col = 0; col < dotCount; col++) {
+                        const tileIndex = row + col + layer;
+                        const tileDelay = tileIndex * 0.025;
+                        const tileProgress = Math.max(0, Math.min(1, (introProgress * introDuration - tileDelay) / 0.8));
+                        const tileEase = 1 - Math.pow(1 - tileProgress, 3);
+                        
+                        const blinkPhase = animTime * 2 + layer * 0.3;
+                        const brightness = animTime > 0 ? (Math.sin(blinkPhase) + 1) / 2 : 1;
+                        
+                        const rowAlpha = 0.05 + (row / (lineCount - 1)) * 0.45;
+                        
+                        const coords = getQuadCoords(row, col, spacing, centerY, layerOffset);
+                        
+                        const centerX = (coords.topLeft + coords.topRight) / 2;
+                        const centerTileY = (coords.y0 + coords.y1) / 2;
+                        
+                        const explosionDist = (1 - tileEase) * canvas.width * 1.5;
+                        const angle = Math.atan2(centerTileY - canvas.height / 2, centerX - canvas.width / 2);
+                        
+                        const offsetX = Math.cos(angle) * explosionDist;
+                        const offsetY = Math.sin(angle) * explosionDist;
+                        
+                        ctx.save();
+                        ctx.translate(offsetX, offsetY);
+                        
+                        const finalAlpha = animTime > 0 ? brightness * rowAlpha : rowAlpha;
+                        
+                        let displayHue, displaySat, displayLightness;
+                        
+                        const checkerboard = (row + col) % 2;
+                        const darken = checkerboard === 0 ? 1 : 0.7;
+                        
+                        if (!allTilesArrived) {
+                            // Phase intro : teinte sombre en damier
+                            displayHue = 220;
+                            displaySat = 30;
+                            displayLightness = checkerboard === 0 ? 20 : 10;
+                        } else if (flashIntensity > 0) {
+                            // Phase flash : blanc
+                            displayHue = 0;
+                            displaySat = 0;
+                            displayLightness = 35 + flashIntensity * 65;
+                        } else {
+                            // Phase animation : couleurs sombres monochrome
+                            displayHue = layerHue;
+                            displaySat = 30;
+                            displayLightness = (15 + brightness * 25) * darken;
+                        }
+                        
+                        ctx.fillStyle = `hsla(${displayHue}, ${displaySat}%, ${displayLightness}%, ${finalAlpha * tileEase})`;
+                        ctx.beginPath();
+                        ctx.moveTo(coords.topLeft, coords.y0);
+                        ctx.lineTo(coords.topRight, coords.y0);
+                        ctx.lineTo(coords.bottomRight, coords.y1);
+                        ctx.lineTo(coords.bottomLeft, coords.y1);
+                        ctx.closePath();
+                        ctx.fill();
+                        
+                        ctx.restore();
+                    }
+                }
+            }
+            
+            requestAnimationFrame(animate);
+        }
+        
+        animate();
+    </script>
+</body>
+</html>

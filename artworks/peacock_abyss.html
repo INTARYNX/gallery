@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body { margin: 0; background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="out"></canvas>
+<script>
+const out = document.getElementById('out');
+const S = Math.min(window.innerWidth, window.innerHeight) * 0.85;
+out.width = out.height = S;
+const octx = out.getContext('2d');
+
+// Smaller sim for performance
+const SIM = 256;
+const offscreen = document.createElement('canvas');
+offscreen.width = offscreen.height = SIM;
+const ctx = offscreen.getContext('2d');
+
+const res = 2;
+const gw = Math.ceil(SIM / res);
+const field = new Float32Array(gw * gw * 3);
+const tmp = new Float32Array(gw * gw * 3);
+const N = 6000;
+const px = new Float32Array(N), py = new Float32Array(N);
+const pa = new Float32Array(N), pc = new Uint8Array(N);
+
+for (let i = 0; i < N; i++) {
+  const a = Math.random() * Math.PI * 2;
+  const r = Math.random() * SIM * 0.35;
+  px[i] = SIM/2 + Math.cos(a)*r;
+  py[i] = SIM/2 + Math.sin(a)*r;
+  pa[i] = Math.random() * Math.PI * 2;
+  pc[i] = i % 3;
+}
+
+const sA=0.45,sD=9,tS=0.35,spd=1.2,dep=0.7,dcy=0.96,dif=0.18;
+
+function sense(x,y,a,ch){
+  const sx=x+Math.cos(a)*sD,sy=y+Math.sin(a)*sD;
+  const gx=(sx/res)|0,gy=(sy/res)|0;
+  if(gx<0||gx>=gw||gy<0||gy>=gw)return 0;
+  const idx=(gy*gw+gx)*3;
+  return field[idx+ch]*2+field[idx+(ch+1)%3]*0.3-field[idx+(ch+2)%3]*0.5;
+}
+
+function simStep(){
+  for(let i=0;i<N;i++){
+    const ch=pc[i],f=sense(px[i],py[i],pa[i],ch),l=sense(px[i],py[i],pa[i]-sA,ch),r=sense(px[i],py[i],pa[i]+sA,ch);
+    if(f>=l&&f>=r){}else if(l>r)pa[i]-=tS*(0.5+Math.random()*0.5);else if(r>l)pa[i]+=tS*(0.5+Math.random()*0.5);else pa[i]+=(Math.random()-0.5)*tS;
+    px[i]+=Math.cos(pa[i])*spd;py[i]+=Math.sin(pa[i])*spd;
+    if(px[i]<0||px[i]>=SIM||py[i]<0||py[i]>=SIM){px[i]=SIM/2+(Math.random()-0.5)*SIM*0.5;py[i]=SIM/2+(Math.random()-0.5)*SIM*0.5;pa[i]=Math.random()*Math.PI*2;}
+    const gx=(px[i]/res)|0,gy=(py[i]/res)|0;
+    if(gx>=0&&gx<gw&&gy>=0&&gy<gw)field[(gy*gw+gx)*3+ch]+=dep;
+  }
+  // diffuse + decay
+  tmp.fill(0);
+  for(let y=1;y<gw-1;y++)for(let x=1;x<gw-1;x++)for(let ch=0;ch<3;ch++){
+    const idx=(y*gw+x)*3+ch;let s=field[idx]*(1-dif);const d=dif/8;
+    s+=field[((y-1)*gw+x-1)*3+ch]*d;s+=field[((y-1)*gw+x)*3+ch]*d;s+=field[((y-1)*gw+x+1)*3+ch]*d;
+    s+=field[(y*gw+x-1)*3+ch]*d;s+=field[(y*gw+x+1)*3+ch]*d;
+    s+=field[((y+1)*gw+x-1)*3+ch]*d;s+=field[((y+1)*gw+x)*3+ch]*d;s+=field[((y+1)*gw+x+1)*3+ch]*d;
+    tmp[idx]=s*dcy;
+  }
+  field.set(tmp);
+}
+
+const simImg = ctx.createImageData(SIM, SIM);
+function renderSim(){
+  const d=simImg.data;
+  for(let y=0;y<SIM;y++){const gy=(y/res)|0;
+    for(let x=0;x<SIM;x++){const gx=(x/res)|0;
+      const fi=(gy*gw+gx)*3,pi=(y*SIM+x)*4;
+      const r=field[fi],g=field[fi+1],b=field[fi+2];
+      // Peacock palette: teal, emerald, sapphire, gold, purple
+      const lum = r + g + b;
+      const phase = Math.atan2(g - b, r - g);
+      d[pi]   = Math.min(255, (r * 4 + b * 8 + lum * 1.5) | 0);       // deep blue-teal
+      d[pi+1] = Math.min(255, (g * 18 + r * 3 + b * 2) | 0);          // rich emerald green
+      d[pi+2] = Math.min(255, (b * 16 + g * 4 + r * 1.5) | 0);        // sapphire blue
+      d[pi+3]=255;
+  }}
+  ctx.putImageData(simImg,0,0);
+}
+
+// Tunnel — continuous smooth rings
+const NUM_RINGS = 30;
+let t = 0;
+
+function renderTunnel(){
+  // persistent trails — semi-transparent overlay
+  octx.globalAlpha = 0.15;
+  octx.fillStyle='#0a0e2a';
+  octx.fillRect(0,0,S,S);
+  octx.globalAlpha = 1;
+  const cx=S/2,cy=S/2,maxR=S*0.49;
+
+  // Build sorted ring list by radius
+  const rings = [];
+  for(let i=0;i<NUM_RINGS;i++){
+    let phase = (t * NUM_RINGS + i) % NUM_RINGS;
+    let depth = phase / NUM_RINGS;
+    let ez = depth * depth;
+    let radius = maxR * ez;
+    rings.push({radius, depth, i});
+  }
+  rings.sort((a,b) => a.radius - b.radius);
+
+  for(let ri=0;ri<rings.length;ri++){
+    const {radius, depth, i} = rings[ri];
+    if(radius < 1) continue;
+    let innerR = ri > 0 ? rings[ri-1].radius : 0;
+
+    octx.save();
+    octx.beginPath();
+    octx.arc(cx,cy,radius,0,Math.PI*2);
+    octx.arc(cx,cy,innerR,0,Math.PI*2,true);
+    octx.clip();
+
+    let scale=(radius*2.2)/SIM;
+    let rot=t*Math.PI*8+i*0.29;
+
+    octx.translate(cx,cy);
+    octx.rotate(rot);
+    octx.scale(scale,scale);
+    octx.globalAlpha=0.4+0.6*depth;
+    octx.drawImage(offscreen,-SIM/2,-SIM/2);
+    octx.restore();
+  }
+
+  // Second tunnel — counter-rotation, lighter blend
+  octx.globalCompositeOperation = 'lighter';
+  const rings2 = [];
+  for(let i=0;i<NUM_RINGS;i++){
+    let phase = (t * NUM_RINGS + i + 2) % NUM_RINGS;
+    let depth = phase / NUM_RINGS;
+    let ez = depth * depth;
+    let radius = maxR * 0.95 * ez;
+    rings2.push({radius, depth, i});
+  }
+  rings2.sort((a,b) => a.radius - b.radius);
+
+  for(let ri=0;ri<rings2.length;ri++){
+    const {radius, depth, i} = rings2[ri];
+    if(radius < 1) continue;
+    let innerR = ri > 0 ? rings2[ri-1].radius : 0;
+
+    octx.save();
+    octx.beginPath();
+    octx.arc(cx,cy,radius,0,Math.PI*2);
+    octx.arc(cx,cy,innerR,0,Math.PI*2,true);
+    octx.clip();
+
+    let scale=(radius*2.2)/SIM;
+    let rot= -t*Math.PI*8 + i*0.35;
+
+    octx.translate(cx,cy);
+    octx.rotate(rot);
+    octx.scale(scale,scale);
+    octx.globalAlpha=0.06+0.15*depth;
+    octx.drawImage(offscreen,-SIM/2,-SIM/2);
+    octx.restore();
+  }
+  octx.globalCompositeOperation = 'source-over';
+
+  // vignette
+  const g=octx.createRadialGradient(cx,cy,maxR*0.8,cx,cy,maxR*1.05);
+  g.addColorStop(0,'transparent');
+  g.addColorStop(1,'rgba(0,0,0,0.7)');
+  octx.fillStyle=g;
+  octx.fillRect(0,0,S,S);
+}
+
+// Run sim ahead a bit before first render
+for(let i=0;i<60;i++)simStep();
+
+// Decouple sim from render: run sim less often
+let simCounter=0;
+function loop(){
+  simCounter++;
+  if(simCounter%1===0){
+    simStep();
+    renderSim();
+  }
+  renderTunnel();
+  t+=0.0012;
+  requestAnimationFrame(loop);
+}
+renderSim();
+loop();
+</script>
+</body>
+</html>

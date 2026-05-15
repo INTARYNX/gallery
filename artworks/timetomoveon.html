@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Time to Move On</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        canvas {
+            border: 1px solid #333;
+            max-width: 100%;
+            max-height: 100%;
+            width: min(90vmin, 600px);
+            height: min(90vmin, 600px);
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 600;
+        canvas.height = 600;
+
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2;
+
+        let angleX = 0;
+        let angleY = 0;
+        let angleZ = 0;
+        let hue = 0;
+        
+        let currentPattern = null;
+        let nextPattern = null;
+        let transitionStart = Date.now();
+        let currentSeed = Math.random() * 1000;
+        const TRANSITION_DURATION = 5000;
+
+        function lerp(a, b, t) {
+            return a + (b - a) * t;
+        }
+
+        function easeInOutCubic(t) {
+            return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+        }
+
+        function seededRandom(seed) {
+            const x = Math.sin(seed) * 10000;
+            return x - Math.floor(x);
+        }
+
+        function generatePattern(seed) {
+            const pattern = {
+                offsetX: (seededRandom(seed * 0.5) - 0.5) * canvas.width * 0.4,
+                offsetY: (seededRandom(seed * 0.6) - 0.5) * canvas.height * 0.4,
+                scale: 0.5 + seededRandom(seed * 0.7) * 0.8,
+                rotation: seededRandom(seed * 0.8) * Math.PI * 2,
+                blobs: []
+            };
+
+            const numBlobs = 12;
+            
+            for (let i = 0; i < numBlobs; i++) {
+                const blobSeed = seed + i * 100;
+                const points = 6;
+                
+                const blob = {
+                    y: -200 + (i / numBlobs) * 400,
+                    x: -120 + seededRandom(blobSeed * 2) * 240,
+                    size: 15 + seededRandom(blobSeed * 3) * 50,
+                    rotation: seededRandom(blobSeed * 11) * Math.PI * 2,
+                    points: points,
+                    radii: [],
+                    stretch: 0.5 + seededRandom(blobSeed * 6) * 1.5,
+                    satellites: []
+                };
+
+                for (let a = 0; a < points; a++) {
+                    blob.radii.push(blob.size * (0.4 + seededRandom(blobSeed * 5 + a) * 1.2));
+                }
+
+                const numSats = 3;
+                for (let j = 0; j < numSats; j++) {
+                    blob.satellites.push({
+                        x: blob.x + (seededRandom(blobSeed * 7 + j) - 0.5) * 100,
+                        y: blob.y + (seededRandom(blobSeed * 8 + j) - 0.5) * 80,
+                        size: 5 + seededRandom(blobSeed * 9 + j) * 20,
+                        rotation: seededRandom(blobSeed * 12 + j) * Math.PI * 2
+                    });
+                }
+
+                pattern.blobs.push(blob);
+            }
+
+            return pattern;
+        }
+
+        function lerpPattern(p1, p2, t) {
+            let rot1 = p1.rotation;
+            let rot2 = p2.rotation;
+            
+            let diff = rot2 - rot1;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+            rot2 = rot1 + diff;
+            
+            const result = {
+                offsetX: lerp(p1.offsetX, p2.offsetX, t),
+                offsetY: lerp(p1.offsetY, p2.offsetY, t),
+                scale: lerp(p1.scale, p2.scale, t),
+                rotation: lerp(rot1, rot2, t),
+                blobs: []
+            };
+
+            for (let i = 0; i < p1.blobs.length; i++) {
+                const b1 = p1.blobs[i];
+                const b2 = p2.blobs[i];
+                
+                let brot1 = b1.rotation;
+                let brot2 = b2.rotation;
+                let bdiff = brot2 - brot1;
+                while (bdiff > Math.PI) bdiff -= Math.PI * 2;
+                while (bdiff < -Math.PI) bdiff += Math.PI * 2;
+                brot2 = brot1 + bdiff;
+                
+                const blob = {
+                    y: lerp(b1.y, b2.y, t),
+                    x: lerp(b1.x, b2.x, t),
+                    size: lerp(b1.size, b2.size, t),
+                    rotation: lerp(brot1, brot2, t),
+                    points: b1.points,
+                    radii: [],
+                    stretch: lerp(b1.stretch, b2.stretch, t),
+                    satellites: []
+                };
+
+                for (let a = 0; a < b1.points; a++) {
+                    blob.radii.push(lerp(b1.radii[a], b2.radii[a], t));
+                }
+
+                for (let j = 0; j < b1.satellites.length; j++) {
+                    const s1 = b1.satellites[j];
+                    const s2 = b2.satellites[j];
+                    
+                    let srot1 = s1.rotation;
+                    let srot2 = s2.rotation;
+                    let sdiff = srot2 - srot1;
+                    while (sdiff > Math.PI) sdiff -= Math.PI * 2;
+                    while (sdiff < -Math.PI) sdiff += Math.PI * 2;
+                    srot2 = srot1 + sdiff;
+                    
+                    blob.satellites.push({
+                        x: lerp(s1.x, s2.x, t),
+                        y: lerp(s1.y, s2.y, t),
+                        size: lerp(s1.size, s2.size, t),
+                        rotation: lerp(srot1, srot2, t)
+                    });
+                }
+
+                result.blobs.push(blob);
+            }
+
+            return result;
+        }
+
+        function drawPattern(pattern) {
+            const complementaryHue = (hue + 180) % 360;
+            ctx.fillStyle = `hsl(${hue}, 60%, 35%)`;
+            ctx.strokeStyle = `hsl(${complementaryHue}, 70%, 50%)`;
+            ctx.lineWidth = 1.5;
+            ctx.globalAlpha = 0.08;
+
+            ctx.save();
+            ctx.translate(canvas.width / 2 + pattern.offsetX, canvas.height / 2 + pattern.offsetY);
+            ctx.rotate(pattern.rotation);
+            ctx.scale(pattern.scale, pattern.scale);
+
+            for (const blob of pattern.blobs) {
+                ctx.save();
+                ctx.translate(blob.x, blob.y);
+                ctx.rotate(blob.rotation);
+
+                ctx.beginPath();
+                for (let a = 0; a < blob.points; a++) {
+                    const angle = (a / blob.points) * Math.PI * 2;
+                    const r = blob.radii[a];
+                    const px = Math.cos(angle) * r;
+                    const py = Math.sin(angle) * r * blob.stretch;
+                    if (a === 0) ctx.moveTo(px, py);
+                    else ctx.lineTo(px, py);
+                }
+                ctx.closePath();
+                ctx.fill();
+                ctx.restore();
+
+                ctx.save();
+                ctx.translate(-blob.x, blob.y);
+                ctx.rotate(-blob.rotation);
+
+                ctx.beginPath();
+                for (let a = 0; a < blob.points; a++) {
+                    const angle = (a / blob.points) * Math.PI * 2;
+                    const r = blob.radii[a];
+                    const px = Math.cos(angle) * r;
+                    const py = Math.sin(angle) * r * blob.stretch;
+                    if (a === 0) ctx.moveTo(px, py);
+                    else ctx.lineTo(px, py);
+                }
+                ctx.closePath();
+                ctx.fill();
+                ctx.restore();
+
+                for (const sat of blob.satellites) {
+                    ctx.save();
+                    ctx.translate(sat.x, sat.y);
+                    ctx.rotate(sat.rotation);
+                    ctx.beginPath();
+                    ctx.ellipse(0, 0, sat.size, sat.size * 1.3, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.restore();
+
+                    ctx.save();
+                    ctx.translate(-sat.x, sat.y);
+                    ctx.rotate(-sat.rotation);
+                    ctx.beginPath();
+                    ctx.ellipse(0, 0, sat.size, sat.size * 1.3, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.restore();
+                }
+            }
+
+            ctx.restore();
+        }
+
+        let currentPattern2 = null;
+        let nextPattern2 = null;
+        let currentSeed2 = Math.random() * 1000 + 5000;
+        
+        currentPattern = generatePattern(currentSeed);
+        nextPattern = generatePattern(currentSeed + 10);
+        currentPattern2 = generatePattern(currentSeed2);
+        nextPattern2 = generatePattern(currentSeed2 + 10);
+
+        function animate() {
+            angleX += 0.005;
+            angleY += 0.007;
+            angleZ += 0.003;
+            hue = (hue + 0.5) % 360;
+
+            const elapsed = Date.now() - transitionStart;
+            let progress = elapsed / TRANSITION_DURATION;
+            
+            if (progress >= 1) {
+                progress = 0;
+                currentSeed = currentSeed + 10;
+                currentPattern = nextPattern;
+                nextPattern = generatePattern(currentSeed + 10);
+                currentSeed2 = currentSeed2 + 10;
+                currentPattern2 = nextPattern2;
+                nextPattern2 = generatePattern(currentSeed2 + 10);
+                transitionStart = Date.now();
+            }
+
+            const t = easeInOutCubic(progress);
+            const interpolatedPattern = lerpPattern(currentPattern, nextPattern, t);
+            const interpolatedPattern2 = lerpPattern(currentPattern2, nextPattern2, t);
+            
+            drawPattern(interpolatedPattern);
+            
+            ctx.save();
+            ctx.translate(canvas.width / 2, canvas.height / 2);
+            ctx.scale(0.6, 0.6);
+            ctx.rotate(angleZ * 0.3);
+            ctx.translate(-canvas.width / 2, -canvas.height / 2);
+            drawPattern(interpolatedPattern2);
+            ctx.restore();
+
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+    </script>
+</body>
+</html>

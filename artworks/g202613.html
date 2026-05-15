@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Genuary 2026 #13</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            overflow: hidden;
+            background: #000;
+            padding: 20px;
+        }
+        
+        body::after {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: repeating-linear-gradient(0deg, rgba(0,0,0,0.15) 0px, rgba(0,0,0,0.15) 1px, transparent 1px, transparent 2px);
+            pointer-events: none;
+            z-index: 100;
+        }
+        
+        #artContainer {
+            width: 600px;
+            height: 600px;
+            max-width: 90vmin;
+            max-height: 90vmin;
+            position: relative;
+            border: 1px solid rgba(0,255,0,0.55);
+            box-shadow: 0 0 12px rgba(0,255,0,0.35), inset 0 0 20px rgba(0,0,0,0.6);
+            overflow: hidden;
+        }
+        
+        #plasma {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            image-rendering: pixelated;
+            opacity: 0.3;
+            filter: blur(2px) saturate(0.85);
+            animation: flashWhite 4s ease-in-out infinite;
+        }
+        
+        @keyframes flashWhite {
+            0%, 89%, 100% { filter: blur(2px) saturate(0.85) brightness(1); }
+            95% { filter: blur(2px) saturate(0.85) brightness(0.3); }
+        }
+        
+        .paw {
+            position: absolute;
+            font-size: 4rem;
+            opacity: 0;
+            filter: grayscale(100%) brightness(2);
+            z-index: 2;
+            left: 50%;
+            top: 50%;
+            will-change: transform, opacity;
+        }
+        
+        @keyframes orbitPaw {
+            0% { transform: translate(-50%, -50%) rotate(0deg) translateX(220px) rotate(0deg); opacity: 0; }
+            10% { opacity: 0.6; }
+            90% { opacity: 0.6; }
+            100% { transform: translate(-50%, -50%) rotate(360deg) translateX(220px) rotate(360deg); opacity: 0; }
+        }
+        
+        #catArt {
+            width: 400px;
+            height: 400px;
+            position: absolute;
+            top: 55%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 10;
+            mix-blend-mode: hard-light;
+            filter: contrast(1.15) saturate(1.1);
+            animation: lissajousOpacity 5s ease-in-out infinite;
+            will-change: opacity;
+        }
+        
+        @keyframes lissajousOpacity {
+            0% { opacity: 0.85; }
+            25% { opacity: 0.95; }
+            50% { opacity: 0.75; }
+            75% { opacity: 0.9; }
+            100% { opacity: 0.85; }
+        }
+        
+        .eye {
+            animation: blink 4s ease-in-out infinite;
+            transform-origin: center;
+            will-change: transform;
+        }
+        
+        @keyframes blink {
+            0%, 90%, 100% { transform: scaleY(1); }
+            95% { transform: scaleY(0.1); }
+        }
+        
+        .mouth {
+            animation: yawn 8s ease-in-out infinite;
+            transform-origin: 50px 67px;
+        }
+        
+        @keyframes yawn {
+            0%, 85%, 100% { transform: scaleY(1); }
+            90%, 95% { transform: scaleY(2.5); }
+        }
+    </style>
+</head>
+<body>
+    <div id="artContainer">
+        <canvas id="plasma"></canvas>
+        <div id="catArt">
+            <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                    <clipPath id="fc"><circle cx="50" cy="50" r="35"/></clipPath>
+                    <clipPath id="lec"><rect x="0" y="0" width="50" height="50"/></clipPath>
+                    <clipPath id="rec"><rect x="50" y="0" width="50" height="50"/></clipPath>
+                    
+                    <radialGradient id="fg" cx="45%" cy="40%">
+                        <stop offset="0%" stop-color="hsl(30,55%,55%)"/>
+                        <stop offset="70%" stop-color="hsl(30,50%,45%)"/>
+                        <stop offset="100%" stop-color="hsl(30,45%,35%)"/>
+                    </radialGradient>
+                    
+                    <linearGradient id="eg" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stop-color="hsl(30,50%,50%)"/>
+                        <stop offset="100%" stop-color="hsl(30,50%,40%)"/>
+                    </linearGradient>
+                    
+                    <filter id="cb">
+                        <feGaussianBlur stdDeviation="2"/>
+                    </filter>
+                    
+                    <radialGradient id="cs" cx="50%" cy="20%">
+                        <stop offset="0%" stop-color="hsl(30,30%,25%)" stop-opacity="0"/>
+                        <stop offset="40%" stop-color="hsl(30,30%,25%)" stop-opacity="0.4"/>
+                        <stop offset="80%" stop-color="hsl(30,30%,20%)" stop-opacity="0.7"/>
+                    </radialGradient>
+                    
+                    <filter id="lg">
+                        <feGaussianBlur stdDeviation="3"/>
+                        <feComponentTransfer><feFuncA type="linear" slope="0.6"/></feComponentTransfer>
+                    </filter>
+                </defs>
+                
+                <polygon points="20,35 12,5 32,25" fill="url(#eg)" clip-path="url(#lec)"/>
+                <polygon points="80,35 88,5 68,25" fill="url(#eg)" clip-path="url(#rec)"/>
+                <polygon points="20,35 15,12 28,27" fill="hsl(30,30%,25%)" clip-path="url(#lec)"/>
+                <polygon points="80,35 85,12 72,27" fill="hsl(30,30%,25%)" clip-path="url(#rec)"/>
+                
+                <circle cx="50" cy="50" r="35" fill="url(#fg)"/>
+                
+                <polygon points="50,40 25,85 75,85" fill="hsl(30,50%,80%)" clip-path="url(#fc)"/>
+                <ellipse cx="50" cy="78" rx="28" ry="12" fill="hsl(30,50%,75%)" clip-path="url(#fc)"/>
+                <ellipse cx="50" cy="78" rx="24" ry="10" fill="hsl(30,50%,80%)" clip-path="url(#fc)"/>
+                <ellipse cx="50" cy="78" rx="30" ry="14" fill="url(#cs)" clip-path="url(#fc)" filter="url(#cb)"/>
+                <path d="M 32,78 Q 50,85 68,78" fill="hsl(30,25%,30%)" clip-path="url(#fc)" filter="url(#cb)"/>
+                
+                <g clip-path="url(#fc)">
+                    <polygon points="38,38 25,10 38,10" fill="hsl(30,30%,15%)" transform="rotate(-15 31.5 24)"/>
+                </g>
+                <polygon points="50,36 47,10 53,10" fill="hsl(30,30%,15%)" clip-path="url(#fc)"/>
+                <g clip-path="url(#fc)">
+                    <polygon points="62,38 62,10 75,10" fill="hsl(30,30%,15%)" transform="rotate(15 68.5 24)"/>
+                </g>
+                
+                <polygon points="30,55 18,52 22,56" fill="hsl(30,30%,15%)" clip-path="url(#fc)"/>
+                <polygon points="30,58 18,55 22,59" fill="hsl(30,30%,15%)" clip-path="url(#fc)"/>
+                <polygon points="30,61 18,58 22,62" fill="hsl(30,30%,15%)" clip-path="url(#fc)"/>
+                <polygon points="70,55 78,56 82,52" fill="hsl(30,30%,15%)" clip-path="url(#fc)"/>
+                <polygon points="70,58 78,59 82,55" fill="hsl(30,30%,15%)" clip-path="url(#fc)"/>
+                <polygon points="70,61 78,62 82,58" fill="hsl(30,30%,15%)" clip-path="url(#fc)"/>
+                <polygon points="33,45 10,33 18,47" fill="hsl(30,30%,15%)" clip-path="url(#fc)"/>
+                <polygon points="67,45 82,47 90,33" fill="hsl(30,30%,15%)" clip-path="url(#fc)"/>
+                
+                <line x1="32" y1="62" x2="10" y2="60" stroke="#000" stroke-width="0.8"/>
+                <line x1="32" y1="64" x2="10" y2="65" stroke="#000" stroke-width="0.8"/>
+                <line x1="32" y1="66" x2="10" y2="70" stroke="#000" stroke-width="0.8"/>
+                <line x1="68" y1="62" x2="90" y2="60" stroke="#000" stroke-width="0.8"/>
+                <line x1="68" y1="64" x2="90" y2="65" stroke="#000" stroke-width="0.8"/>
+                <line x1="68" y1="66" x2="90" y2="70" stroke="#000" stroke-width="0.8"/>
+                
+                <ellipse cx="37" cy="52" rx="8" ry="5" fill="hsl(30,50%,70%)" clip-path="url(#fc)" filter="url(#lg)"/>
+                <ellipse cx="63" cy="52" rx="8" ry="5" fill="hsl(30,50%,70%)" clip-path="url(#fc)" filter="url(#lg)"/>
+                
+                <g class="eye">
+                    <g transform="translate(37,44) rotate(15)">
+                        <ellipse cy="2" rx="6.5" ry="6" fill="hsl(50,70%,60%)"/>
+                        <ellipse cy="2" rx="3" ry="5" fill="#000"/>
+                        <ellipse cx="1" rx="1.5" ry="1.5" fill="#fff"/>
+                        <ellipse cx="-1" cy="1" rx="1" ry="1" fill="#fff"/>
+                    </g>
+                </g>
+                
+                <g class="eye">
+                    <g transform="translate(63,44) rotate(-15)">
+                        <ellipse cy="2" rx="6.5" ry="6" fill="hsl(50,70%,60%)"/>
+                        <ellipse cy="2" rx="3" ry="5" fill="#000"/>
+                        <ellipse cx="1" rx="1.5" ry="1.5" fill="#fff"/>
+                        <ellipse cx="-1" cy="1" rx="1" ry="1" fill="#fff"/>
+                    </g>
+                </g>
+                
+                <ellipse cx="50" cy="60" rx="4" ry="2.5" fill="hsl(350,60%,65%)"/>
+                <rect x="49" y="60" width="2" height="4" fill="hsl(350,60%,65%)"/>
+                
+                <g class="mouth">
+                    <line x1="50" y1="66" x2="50" y2="67" stroke="hsl(0,0%,20%)" stroke-width="1" stroke-linecap="round"/>
+                    <path d="M 43,67 Q 46,69 50,67 Q 54,69 57,67" stroke="hsl(0,0%,20%)" stroke-width="1.2" fill="none" stroke-linecap="round"/>
+                </g>
+            </svg>
+        </div>
+    </div>
+    
+    <script>
+        const canvas = document.getElementById('plasma');
+        const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
+        const container = document.getElementById('artContainer');
+        
+        let w, h, sw, sh;
+        const scale = 8, pi2 = Math.PI * 2;
+        const offscreen = document.createElement('canvas');
+        const offCtx = offscreen.getContext('2d', { alpha: false });
+        
+        function resize() {
+            w = canvas.width = container.clientWidth;
+            h = canvas.height = container.clientHeight;
+            sw = Math.ceil(w / scale);
+            sh = Math.ceil(h / scale);
+        }
+        resize();
+        window.addEventListener('resize', resize);
+        
+        let t = 0;
+        function plasma() {
+            offscreen.width = sw;
+            offscreen.height = sh;
+            const img = offCtx.createImageData(sw, sh);
+            const d = img.data;
+            
+            for (let i = 0, y = 0; y < sh; y++) {
+                for (let x = 0; x < sw; x++, i += 4) {
+                    const px = x * scale, py = y * scale;
+                    const v = Math.sin(px * 0.01 + t) + Math.sin(py * 0.01 + t * 0.7) + 
+                             Math.sin((px + py) * 0.01 + t * 0.5) + Math.sin(Math.sqrt(px * px + py * py) * 0.01 + t * 0.3);
+                    const c = (v + 4) * 0.125;
+                    d[i] = (Math.sin(c * pi2) * 0.3 + 0.4) * 180 | 0;
+                    d[i + 1] = (Math.sin(c * pi2 + 2.094) * 0.25 + 0.3) * 160 | 0;
+                    d[i + 2] = (Math.sin(c * pi2 + 4.189) * 0.35 + 0.5) * 200 | 0;
+                    d[i + 3] = 255;
+                }
+            }
+            
+            offCtx.putImageData(img, 0, 0);
+            ctx.drawImage(offscreen, 0, 0, sw, sh, 0, 0, w, h);
+            t += 0.05;
+            requestAnimationFrame(plasma);
+        }
+        plasma();
+        
+        function createPaw() {
+            const paw = document.createElement('div');
+            paw.className = 'paw';
+            paw.textContent = '🐾';
+            paw.style.animation = `orbitPaw ${10 + Math.random() * 6}s linear ${Math.random() * 3}s infinite`;
+            container.appendChild(paw);
+            setTimeout(() => paw.remove(), 18000);
+        }
+        
+        for (let i = 0; i < 6; i++) setTimeout(createPaw, i * 1500);
+        setInterval(createPaw, 2000);
+    </script>
+</body>
+</html>

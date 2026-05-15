@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nouvel An Chinois - Cheval Low Poly</title>
+<style>
+  *{margin:0;padding:0}
+  html,body{width:100%;height:100%;display:flex;justify-content:center;align-items:center;background:#0a0000;overflow:hidden}
+  canvas{border-radius:8px;box-shadow:0 0 80px rgba(255,160,0,0.3);max-width:100%;max-height:100%;display:block}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+function init(){
+const c=document.getElementById('c'),ctx=c.getContext('2d');
+const S=Math.max(Math.min(window.innerWidth||750,window.innerHeight||750),200);
+c.width=S;c.height=S;
+let frame=0;
+
+const svgW=122.88,svgH=110.29,pad=S*0.08;
+const sc=Math.min((S-pad*2)/svgW,(S-pad*2)/svgH);
+const dw=svgW*sc,dh=svgH*sc;
+const ox=(S-dw)/2,oy=(S-dh)/2;
+const rawPath="M18.09,26.09c1.68,0.61,4.16-0.76,7.97-5.34c1.44,0.53,2.57,1.71,3.06,4.24c0.94,4.82-0.55,7.91-2.62,12.15c-2.25,4.63-4.61,9.02-3.6,15.06c-4.13,0.51-7.93,0.38-11.38-0.46c-1.96-0.17-3.58-0.05-4.78,0.42c-1.22,0.47-2.01,1.3-2.3,2.55c-0.7,4.68-2.53,7.66-4.41,10.56c-0.1,2.38-0.03,4.68,0.89,6.62l0.53,1.36l0.24,3.05c0.32,4.08,1.77,7.49,5.07,1.96c0.34-2.11,0.02-4.22-0.95-6.33l-1.52-0.69c0.09-2.97,0.39-5.84,1.36-8.37c0.75-2.47,2.12-4.24,4.19-5.25l2.12-0.24l-1.24,3.18c-0.29,3.36-0.72,6.42-1.89,8.02c-0.66,2.36-0.36,3.82,0.88,4.42c0.96,0.39,1.84,2.15,2.65,5.6c0.86,1.96,1.94,3.04,3.24,3.24c1.36-0.34,1.6-3.03,1.06-7.31c-1.04-1.27-2.08-1.78-3.13-1.89c0.19-2.27,0.1-4.48-0.3-6.61c0.19-2.65,0.97-5.13,3.36-7.19c0.92,2.5,4.89,3.59,9.91,4.19l3.3-3.42c8.75,8.3,18.93,13.06,28.78,9.44c0.72,0.51,1,2.52,1.25,6.01c2.01,2.89,3.92,8.19,5.82,11.98c1.4,2.92,1.11,5.33-0.24,7.43c-3.04,1.29-5.95,3.26-7.75,5.38c-2.93,0.13-5.16,0.27-7,1.22c-1.26,0.99-2.02,2.23-2.18,3.77l1.53,0.59l-1.71,2.36c0.61,2.05,2.61,2.6,6.52,2.44l2.27-3.91l4.36-1.24c1.6-3.18,4.16-6.26,9.61-9.02c3.64,0.2,5.57-1.75,5.37-6.37c-1.84-4.18-2.51-8.19-0.83-11.85c7.72-4.75,12.49-12.02,11.91-20.17c12.31-3.22-6.38,28.39,28.91,21.44c2.04-0.4,4.16-1.14,6.42-1.98c-4.56-0.78-17.68-4.03-19.99-9.55c-5.91-8.38-12.1-14.5-18.69-17.4c-4.47-5.68-12.36-7.87-22.06-8.2c-2.9-0.26-5.44-1.03-7.43-2.59c2.01-14.21-11.58-21.19-1.65-16.81C48.79,12.28,35.64,8.92,44.92,9.99c-4.77-4.36-10.79-6.77-19.34-5.25c-1.82-2.65-6.17-8.32-4.84-1.53l-2.18-1.95l-0.12,6.84c-2.59,1.98-4.01,8.57-6.02,12.85c-1.71,1.7-2.37,3.74-1.83,6.9C13.27,31.3,17.49,30.45,18.09,26.09z";
+const p2d=new Path2D(rawPath);
+
+// Rasterize flipped horse
+const hc=document.createElement('canvas');
+hc.width=S;hc.height=S;
+const hctx=hc.getContext('2d');
+hctx.save();
+hctx.translate(ox+dw,oy);
+hctx.scale(-sc,sc);
+hctx.fillStyle='#000';
+hctx.fill(p2d);
+hctx.restore();
+const imgData=hctx.getImageData(0,0,S,S).data;
+
+function isIn(x,y){
+  const ix=Math.round(x),iy=Math.round(y);
+  if(ix<0||iy<0||ix>=S||iy>=S)return false;
+  return imgData[(iy*S+ix)*4+3]>128;
+}
+
+// Delaunay
+function triangulate(pts){
+  const sup=[[-1e4,-1e4],[1e4,-1e4],[0,1e4]];
+  let tris=[[0,1,2]];const all=[...sup];
+  for(let i=0;i<pts.length;i++){
+    all.push(pts[i]);const pi=all.length-1;const bad=[];
+    for(let j=0;j<tris.length;j++){const t=tris[j];if(cc(all[t[0]],all[t[1]],all[t[2]],pts[i]))bad.push(j);}
+    const bs=new Set(bad);const edges=[];
+    for(const bi of bad){const t=tris[bi];for(let e=0;e<3;e++){const a=t[e],b=t[(e+1)%3];let sh=false;for(const bj of bad){if(bj!==bi&&tris[bj].includes(a)&&tris[bj].includes(b)){sh=true;break;}}if(!sh)edges.push([a,b]);}}
+    const nt=tris.filter((_,i)=>!bs.has(i));for(const[a,b]of edges)nt.push([a,b,pi]);tris=nt;
+  }
+  return tris.filter(t=>t[0]>2&&t[1]>2&&t[2]>2).map(t=>[t[0]-3,t[1]-3,t[2]-3]);
+}
+function cc(a,b,c,d){
+  const ax=a[0]-d[0],ay=a[1]-d[1],bx=b[0]-d[0],by=b[1]-d[1],cx_=c[0]-d[0],cy=c[1]-d[1];
+  const A=ax*ax+ay*ay,B=bx*bx+by*by,C=cx_*cx_+cy*cy;
+  return ax*(by*C-cy*B)-ay*(bx*C-cx_*B)+A*(bx*cy-cx_*by)>0;
+}
+
+// Sample points
+const pts=[];
+const gr=Math.round(S*0.038);
+for(let x=0;x<S;x+=3)for(let y=0;y<S;y+=3){
+  if(isIn(x,y)!==(isIn(x+3,y))||isIn(x,y)!==isIn(x,y+3)){
+    if(!pts.some(p=>Math.abs(p[0]-x)<6&&Math.abs(p[1]-y)<6))pts.push([x,y]);
+  }
+}
+for(let x=0;x<S;x+=gr)for(let y=0;y<S;y+=gr){
+  const jx=x+(Math.random()-0.5)*gr*0.4,jy=y+(Math.random()-0.5)*gr*0.4;
+  if(isIn(jx,jy))pts.push([jx,jy]);
+}
+
+const allTris=triangulate(pts);
+const valid=allTris.filter(t=>{
+  const cx=(pts[t[0]][0]+pts[t[1]][0]+pts[t[2]][0])/3;
+  const cy=(pts[t[0]][1]+pts[t[1]][1]+pts[t[2]][1])/3;
+  return isIn(cx,cy);
+});
+
+// Lighting
+const lnx=-0.33,lny=-0.5,lnz=0.8;
+const ll=Math.sqrt(lnx*lnx+lny*lny+lnz*lnz);
+const lx=lnx/ll,ly=lny/ll,lz=lnz/ll;
+
+const triCache=valid.map((t,i)=>{
+  const p0=pts[t[0]],p1=pts[t[1]],p2=pts[t[2]];
+  const cx=(p0[0]+p1[0]+p2[0])/3,cy=(p0[1]+p1[1]+p2[1])/3;
+  const ncx=(cx-ox)/dw,ncy=(cy-oy)/dh;
+  const depth=Math.sin(ncx*Math.PI)*Math.sin(ncy*Math.PI)*0.5;
+  const ux=p1[0]-p0[0],uy=p1[1]-p0[1],vx=p2[0]-p0[0],vy=p2[1]-p0[1];
+  const uz=depth*0.15+Math.sin(i*2.7)*0.05,vz=depth*0.12+Math.cos(i*1.9)*0.05;
+  let nx=uy*vz-uz*vy,ny=uz*vx-ux*vz,nz=ux*vy-uy*vx;
+  const nl=Math.sqrt(nx*nx+ny*ny+nz*nz)||1;
+  nx/=nl;ny/=nl;nz/=nl;if(nz<0){nx=-nx;ny=-ny;nz=-nz;}
+  const diff=Math.max(0,nx*lx+ny*ly+nz*lz);
+  const hx=lx,hy=ly,hz=lz+1,hl=Math.sqrt(hx*hx+hy*hy+hz*hz)||1;
+  const spec=Math.pow(Math.max(0,(nx*hx+ny*hy+nz*hz)/hl),28);
+  // Expand verts to avoid seams
+  const ex=0.6;
+  const e=[[],[],[]];
+  [p0,p1,p2].forEach((p,j)=>{
+    const d=Math.max(1,Math.hypot(p[0]-cx,p[1]-cy));
+    e[j][0]=p[0]+(p[0]-cx)*ex/d;
+    e[j][1]=p[1]+(p[1]-cy)*ex/d;
+  });
+  return{e,diff,spec,ncx,ncy};
+});
+
+// Gold color
+function gRGB(diff,spec,shim){
+  const d=0.3+diff*0.5+shim*0.08;
+  return`rgb(${Math.min(255,255*d+spec*100|0)},${Math.min(255,215*d+spec*100|0)},${Math.min(255,spec*80|0)})`;
+}
+
+// Particles
+const parts=[];
+for(let i=0;i<50;i++)parts.push({x:Math.random()*S,y:Math.random()*S,vx:(Math.random()-0.5)*0.3,vy:-Math.random()*0.4-0.1,sz:Math.random()*2+0.5,ph:Math.random()*6.28,br:Math.random()*0.4+0.3});
+
+const gx=ox+dw*0.45,gy=oy+dh*0.45;
+
+function draw(){
+  ctx.clearRect(0,0,S,S);
+
+  // Background
+  const bg=ctx.createRadialGradient(S/2,S*0.45,0,S/2,S*0.45,S*0.8);
+  bg.addColorStop(0,'#b80000');bg.addColorStop(0.3,'#990000');bg.addColorStop(0.6,'#770000');bg.addColorStop(1,'#2a0000');
+  ctx.fillStyle=bg;ctx.fillRect(0,0,S,S);
+
+  // Subtle rings
+  ctx.globalAlpha=0.03;ctx.strokeStyle='#ffd700';ctx.lineWidth=1;
+  for(let i=1;i<=10;i++){ctx.beginPath();ctx.arc(S/2,S*0.48,i*S*0.045,0,Math.PI*2);ctx.stroke();}
+  ctx.globalAlpha=1;
+
+  // Particles
+  parts.forEach(p=>{
+    p.x+=p.vx;p.y+=p.vy;if(p.y<-10)p.y=S+10;if(p.x<-10)p.x=S+10;if(p.x>S+10)p.x=-10;
+    const pulse=Math.sin(frame*0.05+p.ph)*0.4+0.6;
+    const a=p.br*pulse*0.35,sz=p.sz*pulse;
+    const pg=ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,sz*3);
+    pg.addColorStop(0,`rgba(255,220,100,${a*0.4})`);pg.addColorStop(1,'rgba(255,200,50,0)');
+    ctx.fillStyle=pg;ctx.beginPath();ctx.arc(p.x,p.y,sz*3,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle=`rgba(255,235,160,${a})`;
+    ctx.beginPath();ctx.moveTo(p.x,p.y-sz*2);ctx.lineTo(p.x+sz,p.y);ctx.lineTo(p.x,p.y+sz*2);ctx.lineTo(p.x-sz,p.y);ctx.closePath();ctx.fill();
+  });
+
+  // Glow rays behind horse
+  ctx.globalCompositeOperation='screen';
+  for(let r=0;r<18;r++){
+    const angle=r*Math.PI*2/18+frame*0.004;
+    const len=S*0.38+Math.sin(frame*0.02+r*0.8)*S*0.08;
+    const a=0.08+Math.sin(frame*0.03+r)*0.04;
+    const grd=ctx.createLinearGradient(gx,gy,gx+Math.cos(angle)*len,gy+Math.sin(angle)*len);
+    grd.addColorStop(0,`rgba(255,215,0,${a})`);grd.addColorStop(0.4,`rgba(255,200,30,${a*0.4})`);grd.addColorStop(1,'rgba(255,180,0,0)');
+    ctx.strokeStyle=grd;ctx.lineWidth=S*0.018+Math.sin(frame*0.025+r)*S*0.008;
+    ctx.beginPath();ctx.moveTo(gx,gy);ctx.lineTo(gx+Math.cos(angle)*len,gy+Math.sin(angle)*len);ctx.stroke();
+  }
+  // Glow orbs
+  for(let w=0;w<12;w++){
+    const a2=frame*0.012+w*Math.PI*2/12;
+    const r2=S*0.22+Math.sin(frame*0.018+w)*S*0.06;
+    const wx=gx+Math.cos(a2)*r2,wy=gy+Math.sin(a2)*r2*0.75;
+    const ws=S*0.06+Math.sin(frame*0.04+w*2)*S*0.02;
+    const wa=0.12+Math.sin(frame*0.035+w*1.3)*0.05;
+    const wg=ctx.createRadialGradient(wx,wy,0,wx,wy,ws);
+    wg.addColorStop(0,`rgba(255,230,80,${wa})`);wg.addColorStop(0.4,`rgba(255,210,40,${wa*0.4})`);wg.addColorStop(1,'rgba(255,180,0,0)');
+    ctx.fillStyle=wg;ctx.beginPath();ctx.arc(wx,wy,ws,0,Math.PI*2);ctx.fill();
+  }
+  // Glow rings
+  for(let i=0;i<4;i++){
+    const rr=S*(0.12+i*0.07)*(0.85+Math.sin(frame*0.02+i)*0.15);
+    const ring=ctx.createRadialGradient(gx,gy,rr*0.6,gx,gy,rr);
+    ring.addColorStop(0,'rgba(255,215,0,0)');ring.addColorStop(0.5,`rgba(255,215,0,${0.08-i*0.015})`);ring.addColorStop(1,'rgba(255,215,0,0)');
+    ctx.fillStyle=ring;ctx.beginPath();ctx.arc(gx,gy,rr,0,Math.PI*2);ctx.fill();
+  }
+  // Sparkle bursts
+  for(let s=0;s<20;s++){
+    const sa=frame*0.006+s*Math.PI*2/20+Math.sin(frame*0.01+s)*0.3;
+    const sr=S*0.15+s*S*0.012+Math.sin(frame*0.025+s*1.5)*S*0.03;
+    const sx=gx+Math.cos(sa)*sr,sy=gy+Math.sin(sa)*sr*0.8;
+    const ss=S*0.003+Math.sin(frame*0.06+s*2)*S*0.003;
+    const sAlpha=0.3+Math.sin(frame*0.07+s*1.7)*0.25;
+    if(sAlpha>0.1){
+      ctx.fillStyle=`rgba(255,250,200,${sAlpha})`;
+      ctx.beginPath();
+      ctx.moveTo(sx,sy-ss*3);ctx.lineTo(sx+ss,sy);ctx.lineTo(sx,sy+ss*3);ctx.lineTo(sx-ss,sy);
+      ctx.closePath();ctx.fill();
+      const sg=ctx.createRadialGradient(sx,sy,0,sx,sy,ss*5);
+      sg.addColorStop(0,`rgba(255,230,100,${sAlpha*0.3})`);sg.addColorStop(1,'rgba(255,215,0,0)');
+      ctx.fillStyle=sg;ctx.beginPath();ctx.arc(sx,sy,ss*5,0,Math.PI*2);ctx.fill();
+    }
+  }
+  ctx.globalCompositeOperation='source-over';
+
+  // Horse glow behind
+  const hg=ctx.createRadialGradient(gx,gy,0,gx,gy,S*0.35);
+  hg.addColorStop(0,'rgba(255,215,0,0.14)');hg.addColorStop(1,'rgba(255,215,0,0)');
+  ctx.fillStyle=hg;ctx.beginPath();ctx.arc(gx,gy,S*0.35,0,Math.PI*2);ctx.fill();
+
+  // Horse triangles
+  const shA=frame*0.008,shX=Math.cos(shA)*0.3,shY=Math.sin(shA)*0.3;
+  triCache.forEach((d,i)=>{
+    const dx=d.ncx-0.5-shX,dy=d.ncy-0.5-shY;
+    const dist=Math.sqrt(dx*dx+dy*dy);
+    const shim=Math.max(0,1-dist*2)*Math.sin(frame*0.04+i*0.3)*0.5;
+    ctx.beginPath();ctx.moveTo(d.e[0][0],d.e[0][1]);ctx.lineTo(d.e[1][0],d.e[1][1]);ctx.lineTo(d.e[2][0],d.e[2][1]);ctx.closePath();
+    ctx.fillStyle=gRGB(d.diff+shim*0.2,d.spec+Math.max(0,1-dist*3)*0.4+shim*0.15,shim);
+    ctx.fill();
+  });
+
+  // Specular pass
+  ctx.globalCompositeOperation='screen';
+  triCache.forEach((d,i)=>{
+    if(d.spec<0.3)return;
+    ctx.beginPath();ctx.moveTo(d.e[0][0],d.e[0][1]);ctx.lineTo(d.e[1][0],d.e[1][1]);ctx.lineTo(d.e[2][0],d.e[2][1]);ctx.closePath();
+    ctx.fillStyle=`rgba(255,245,200,${(d.spec-0.3)*0.35})`;ctx.fill();
+  });
+  ctx.globalCompositeOperation='source-over';
+
+  // Border - elegant red+gold
+  const m=10;
+  // Outer red frame
+  ctx.strokeStyle='rgba(180,0,0,0.6)';ctx.lineWidth=6;
+  ctx.strokeRect(m,m,S-m*2,S-m*2);
+  // Gold inset
+  ctx.strokeStyle='rgba(212,175,55,0.7)';ctx.lineWidth=1.5;
+  ctx.strokeRect(m+4,m+4,S-m*2-8,S-m*2-8);
+  // Inner red
+  ctx.strokeStyle='rgba(140,0,0,0.4)';ctx.lineWidth=1;
+  ctx.strokeRect(m+7,m+7,S-m*2-14,S-m*2-14);
+
+
+
+  frame++;
+  requestAnimationFrame(draw);
+}
+draw();
+}
+if(document.readyState==='complete')init();
+else window.addEventListener('load',init);
+</script>
+</body>
+</html>

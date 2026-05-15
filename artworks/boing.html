@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body { margin: 0; background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+  canvas { width: 100vmin !important; height: 100vmin !important; }
+</style>
+</head>
+<body>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+camera.position.z = 12;
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(480, 480);
+document.body.appendChild(renderer.domElement);
+
+// Vortex background — rendered as fullscreen quad in screen space
+const bgMesh = new THREE.Mesh(
+  new THREE.PlaneGeometry(2, 2),
+  new THREE.ShaderMaterial({
+    vertexShader: `varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position.xy,0.,1.);}`,
+    fragmentShader: `
+    uniform float uT;uniform vec2 uB;varying vec2 vUv;
+    void main(){
+      vec2 p=vUv-uB;float d=length(p),a=atan(p.y,p.x);
+      float s1=sin(a*5.+d*12.-uT*3.)*.5+.5;
+      float s2=sin(a*3.-d*8.+uT*2.)*.5+.5;
+      float s3=sin(a*7.+d*6.+uT*1.7)*.5+.5;
+      float hue=fract(a/6.2832+d*2.-uT*.3);
+      float hue2=fract(a/6.2832-d*1.5+uT*.5);
+      vec3 rgb1=.5+.5*cos(6.2832*(hue+vec3(0.,.333,.666)));
+      vec3 rgb2=.5+.5*cos(6.2832*(hue2+vec3(0.,.333,.666)));
+      vec3 col=mix(rgb1,rgb2,s1);
+      col=mix(col,vec3(1.,.2,.8),s2*s3*.5);
+      col*=.7+.3*sin(d*20.-uT*6.);
+      float glow=exp(-d*1.5);
+      col=mix(col*.3,col,glow*.8+.2);
+      col=mix(col,vec3(1.),exp(-d*8.)*.6);
+      vec2 gr=abs(fract(vUv*12.)-.5);
+      col+=col*.3*(1.-smoothstep(.0,.02,min(gr.x,gr.y)));
+      col=pow(col,vec3(.8));
+      gl_FragColor=vec4(col,1.);}`,
+    uniforms: { uT: { value: 0 }, uB: { value: new THREE.Vector2(.5,.5) } },
+    depthTest: false,
+    depthWrite: false
+  })
+);
+bgMesh.renderOrder = -1;
+bgMesh.frustumCulled = false;
+scene.add(bgMesh);
+
+// Lighting
+scene.add(new THREE.AmbientLight(0x888888));
+const dl = new THREE.DirectionalLight(0xffffff, 0.8);
+dl.position.set(-3, -4, 8); scene.add(dl);
+const pl = new THREE.PointLight(0xffffff, 0.5);
+pl.position.set(4, 4, 6); scene.add(pl);
+
+// Ball — classic Amiga boing ball: lat/lon quads, red & white checker, flat shaded
+const R = 0.4;
+const ROWS = 8, COLS = 16;
+const ballGroup = new THREE.Group();
+scene.add(ballGroup);
+
+for (let row = 0; row < ROWS; row++) {
+  const t0 = row / ROWS * Math.PI, t1 = (row+1) / ROWS * Math.PI;
+  const y0 = Math.cos(t0)*R, y1 = Math.cos(t1)*R;
+  const r0 = Math.sin(t0)*R, r1 = Math.sin(t1)*R;
+  for (let col = 0; col < COLS; col++) {
+    const p0 = col/COLS*Math.PI*2, p1 = (col+1)/COLS*Math.PI*2;
+    const v00=[r0*Math.cos(p0),y0,r0*Math.sin(p0)];
+    const v10=[r0*Math.cos(p1),y0,r0*Math.sin(p1)];
+    const v11=[r1*Math.cos(p1),y1,r1*Math.sin(p1)];
+    const v01=[r1*Math.cos(p0),y1,r1*Math.sin(p0)];
+    const ab=[v10[0]-v00[0],v10[1]-v00[1],v10[2]-v00[2]];
+    const ac=[v01[0]-v00[0],v01[1]-v00[1],v01[2]-v00[2]];
+    const n=[ab[1]*ac[2]-ab[2]*ac[1],ab[2]*ac[0]-ab[0]*ac[2],ab[0]*ac[1]-ab[1]*ac[0]];
+    const nl=Math.sqrt(n[0]*n[0]+n[1]*n[1]+n[2]*n[2]);
+    n[0]/=nl;n[1]/=nl;n[2]/=nl;
+    const geo=new THREE.BufferGeometry();
+    geo.setAttribute('position',new THREE.Float32BufferAttribute([...v00,...v10,...v11,...v00,...v11,...v01],3));
+    geo.setAttribute('normal',new THREE.Float32BufferAttribute([...n,...n,...n,...n,...n,...n],3));
+    const isRed=(row+col)%2===0;
+    ballGroup.add(new THREE.Mesh(geo,new THREE.MeshPhongMaterial({color:isRed?0xdd0000:0xffffff,flatShading:true,shininess:30})));
+  }
+}
+
+// === BUMPERS — glowing cylinders, top area ===
+const bumpers = [];
+const bumperPositions = [[-2.2, 2.5], [2.2, 2.5], [0, 3.0], [-1.2, 1.5], [1.2, 1.5]];
+const bumperGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.3, 24);
+bumperGeo.rotateX(Math.PI / 2);
+
+bumperPositions.forEach(([bpx, bpy]) => {
+  const mat = new THREE.MeshPhongMaterial({ color: 0xff2266, emissive: 0xff0033, emissiveIntensity: 0.8, shininess: 100 });
+  const mesh = new THREE.Mesh(bumperGeo, mat);
+  mesh.position.set(bpx, bpy, 0);
+  const light = new THREE.PointLight(0xff0044, 1, 4);
+  light.position.set(bpx, bpy, 0.2);
+  scene.add(mesh); scene.add(light);
+  bumpers.push({ mesh, x: bpx, y: bpy, r: 0.45, flash: 0, mat, light });
+});
+
+// === FLIPPERS — chrome tapered paddles ===
+const chromeMat = new THREE.MeshPhongMaterial({ color: 0xffffff, emissive: 0x444444, specular: 0xffffff, shininess: 200 });
+
+function createFlipper() {
+  const shape = new THREE.Shape();
+  shape.moveTo(0, 0.12);
+  shape.lineTo(1.8, 0.06);
+  shape.quadraticCurveTo(2.0, 0, 1.8, -0.06);
+  shape.lineTo(0, -0.12);
+  shape.quadraticCurveTo(-0.15, 0, 0, 0.12);
+  const g = new THREE.ExtrudeGeometry(shape, { depth: 0.2, bevelEnabled: true, bevelThickness: 0.04, bevelSize: 0.04, bevelSegments: 3 });
+  g.translate(0, 0, -0.1);
+  return g;
+}
+
+const flipLGeo = createFlipper();
+const flipRGeo = createFlipper();
+flipRGeo.scale(-1, 1, 1);
+
+const flipperL = new THREE.Mesh(flipLGeo, chromeMat.clone());
+flipperL.position.set(-2.5, -4.2, 0); scene.add(flipperL);
+const flipperR = new THREE.Mesh(flipRGeo, chromeMat.clone());
+flipperR.position.set(2.5, -4.2, 0); scene.add(flipperR);
+
+const pivotGeo = new THREE.SphereGeometry(0.15, 12, 12);
+const pvL = new THREE.Mesh(pivotGeo, chromeMat.clone());
+pvL.position.set(-2.5, -4.2, 0); scene.add(pvL);
+const pvR = new THREE.Mesh(pivotGeo, chromeMat.clone());
+pvR.position.set(2.5, -4.2, 0); scene.add(pvR);
+
+// Side guides — straight neon bars angled toward flippers
+const guideGeo = new THREE.BoxGeometry(2.5, 0.1, 0.15);
+
+const neonMatL = new THREE.MeshPhongMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 1.5, transparent: true, opacity: 0.9 });
+const neonMatR = new THREE.MeshPhongMaterial({ color: 0xff00ff, emissive: 0xff00ff, emissiveIntensity: 1.5, transparent: true, opacity: 0.9 });
+
+const guideL = new THREE.Mesh(guideGeo, neonMatL);
+guideL.position.set(-3.5, -2.5, 0);
+guideL.rotation.z = -0.6;
+scene.add(guideL);
+
+const guideR = new THREE.Mesh(guideGeo, neonMatR);
+guideR.position.set(3.5, -2.5, 0);
+guideR.rotation.z = 0.6;
+scene.add(guideR);
+
+// Glow around guides
+const glowGeo = new THREE.BoxGeometry(2.5, 0.4, 0.4);
+const glowMatL = new THREE.MeshPhongMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 0.6, transparent: true, opacity: 0.15 });
+const glowMatR = new THREE.MeshPhongMaterial({ color: 0xff00ff, emissive: 0xff00ff, emissiveIntensity: 0.6, transparent: true, opacity: 0.15 });
+
+const glowL = new THREE.Mesh(glowGeo, glowMatL);
+glowL.position.copy(guideL.position); glowL.rotation.z = guideL.rotation.z;
+scene.add(glowL);
+const glowR = new THREE.Mesh(glowGeo, glowMatR);
+glowR.position.copy(guideR.position); glowR.rotation.z = guideR.rotation.z;
+scene.add(glowR);
+
+// Neon lights
+const neonLightL = new THREE.PointLight(0x00ffff, 0.8, 5);
+neonLightL.position.set(-3.5, -2.5, 0.5); scene.add(neonLightL);
+const neonLightR = new THREE.PointLight(0xff00ff, 0.8, 5);
+neonLightR.position.set(3.5, -2.5, 0.5); scene.add(neonLightR);
+
+let flipLAngle = 0.3, flipRAngle = -0.3;
+let flipLTarget = 0.3, flipRTarget = -0.3;
+
+// Rotation
+const rotQ = new THREE.Quaternion(), tQ = new THREE.Quaternion();
+const aX = new THREE.Vector3(1,0,0), aY = new THREE.Vector3(0,1,0), aZ = new THREE.Vector3(0,0,1);
+
+// Physics
+const bounds = 3.8;
+let bx = 0, by = 0, pvx = 0.12, pvy = 0.09, time = 0;
+function nudge() {
+  pvy += (Math.random()-.5)*.02;
+  const s = Math.sqrt(pvx*pvx+pvy*pvy), t = Math.sqrt(.12*.12+.09*.09);
+  pvx *= t/s; pvy *= t/s;
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  time += 0.016;
+
+  bx += pvx; by += pvy;
+  if (bx > bounds) { bx = bounds; pvx = -Math.abs(pvx); nudge(); }
+  if (bx < -bounds) { bx = -bounds; pvx = Math.abs(pvx); nudge(); }
+  if (by > bounds) { by = bounds; pvy = -Math.abs(pvy); }
+  if (by < -bounds) { by = -bounds; pvy = Math.abs(pvy); }
+
+  // Bumper collisions
+  bumpers.forEach(b => {
+    const dx = bx - b.x, dy = by - b.y;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    const minDist = b.r + R;
+    if (dist < minDist && dist > 0) {
+      const nx = dx/dist, ny = dy/dist;
+      bx = b.x + nx * minDist;
+      by = b.y + ny * minDist;
+      const dot = pvx*nx + pvy*ny;
+      pvx -= 2*dot*nx; pvy -= 2*dot*ny;
+      pvx *= 1.4; pvy *= 1.4;
+      b.flash = 1;
+    }
+    if (b.flash > 0) {
+      b.flash *= 0.92;
+      b.mat.emissiveIntensity = 0.8 + b.flash * 4;
+      b.mat.emissive.setRGB(1, 0.3 + b.flash * 0.7, 0.2 + b.flash * 0.8);
+      b.light.intensity = 1 + b.flash * 5;
+    }
+  });
+
+  // Auto flippers
+  if (by < -2.8 && pvy < 0) {
+    if (bx < 0) flipLTarget = -0.6;
+    if (bx >= 0) flipRTarget = 0.6;
+  } else {
+    flipLTarget = 0.3; flipRTarget = -0.3;
+  }
+  flipLAngle += (flipLTarget - flipLAngle) * 0.3;
+  flipRAngle += (flipRTarget - flipRAngle) * 0.3;
+  flipperL.rotation.z = flipLAngle;
+  flipperR.rotation.z = flipRAngle;
+
+  // Flipper collision — strong kick upward
+  if (by < -3.8 && by > -4.6 && Math.abs(bx) < 3.5 && pvy < 0) {
+    pvy = 0.35;
+    pvx += (bx > 0 ? 0.08 : -0.08);
+    by = -3.8;
+  }
+
+  // Side guide collisions
+  // Left guide: line from roughly (-4.7,-1.5) to (-2.3,-3.5), normal pointing right-down
+  const glx = bx + 3.5, gly = by + 2.5;
+  const glDist = glx * Math.cos(0.6) + gly * Math.sin(0.6);
+  if (glDist < R && bx < -1.5 && by < -1.0 && by > -4.0) {
+    const gn = [Math.cos(0.6), Math.sin(0.6)];
+    const dot = pvx*gn[0] + pvy*gn[1];
+    if (dot < 0) { pvx -= 2*dot*gn[0]; pvy -= 2*dot*gn[1]; }
+  }
+  // Right guide: mirror
+  const grx = -bx + 3.5, gry = by + 2.5;
+  const grDist = grx * Math.cos(0.6) + gry * Math.sin(0.6);
+  if (grDist < R && bx > 1.5 && by < -1.0 && by > -4.0) {
+    const gn = [-Math.cos(0.6), Math.sin(0.6)];
+    const dot = pvx*gn[0] + pvy*gn[1];
+    if (dot < 0) { pvx -= 2*dot*gn[0]; pvy -= 2*dot*gn[1]; }
+  }
+
+  // Speed cap
+  const spd = Math.sqrt(pvx*pvx + pvy*pvy);
+  if (spd > 0.4) { pvx *= 0.4/spd; pvy *= 0.4/spd; }
+
+  ballGroup.position.set(bx, by, 0);
+
+  // Multi-axis rotation
+  tQ.setFromAxisAngle(aY, .04*Math.sign(pvx)); rotQ.premultiply(tQ);
+  tQ.setFromAxisAngle(aX, .025*Math.sign(pvy)); rotQ.premultiply(tQ);
+  tQ.setFromAxisAngle(aZ, .01); rotQ.premultiply(tQ);
+  rotQ.normalize();
+  ballGroup.quaternion.copy(rotQ);
+
+  // Vortex follows ball
+  bgMesh.material.uniforms.uT.value = time;
+  // Vortex center: project ball to screen space
+  const v = new THREE.Vector3(bx, by, 0).project(camera);
+  bgMesh.material.uniforms.uT.value = time;
+  bgMesh.material.uniforms.uB.value.set(v.x * 0.5 + 0.5, v.y * 0.5 + 0.5);
+
+  renderer.render(scene, camera);
+}
+animate();
+</script>
+</body>
+</html>

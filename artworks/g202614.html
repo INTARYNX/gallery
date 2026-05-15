@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Genuary 2026 #14</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Bangers&display=swap');
+        
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #000;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Make canvas square with max size for performance
+        const maxSize = 800;
+        const size = Math.min(window.innerWidth, window.innerHeight, maxSize);
+        canvas.width = size;
+        canvas.height = size;
+        
+        // Center canvas on page
+        canvas.style.position = 'absolute';
+        canvas.style.top = '50%';
+        canvas.style.left = '50%';
+        canvas.style.transform = 'translate(-50%, -50%)';
+
+        let time = 0;
+        const SCENE_DURATION = 480;
+        let particles = [];
+        let winner = null;
+        let fractalSeed = Math.random() * 1000;
+        let colorPalette = null;
+        
+        const colorPalettes = [
+            {
+                left: { name: 'pink', stops: ['255, 0, 110', '220, 20, 140', '180, 0, 200'], shadow: '255, 0, 110' },
+                right: { name: 'cyan', stops: ['6, 255, 165', '30, 200, 255', '0, 150, 255'], shadow: '6, 255, 165' }
+            },
+            {
+                left: { name: 'orange', stops: ['255, 107, 0', '255, 140, 0', '230, 90, 0'], shadow: '255, 107, 0' },
+                right: { name: 'blue', stops: ['0, 119, 255', '30, 144, 255', '0, 100, 230'], shadow: '0, 119, 255' }
+            },
+            {
+                left: { name: 'red', stops: ['255, 30, 70', '230, 20, 60', '200, 10, 50'], shadow: '255, 30, 70' },
+                right: { name: 'green', stops: ['0, 255, 127', '30, 230, 140', '0, 200, 100'], shadow: '0, 255, 127' }
+            },
+            {
+                left: { name: 'magenta', stops: ['255, 0, 255', '230, 30, 230', '200, 0, 200'], shadow: '255, 0, 255' },
+                right: { name: 'lime', stops: ['0, 255, 0', '50, 255, 50', '0, 230, 0'], shadow: '0, 255, 0' }
+            },
+            {
+                left: { name: 'gold', stops: ['255, 215, 0', '255, 193, 37', '218, 165, 32'], shadow: '255, 215, 0' },
+                right: { name: 'teal', stops: ['0, 206, 209', '32, 178, 170', '0, 139, 139'], shadow: '0, 206, 209' }
+            }
+        ];
+        
+        function blendColors(color1, color2) {
+            const c1 = color1.split(',').map(s => parseInt(s.trim()));
+            const c2 = color2.split(',').map(s => parseInt(s.trim()));
+            const blended = [
+                Math.round((c1[0] + c2[0]) / 2),
+                Math.round((c1[1] + c2[1]) / 2),
+                Math.round((c1[2] + c2[2]) / 2)
+            ];
+            return blended.join(', ');
+        }
+        
+        function getMergedPalette() {
+            return {
+                name: 'merged',
+                stops: [
+                    blendColors(colorPalette.left.stops[0], colorPalette.right.stops[0]),
+                    blendColors(colorPalette.left.stops[1], colorPalette.right.stops[1]),
+                    blendColors(colorPalette.left.stops[2], colorPalette.right.stops[2])
+                ],
+                shadow: blendColors(colorPalette.left.shadow, colorPalette.right.shadow)
+            };
+        }
+        
+        function selectColorPalette() {
+            return colorPalettes[Math.floor(Math.random() * colorPalettes.length)];
+        }
+        
+        function selectWinner() {
+            const rand = Math.random();
+            if (rand < 0.33) return 'left';
+            if (rand < 0.66) return 'right';
+            return 'merge';
+        }
+        
+        colorPalette = selectColorPalette();
+        winner = selectWinner();
+
+        function seededRandom(seed) {
+            const x = Math.sin(seed) * 10000;
+            return x - Math.floor(x);
+        }
+
+        function generateComplexFractalEdge(p1, p2, seed) {
+            const points = [];
+            const totalPoints = 300;
+            
+            for (let i = 0; i <= totalPoints; i++) {
+                const t = i / totalPoints;
+                const baseX = p1.x + (p2.x - p1.x) * t;
+                const baseY = p1.y + (p2.y - p1.y) * t;
+                
+                let displacement = 0;
+                
+                for (let octave = 1; octave <= 7; octave++) {
+                    const freq = Math.pow(2, octave);
+                    const amp = 60 / Math.pow(2, octave);
+                    const phase = seededRandom(seed + octave * 100 + i * 0.1) * Math.PI * 2;
+                    displacement += Math.sin(t * freq * Math.PI + phase) * amp;
+                }
+                
+                for (let j = 0; j < 4; j++) {
+                    const s = seed + i * 7.123 + j * 13.456;
+                    const noise = seededRandom(s) - 0.5;
+                    displacement += noise * (20 / (j + 1));
+                }
+                
+                const organicFactor = Math.sin(t * Math.PI) * 0.7 + 0.3;
+                displacement *= organicFactor;
+                
+                const dx = p2.x - p1.x;
+                const dy = p2.y - p1.y;
+                const perpX = -dy;
+                const perpY = dx;
+                const len = Math.sqrt(perpX * perpX + perpY * perpY);
+                
+                points.push({
+                    x: baseX + (perpX / len) * displacement,
+                    y: baseY + (perpY / len) * displacement
+                });
+            }
+            
+            return points;
+        }
+
+        function easeInOutCubic(t) {
+            return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+        }
+
+        function spawnParticles(x, y, color, count) {
+            for (let i = 0; i < count; i++) {
+                particles.push({
+                    x, y,
+                    vx: (Math.random() - 0.5) * 6,
+                    vy: (Math.random() - 0.5) * 6,
+                    alpha: 1,
+                    size: Math.random() * 2.5 + 0.5,
+                    color
+                });
+            }
+        }
+
+        function updateParticles(ctx) {
+            particles.forEach(p => {
+                p.x += p.vx;
+                p.y += p.vy;
+                p.vx *= 0.98;
+                p.vy *= 0.98;
+                p.alpha -= 0.015;
+                
+                if (p.alpha > 0) {
+                    ctx.fillStyle = `rgba(${p.color},${p.alpha})`;
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            });
+            particles = particles.filter(p => p.alpha > 0);
+        }
+
+        function drawSpeedLines(ctx, centerX, centerY, intensity, alpha, angle) {
+            ctx.strokeStyle = `rgba(255, 255, 255, ${0.12 * alpha * intensity})`;
+            for (let i = 0; i < 25; i++) {
+                const a = angle + (i / 25) * Math.PI * 2;
+                const startDist = 80;
+                const endDist = 500 * intensity;
+                const offset = Math.random() * 20;
+                
+                ctx.lineWidth = 0.5 + Math.random() * 1.5;
+                ctx.beginPath();
+                ctx.moveTo(
+                    centerX + Math.cos(a) * (startDist + offset),
+                    centerY + Math.sin(a) * (startDist + offset)
+                );
+                ctx.lineTo(
+                    centerX + Math.cos(a) * endDist,
+                    centerY + Math.sin(a) * endDist
+                );
+                ctx.stroke();
+            }
+        }
+
+        function drawShape(ctx, edgePoints, isLeft, offsetX, offsetY, rotation, scale, alpha, pulse, isGhost = false) {
+            ctx.save();
+            ctx.translate(offsetX, offsetY);
+            ctx.rotate(rotation);
+            
+            const pulsedScale = scale * (1 + pulse * 0.08 * Math.sin(time * 0.15));
+            ctx.scale(pulsedScale, pulsedScale);
+            
+            const gradient = ctx.createLinearGradient(-200, -250, 200, 250);
+            const ghostAlpha = isGhost ? alpha * 0.3 : alpha;
+            
+            const colors = isLeft ? colorPalette.left : colorPalette.right;
+            gradient.addColorStop(0, `rgba(${colors.stops[0]}, ${ghostAlpha})`);
+            gradient.addColorStop(0.5, `rgba(${colors.stops[1]}, ${ghostAlpha})`);
+            gradient.addColorStop(1, `rgba(${colors.stops[2]}, ${ghostAlpha})`);
+            
+            ctx.beginPath();
+            
+            if (isLeft) {
+                ctx.moveTo(-200, -250);
+                const points = [];
+                for (let i = 0; i < edgePoints.length; i++) {
+                    points.push({
+                        x: edgePoints[i].x - 300,
+                        y: edgePoints[i].y - 300
+                    });
+                }
+                
+                ctx.lineTo(points[0].x, points[0].y);
+                for (let i = 1; i < points.length - 2; i++) {
+                    const xc = (points[i].x + points[i + 1].x) / 2;
+                    const yc = (points[i].y + points[i + 1].y) / 2;
+                    ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
+                }
+                ctx.quadraticCurveTo(
+                    points[points.length - 2].x,
+                    points[points.length - 2].y,
+                    points[points.length - 1].x,
+                    points[points.length - 1].y
+                );
+                ctx.lineTo(-200, 250);
+            } else {
+                const points = [];
+                for (let i = edgePoints.length - 1; i >= 0; i--) {
+                    points.push({
+                        x: edgePoints[i].x - 300,
+                        y: edgePoints[i].y - 300
+                    });
+                }
+                
+                ctx.moveTo(points[0].x, points[0].y);
+                for (let i = 1; i < points.length - 2; i++) {
+                    const xc = (points[i].x + points[i + 1].x) / 2;
+                    const yc = (points[i].y + points[i + 1].y) / 2;
+                    ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
+                }
+                ctx.quadraticCurveTo(
+                    points[points.length - 2].x,
+                    points[points.length - 2].y,
+                    points[points.length - 1].x,
+                    points[points.length - 1].y
+                );
+                ctx.lineTo(200, -250);
+                ctx.lineTo(200, 250);
+                ctx.lineTo(points[0].x, points[0].y);
+            }
+            
+            ctx.closePath();
+            
+            if (!isGhost) {
+                const colors = isLeft ? colorPalette.left : colorPalette.right;
+                ctx.shadowColor = `rgba(${colors.shadow}, 0.5)`;
+                ctx.shadowBlur = 20 / pulsedScale;
+            }
+            
+            ctx.fillStyle = gradient;
+            ctx.fill();
+            
+            if (!isGhost) {
+                ctx.shadowBlur = 8 / pulsedScale;
+                ctx.strokeStyle = `rgba(255, 255, 255, ${0.9 * ghostAlpha})`;
+                ctx.lineWidth = 1.5 / pulsedScale;
+                ctx.stroke();
+                
+                ctx.shadowBlur = 0;
+                ctx.strokeStyle = `rgba(255, 255, 255, ${0.5 * ghostAlpha})`;
+                ctx.lineWidth = 0.5 / pulsedScale;
+                ctx.stroke();
+            }
+            
+            ctx.restore();
+        }
+
+        function drawMergedShape(ctx, offsetX, offsetY, scale, alpha, winnerType) {
+            ctx.save();
+            ctx.translate(offsetX, offsetY);
+            ctx.scale(scale, scale);
+            
+            let colors;
+            if (winnerType === 'left') {
+                colors = colorPalette.left;
+                const gradient = ctx.createLinearGradient(-200, -250, 200, 250);
+                gradient.addColorStop(0, `rgba(${colors.stops[0]}, ${alpha})`);
+                gradient.addColorStop(0.5, `rgba(${colors.stops[1]}, ${alpha})`);
+                gradient.addColorStop(1, `rgba(${colors.stops[2]}, ${alpha})`);
+                
+                ctx.beginPath();
+                ctx.rect(-200, -250, 400, 500);
+                ctx.closePath();
+                
+                ctx.shadowColor = `rgba(${colors.shadow}, 0.5)`;
+                ctx.shadowBlur = 20 / scale;
+                ctx.fillStyle = gradient;
+                ctx.fill();
+            } else if (winnerType === 'right') {
+                colors = colorPalette.right;
+                const gradient = ctx.createLinearGradient(-200, -250, 200, 250);
+                gradient.addColorStop(0, `rgba(${colors.stops[0]}, ${alpha})`);
+                gradient.addColorStop(0.5, `rgba(${colors.stops[1]}, ${alpha})`);
+                gradient.addColorStop(1, `rgba(${colors.stops[2]}, ${alpha})`);
+                
+                ctx.beginPath();
+                ctx.rect(-200, -250, 400, 500);
+                ctx.closePath();
+                
+                ctx.shadowColor = `rgba(${colors.shadow}, 0.5)`;
+                ctx.shadowBlur = 20 / scale;
+                ctx.fillStyle = gradient;
+                ctx.fill();
+            } else {
+                // Merged color with diagonal hatching pattern
+                ctx.beginPath();
+                ctx.rect(-200, -250, 400, 500);
+                ctx.closePath();
+                ctx.clip();
+                
+                // Draw alternating diagonal stripes
+                const stripeWidth = 40;
+                const leftColor = colorPalette.left.stops[1];
+                const rightColor = colorPalette.right.stops[1];
+                
+                ctx.lineWidth = stripeWidth;
+                ctx.lineCap = 'butt';
+                
+                for (let i = -800; i < 800; i += stripeWidth * 2) {
+                    // Left color stripe
+                    ctx.strokeStyle = `rgba(${leftColor}, ${alpha})`;
+                    ctx.beginPath();
+                    ctx.moveTo(i, -250);
+                    ctx.lineTo(i + 500, 250);
+                    ctx.stroke();
+                    
+                    // Right color stripe
+                    ctx.strokeStyle = `rgba(${rightColor}, ${alpha})`;
+                    ctx.beginPath();
+                    ctx.moveTo(i + stripeWidth, -250);
+                    ctx.lineTo(i + stripeWidth + 500, 250);
+                    ctx.stroke();
+                }
+            }
+            
+            ctx.shadowBlur = 8 / scale;
+            ctx.strokeStyle = `rgba(255, 255, 255, ${0.9 * alpha})`;
+            ctx.lineWidth = 1.5 / scale;
+            ctx.beginPath();
+            ctx.rect(-200, -250, 400, 500);
+            ctx.stroke();
+            
+            ctx.restore();
+        }
+
+        function animate() {
+            const w = canvas.width;
+            const h = canvas.height;
+            
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+            ctx.fillRect(0, 0, w, h);
+
+            const edgePoints = generateComplexFractalEdge(
+                {x: 220, y: 80},
+                {x: 420, y: 520},
+                fractalSeed
+            );
+
+            const progress = (time % SCENE_DURATION) / SCENE_DURATION;
+            
+            if (time % SCENE_DURATION === 0 && time > 0) {
+                colorPalette = selectColorPalette();
+                winner = selectWinner();
+                fractalSeed = Math.random() * 1000; // New fractal each cycle
+            }
+            
+            let leftX, leftY, leftRot, leftScale, leftAlpha, leftPulse;
+            let rightX, rightY, rightRot, rightScale, rightAlpha, rightPulse;
+            let speedLineIntensity = 0;
+            let impactIntensity = 0;
+            let shake = {x: 0, y: 0};
+            let showMerged = false;
+            let mergedAlpha = 0;
+            let showSeparating = false;
+            let separationAmount = 0;
+            let separationAlpha = 0;
+            
+            if (progress < 0.15) {
+                const t = easeInOutCubic(progress / 0.15);
+                leftX = w / 2;
+                leftY = h / 2;
+                leftRot = t * Math.PI / 6 + Math.sin(time * 0.05) * 0.02;
+                leftScale = 1 + t * 3;
+                leftAlpha = 1;
+                leftPulse = 1;
+                rightAlpha = 0;
+                speedLineIntensity = t;
+            } else if (progress < 0.35) {
+                const t = easeInOutCubic((progress - 0.15) / 0.2);
+                leftX = w / 2 - t * w * 1.5;
+                leftY = h / 2;
+                leftRot = Math.PI / 6;
+                leftScale = 4;
+                leftAlpha = 1 - t;
+                leftPulse = 1 - t;
+                
+                rightX = w / 2 + (1 - t) * w * 1.5;
+                rightY = h / 2;
+                rightRot = -Math.PI / 6 + Math.sin(time * 0.05) * 0.02;
+                rightScale = 4;
+                rightAlpha = t;
+                rightPulse = t;
+                speedLineIntensity = 1.5;
+            } else if (progress < 0.5) {
+                const t = easeInOutCubic((progress - 0.35) / 0.15);
+                rightX = w / 2;
+                rightY = h / 2;
+                rightRot = -Math.PI / 6 + Math.sin(time * 0.05) * 0.02;
+                rightScale = 4;
+                rightAlpha = 1;
+                rightPulse = 1;
+                leftAlpha = 0;
+                speedLineIntensity = t;
+            } else if (progress < 0.7) {
+                const t = easeInOutCubic((progress - 0.5) / 0.2);
+                leftX = w / 2 - 300 * (1 - t);
+                leftY = h / 2;
+                leftRot = Math.PI / 6 * (1 - t) + Math.sin(time * 0.05) * 0.01;
+                leftScale = 4 - 3 * t;
+                leftAlpha = t;
+                leftPulse = t;
+                
+                rightX = w / 2 + 300 * (1 - t);
+                rightY = h / 2;
+                rightRot = -Math.PI / 6 * (1 - t) + Math.sin(time * 0.05) * 0.01;
+                rightScale = 4 - 3 * t;
+                rightAlpha = t;
+                rightPulse = t;
+                speedLineIntensity = 1 - t;
+            } else if (progress < 0.8) {
+                const t = easeInOutCubic((progress - 0.7) / 0.1);
+                const separation = 300 * (1 - t);
+                leftX = w / 2 - separation;
+                leftY = h / 2;
+                leftRot = Math.sin(time * 0.05) * 0.01;
+                leftScale = 1;
+                leftAlpha = 1;
+                leftPulse = 1;
+                
+                rightX = w / 2 + separation;
+                rightY = h / 2;
+                rightRot = Math.sin(time * 0.05) * 0.01;
+                rightScale = 1;
+                rightAlpha = 1;
+                rightPulse = 1;
+                
+                if (t > 0.9) {
+                    impactIntensity = (t - 0.9) * 10;
+                    shake = {x: (Math.random() - 0.5) * 8, y: (Math.random() - 0.5) * 8};
+                    spawnParticles(w/2, h/2, '255,255,255', 8);
+                    
+                    if (impactIntensity > 0.8) {
+                        ctx.fillStyle = `rgba(255, 255, 255, ${(impactIntensity - 0.8) * 2})`;
+                        ctx.fillRect(0, 0, w, h);
+                    }
+                }
+            } else if (progress < 0.85) {
+                const t = easeInOutCubic((progress - 0.8) / 0.05);
+                leftX = w / 2;
+                leftY = h / 2;
+                leftRot = 0;
+                leftScale = 1;
+                leftAlpha = 1 - t;
+                leftPulse = 1;
+                
+                rightX = w / 2;
+                rightY = h / 2;
+                rightRot = 0;
+                rightScale = 1;
+                rightAlpha = 1 - t;
+                rightPulse = 1;
+                
+                showMerged = true;
+                mergedAlpha = t;
+            } else if (progress < 0.93) {
+                // Hold merged
+                leftAlpha = 0;
+                rightAlpha = 0;
+                showMerged = true;
+                mergedAlpha = 1;
+            } else {
+                // Separate again for loop
+                const t = easeInOutCubic((progress - 0.93) / 0.07);
+                const separation = 300 * t;
+                
+                showMerged = true;
+                mergedAlpha = 1 - t;
+                
+                // Both shapes should show winner color when separating
+                leftX = w / 2 - separation;
+                leftY = h / 2;
+                leftRot = 0;
+                leftScale = 1;
+                leftAlpha = 0; // Don't show left/right with original colors
+                leftPulse = 1;
+                
+                rightX = w / 2 + separation;
+                rightY = h / 2;
+                rightRot = 0;
+                rightScale = 1;
+                rightAlpha = 0; // Don't show left/right with original colors
+                rightPulse = 1;
+                
+                // Show two copies of merged shape separating
+                if (t > 0) {
+                    showSeparating = true;
+                    separationAmount = separation;
+                    separationAlpha = t;
+                }
+            }
+
+            ctx.save();
+            ctx.translate(shake.x, shake.y);
+
+            if (speedLineIntensity > 0.1) {
+                drawSpeedLines(ctx, w/2, h/2, speedLineIntensity, Math.max(leftAlpha, rightAlpha), time * 0.02);
+            }
+
+            if (leftAlpha > 0) {
+                drawShape(ctx, edgePoints, true, leftX - 8, leftY - 8, leftRot, leftScale * 0.96, leftAlpha, leftPulse, true);
+                drawShape(ctx, edgePoints, true, leftX, leftY, leftRot, leftScale, leftAlpha, leftPulse);
+            }
+            
+            if (rightAlpha > 0) {
+                drawShape(ctx, edgePoints, false, rightX + 8, rightY + 8, rightRot, rightScale * 0.96, rightAlpha, rightPulse, true);
+                drawShape(ctx, edgePoints, false, rightX, rightY, rightRot, rightScale, rightAlpha, rightPulse);
+            }
+
+            if (showMerged && mergedAlpha > 0) {
+                drawMergedShape(ctx, w/2, h/2, 1, mergedAlpha, winner);
+            }
+            
+            if (showSeparating && separationAlpha > 0) {
+                // Draw two halves separating with winner color
+                let colors;
+                if (winner === 'left') {
+                    colors = colorPalette.left;
+                } else if (winner === 'right') {
+                    colors = colorPalette.right;
+                } else {
+                    colors = getMergedPalette();
+                }
+                
+                // Left half
+                ctx.save();
+                ctx.translate(w/2 - separationAmount, h/2);
+                ctx.scale(1, 1);
+                
+                if (winner === 'merge') {
+                    // Hatching pattern for merge
+                    ctx.beginPath();
+                    ctx.moveTo(-200, -250);
+                    const points = [];
+                    for (let i = 0; i < edgePoints.length; i++) {
+                        points.push({x: edgePoints[i].x - 300, y: edgePoints[i].y - 300});
+                    }
+                    ctx.lineTo(points[0].x, points[0].y);
+                    for (let i = 1; i < points.length - 2; i++) {
+                        const xc = (points[i].x + points[i + 1].x) / 2;
+                        const yc = (points[i].y + points[i + 1].y) / 2;
+                        ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
+                    }
+                    ctx.quadraticCurveTo(points[points.length - 2].x, points[points.length - 2].y, points[points.length - 1].x, points[points.length - 1].y);
+                    ctx.lineTo(-200, 250);
+                    ctx.closePath();
+                    ctx.clip();
+                    
+                    const stripeWidth = 40;
+                    ctx.lineWidth = stripeWidth;
+                    for (let i = -800; i < 800; i += stripeWidth * 2) {
+                        ctx.strokeStyle = `rgba(${colorPalette.left.stops[1]}, ${separationAlpha})`;
+                        ctx.beginPath();
+                        ctx.moveTo(i, -250);
+                        ctx.lineTo(i + 500, 250);
+                        ctx.stroke();
+                        
+                        ctx.strokeStyle = `rgba(${colorPalette.right.stops[1]}, ${separationAlpha})`;
+                        ctx.beginPath();
+                        ctx.moveTo(i + stripeWidth, -250);
+                        ctx.lineTo(i + stripeWidth + 500, 250);
+                        ctx.stroke();
+                    }
+                } else {
+                    const gradient1 = ctx.createLinearGradient(-200, -250, 200, 250);
+                    gradient1.addColorStop(0, `rgba(${colors.stops[0]}, ${separationAlpha})`);
+                    gradient1.addColorStop(0.5, `rgba(${colors.stops[1]}, ${separationAlpha})`);
+                    gradient1.addColorStop(1, `rgba(${colors.stops[2]}, ${separationAlpha})`);
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(-200, -250);
+                    const points = [];
+                    for (let i = 0; i < edgePoints.length; i++) {
+                        points.push({x: edgePoints[i].x - 300, y: edgePoints[i].y - 300});
+                    }
+                    ctx.lineTo(points[0].x, points[0].y);
+                    for (let i = 1; i < points.length - 2; i++) {
+                        const xc = (points[i].x + points[i + 1].x) / 2;
+                        const yc = (points[i].y + points[i + 1].y) / 2;
+                        ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
+                    }
+                    ctx.quadraticCurveTo(points[points.length - 2].x, points[points.length - 2].y, points[points.length - 1].x, points[points.length - 1].y);
+                    ctx.lineTo(-200, 250);
+                    ctx.closePath();
+                    ctx.fillStyle = gradient1;
+                    ctx.fill();
+                }
+                
+                ctx.strokeStyle = `rgba(255, 255, 255, ${0.9 * separationAlpha})`;
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+                ctx.restore();
+                
+                // Right half
+                ctx.save();
+                ctx.translate(w/2 + separationAmount, h/2);
+                ctx.scale(1, 1);
+                
+                if (winner === 'merge') {
+                    ctx.beginPath();
+                    const points2 = [];
+                    for (let i = edgePoints.length - 1; i >= 0; i--) {
+                        points2.push({x: edgePoints[i].x - 300, y: edgePoints[i].y - 300});
+                    }
+                    ctx.moveTo(points2[0].x, points2[0].y);
+                    for (let i = 1; i < points2.length - 2; i++) {
+                        const xc = (points2[i].x + points2[i + 1].x) / 2;
+                        const yc = (points2[i].y + points2[i + 1].y) / 2;
+                        ctx.quadraticCurveTo(points2[i].x, points2[i].y, xc, yc);
+                    }
+                    ctx.quadraticCurveTo(points2[points2.length - 2].x, points2[points2.length - 2].y, points2[points2.length - 1].x, points2[points2.length - 1].y);
+                    ctx.lineTo(200, -250);
+                    ctx.lineTo(200, 250);
+                    ctx.lineTo(points2[0].x, points2[0].y);
+                    ctx.closePath();
+                    ctx.clip();
+                    
+                    const stripeWidth = 40;
+                    ctx.lineWidth = stripeWidth;
+                    for (let i = -800; i < 800; i += stripeWidth * 2) {
+                        ctx.strokeStyle = `rgba(${colorPalette.left.stops[1]}, ${separationAlpha})`;
+                        ctx.beginPath();
+                        ctx.moveTo(i, -250);
+                        ctx.lineTo(i + 500, 250);
+                        ctx.stroke();
+                        
+                        ctx.strokeStyle = `rgba(${colorPalette.right.stops[1]}, ${separationAlpha})`;
+                        ctx.beginPath();
+                        ctx.moveTo(i + stripeWidth, -250);
+                        ctx.lineTo(i + stripeWidth + 500, 250);
+                        ctx.stroke();
+                    }
+                } else {
+                    const gradient2 = ctx.createLinearGradient(-200, -250, 200, 250);
+                    gradient2.addColorStop(0, `rgba(${colors.stops[0]}, ${separationAlpha})`);
+                    gradient2.addColorStop(0.5, `rgba(${colors.stops[1]}, ${separationAlpha})`);
+                    gradient2.addColorStop(1, `rgba(${colors.stops[2]}, ${separationAlpha})`);
+                    
+                    ctx.beginPath();
+                    const points2 = [];
+                    for (let i = edgePoints.length - 1; i >= 0; i--) {
+                        points2.push({x: edgePoints[i].x - 300, y: edgePoints[i].y - 300});
+                    }
+                    ctx.moveTo(points2[0].x, points2[0].y);
+                    for (let i = 1; i < points2.length - 2; i++) {
+                        const xc = (points2[i].x + points2[i + 1].x) / 2;
+                        const yc = (points2[i].y + points2[i + 1].y) / 2;
+                        ctx.quadraticCurveTo(points2[i].x, points2[i].y, xc, yc);
+                    }
+                    ctx.quadraticCurveTo(points2[points2.length - 2].x, points2[points2.length - 2].y, points2[points2.length - 1].x, points2[points2.length - 1].y);
+                    ctx.lineTo(200, -250);
+                    ctx.lineTo(200, 250);
+                    ctx.lineTo(points2[0].x, points2[0].y);
+                    ctx.closePath();
+                    ctx.fillStyle = gradient2;
+                    ctx.fill();
+                }
+                
+                ctx.strokeStyle = `rgba(255, 255, 255, ${0.9 * separationAlpha})`;
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+                ctx.restore();
+            }
+
+            if (impactIntensity > 0) {
+                ctx.strokeStyle = `rgba(255,255,255,${impactIntensity})`;
+                ctx.lineWidth = 2;
+                for (let i = 0; i < 12; i++) {
+                    const angle = (i / 12) * Math.PI * 2;
+                    const length = 60 + Math.random() * 40;
+                    ctx.beginPath();
+                    ctx.moveTo(w/2, h/2);
+                    ctx.lineTo(w/2 + Math.cos(angle) * length, h/2 + Math.sin(angle) * length);
+                    ctx.stroke();
+                }
+            }
+
+            updateParticles(ctx);
+            
+            ctx.restore();
+
+            // Draw BAM text as overlay, anchored to shaken impact center
+            if (impactIntensity > 0.5) {
+                const impactX = w / 2 + shake.x;
+                const impactY = h / 2 + shake.y + 10; // optical center adjustment
+                
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
+                ctx.font = 'bold 120px Bangers, Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                
+                ctx.strokeStyle = `rgba(0, 0, 0, ${impactIntensity * 0.8})`;
+                ctx.lineWidth = 8;
+                ctx.strokeText('BAM!', impactX, impactY);
+                
+                ctx.fillStyle = `rgba(255, 255, 255, ${impactIntensity})`;
+                ctx.fillText('BAM!', impactX, impactY);
+            }
+
+            time++;
+            requestAnimationFrame(animate);
+        }
+
+        // Wait for font to load before starting animation
+        document.fonts.ready.then(() => {
+            animate();
+        });
+    </script>
+</body>
+</html>

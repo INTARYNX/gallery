@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<base href="/upstride/">
+    <title>Nocturnal</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(to bottom, #001a33 0%, #003366 50%, #004d7a 100%);
+            overflow: hidden;
+        }
+        canvas {
+            border: 1px solid #333;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        canvas.width = 800;
+        canvas.height = 600;
+        
+        const gridSize = 32;
+        const tileWidth = 16;
+        const tileHeight = 8;
+        const offsetX = canvas.width / 2;
+        const offsetY = canvas.height / 2 - 50;
+        
+        // Génération du terrain
+        function noise(x, y, time) {
+            return Math.sin(x * 0.3 + time * 0.1) * Math.cos(y * 0.3 + time * 0.1) + 
+                   Math.sin(x * 0.15 + y * 0.15 + time * 0.05) * 0.5;
+        }
+        
+        let terrainTime = 0;
+        const terrain = [];
+        for (let y = 0; y < gridSize; y++) {
+            terrain[y] = [];
+            for (let x = 0; x < gridSize; x++) {
+                terrain[y][x] = Math.floor(Math.abs(noise(x, y, terrainTime)) * 8);
+            }
+        }
+        
+        // Particules pour les traces
+        const particles = [];
+        
+        // Étoiles
+        const stars = [];
+        for (let i = 0; i < 100; i++) {
+            stars.push({
+                x: Math.random() * canvas.width,
+                y: Math.random() * (canvas.height * 0.4),
+                size: Math.random() * 1.5,
+                twinkle: Math.random() * Math.PI * 2,
+                twinkleSpeed: 0.02 + Math.random() * 0.03
+            });
+        }
+        
+        // Arbres (sapins)
+        const trees = [];
+        const treeMap = {}; // Pour tracker quelles tuiles ont des arbres
+        
+        function spawnTree() {
+            const tx = Math.floor(Math.random() * gridSize);
+            const ty = Math.floor(Math.random() * gridSize);
+            const key = `${tx},${ty}`;
+            
+            // Ne pas mettre d'arbre si la tuile en a déjà un
+            if (treeMap[key]) return;
+            
+            treeMap[key] = true;
+            trees.push({
+                x: tx,
+                y: ty,
+                growth: 0,
+                maxGrowth: 1,
+                state: 'growing',
+                lifeTime: 15000 + Math.random() * 15000
+            });
+        }
+        
+        // Créer arbres initiaux (10% des tuiles)
+        const initialTrees = Math.floor(gridSize * gridSize * 0.1);
+        for (let i = 0; i < initialTrees; i++) {
+            spawnTree();
+        }
+        
+        // Drones
+        const drones = [];
+        for (let i = 0; i < 8; i++) {
+            drones.push({
+                x: Math.random() * gridSize,
+                y: Math.random() * gridSize,
+                z: 15 + Math.random() * 20,
+                vx: (Math.random() - 0.5) * 0.04,
+                vy: (Math.random() - 0.5) * 0.04,
+                vz: (Math.random() - 0.5) * 0.01,
+                pulse: Math.random() * Math.PI * 2,
+                angle: Math.random() * Math.PI * 2,
+                angleSpeed: 0.005 + Math.random() * 0.01
+            });
+        }
+        
+        // Projection isométrique Populous-style
+        function toIso(x, y, z) {
+            return {
+                x: (x - y) * tileWidth + offsetX,
+                y: (x + y) * tileHeight + offsetY - z * tileHeight
+            };
+        }
+        
+        function drawTerrain() {
+            // Ciel dégradé
+            const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            gradient.addColorStop(0, '#001a33');
+            gradient.addColorStop(0.5, '#003366');
+            gradient.addColorStop(1, '#004d7a');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Dessiner les étoiles
+            stars.forEach(star => {
+                star.twinkle += star.twinkleSpeed;
+                const brightness = Math.sin(star.twinkle) * 0.3 + 0.7;
+                ctx.fillStyle = `rgba(255, 255, 255, ${brightness})`;
+                ctx.beginPath();
+                ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            
+            // Dessiner de l'arrière vers l'avant
+            for (let y = gridSize - 1; y >= 0; y--) {
+                for (let x = 0; x < gridSize; x++) {
+                    const height = Math.floor(terrain[y][x]);
+                    
+                    // Brume atmosphérique basée sur la distance
+                    const distFromCenter = Math.sqrt(Math.pow(x - gridSize/2, 2) + Math.pow(y - gridSize/2, 2));
+                    const fogAmount = Math.min(distFromCenter / (gridSize * 0.6), 0.4);
+                    
+                    // Dessiner les couches empilées
+                    for (let h = 0; h <= height; h++) {
+                        const p1 = toIso(x, y, h);
+                        const p2 = toIso(x + 1, y, h);
+                        const p3 = toIso(x + 1, y + 1, h);
+                        const p4 = toIso(x, y + 1, h);
+                        
+                        // Face du dessus
+                        if (h === height) {
+                            const brightness = 80 + h * 15;
+                            const r = Math.floor(fogAmount * 0 + (1 - fogAmount) * 0);
+                            const g = Math.floor(fogAmount * 51 + (1 - fogAmount) * brightness);
+                            const b = Math.floor(fogAmount * 102 + (1 - fogAmount) * (brightness * 0.6));
+                            ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+                            ctx.beginPath();
+                            ctx.moveTo(p1.x, p1.y);
+                            ctx.lineTo(p2.x, p2.y);
+                            ctx.lineTo(p3.x, p3.y);
+                            ctx.lineTo(p4.x, p4.y);
+                            ctx.closePath();
+                            ctx.fill();
+                            
+                            ctx.strokeStyle = `rgba(0, 255, 136, ${1 - fogAmount * 0.7})`;
+                            ctx.lineWidth = 1;
+                            ctx.stroke();
+                        }
+                        
+                        // Face droite
+                        if (x === gridSize - 1 || (x < gridSize - 1 && Math.floor(terrain[y][x + 1]) < h)) {
+                            const p5 = toIso(x + 1, y, h - 1);
+                            const p6 = toIso(x + 1, y + 1, h - 1);
+                            
+                            const brightness = 40 + h * 10;
+                            const r = Math.floor(fogAmount * 0 + (1 - fogAmount) * 0);
+                            const g = Math.floor(fogAmount * 51 + (1 - fogAmount) * brightness);
+                            const b = Math.floor(fogAmount * 102 + (1 - fogAmount) * (brightness * 0.4));
+                            ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+                            ctx.beginPath();
+                            ctx.moveTo(p2.x, p2.y);
+                            ctx.lineTo(p3.x, p3.y);
+                            ctx.lineTo(p6.x, p6.y);
+                            ctx.lineTo(p5.x, p5.y);
+                            ctx.closePath();
+                            ctx.fill();
+                            
+                            ctx.strokeStyle = `rgba(0, 136, 85, ${1 - fogAmount * 0.7})`;
+                            ctx.lineWidth = 1;
+                            ctx.stroke();
+                        }
+                        
+                        // Face gauche
+                        if (y === gridSize - 1 || (y < gridSize - 1 && Math.floor(terrain[y + 1][x]) < h)) {
+                            const p5 = toIso(x, y + 1, h - 1);
+                            const p6 = toIso(x + 1, y + 1, h - 1);
+                            
+                            const brightness = 50 + h * 10;
+                            const r = Math.floor(fogAmount * 0 + (1 - fogAmount) * 0);
+                            const g = Math.floor(fogAmount * 51 + (1 - fogAmount) * brightness);
+                            const b = Math.floor(fogAmount * 102 + (1 - fogAmount) * (brightness * 0.5));
+                            ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+                            ctx.beginPath();
+                            ctx.moveTo(p4.x, p4.y);
+                            ctx.lineTo(p3.x, p3.y);
+                            ctx.lineTo(p6.x, p6.y);
+                            ctx.lineTo(p5.x, p5.y);
+                            ctx.closePath();
+                            ctx.fill();
+                            
+                            ctx.strokeStyle = `rgba(0, 170, 102, ${1 - fogAmount * 0.7})`;
+                            ctx.lineWidth = 1;
+                            ctx.stroke();
+                        }
+                    }
+                }
+            }
+            
+            // Dessiner les arbres
+            trees.forEach(tree => {
+                if (tree.growth > 0) {
+                    const treeZ = Math.floor(terrain[tree.y][tree.x]);
+                    // Centrer sur la tuile
+                    const centerPos = toIso(tree.x + 0.5, tree.y + 0.5, treeZ + 1);
+                    const size = 3 * tree.growth;
+                    
+                    // Tronc simple
+                    ctx.fillStyle = `rgba(101, 67, 33, ${tree.growth})`;
+                    ctx.fillRect(centerPos.x - 1, centerPos.y - size * 1.5, 2, size * 1.5);
+                    
+                    // Feuillage triangle simple
+                    ctx.fillStyle = `rgba(34, 139, 34, ${tree.growth * 0.9})`;
+                    ctx.beginPath();
+                    ctx.moveTo(centerPos.x, centerPos.y - size * 3);
+                    ctx.lineTo(centerPos.x - size, centerPos.y - size);
+                    ctx.lineTo(centerPos.x + size, centerPos.y - size);
+                    ctx.closePath();
+                    ctx.fill();
+                    
+                    // Deuxième étage
+                    ctx.fillStyle = `rgba(46, 125, 50, ${tree.growth * 0.8})`;
+                    ctx.beginPath();
+                    ctx.moveTo(centerPos.x, centerPos.y - size * 2);
+                    ctx.lineTo(centerPos.x - size * 0.8, centerPos.y - size * 0.5);
+                    ctx.lineTo(centerPos.x + size * 0.8, centerPos.y - size * 0.5);
+                    ctx.closePath();
+                    ctx.fill();
+                }
+            });
+            
+            // Dessiner les particules de trace
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                const pos = toIso(p.x, p.y, p.z);
+                
+                const grad = ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, p.size * 2);
+                grad.addColorStop(0, `rgba(255, 255, 150, ${p.alpha})`);
+                grad.addColorStop(0.5, `rgba(255, 200, 100, ${p.alpha * 0.5})`);
+                grad.addColorStop(1, 'rgba(255, 150, 50, 0)');
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, p.size * 2, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            // Dessiner les drones comme lucioles
+            drones.forEach(drone => {
+                const pos = toIso(drone.x, drone.y, drone.z);
+                const pulseIntensity = Math.sin(drone.pulse) * 0.5 + 0.5;
+                const size = 4 + pulseIntensity * 3;
+                
+                // Halo externe
+                const droneGradient = ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, size * 4);
+                droneGradient.addColorStop(0, `rgba(255, 255, 100, ${pulseIntensity * 0.9})`);
+                droneGradient.addColorStop(0.5, `rgba(255, 200, 50, ${pulseIntensity * 0.5})`);
+                droneGradient.addColorStop(1, 'rgba(255, 150, 0, 0)');
+                ctx.fillStyle = droneGradient;
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, size * 4, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Point lumineux central
+                ctx.fillStyle = `rgba(255, 255, 255, ${0.9 + pulseIntensity * 0.1})`;
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, size, 0, Math.PI * 2);
+                ctx.fill();
+            });
+        }
+        
+        function updateDrones() {
+            // Mettre à jour le terrain très lentement
+            terrainTime += 0.002;
+            for (let y = 0; y < gridSize; y++) {
+                for (let x = 0; x < gridSize; x++) {
+                    const targetHeight = Math.floor(Math.abs(noise(x, y, terrainTime)) * 8);
+                    // Transition progressive vers la hauteur cible
+                    if (terrain[y][x] < targetHeight) {
+                        terrain[y][x] += 0.02;
+                    } else if (terrain[y][x] > targetHeight) {
+                        terrain[y][x] -= 0.02;
+                    }
+                    // Arrondir uniquement quand proche
+                    if (Math.abs(terrain[y][x] - targetHeight) < 0.1) {
+                        terrain[y][x] = targetHeight;
+                    }
+                }
+            }
+            
+            // Mettre à jour les arbres
+            for (let i = trees.length - 1; i >= 0; i--) {
+                const tree = trees[i];
+                
+                if (tree.state === 'growing') {
+                    tree.growth += 0.015;
+                    if (tree.growth >= tree.maxGrowth) {
+                        tree.state = 'alive';
+                        tree.birthTime = Date.now();
+                    }
+                } else if (tree.state === 'alive') {
+                    if (Date.now() - tree.birthTime > tree.lifeTime) {
+                        tree.state = 'dying';
+                    }
+                } else if (tree.state === 'dying') {
+                    tree.growth -= 0.015;
+                    if (tree.growth <= 0) {
+                        const key = `${tree.x},${tree.y}`;
+                        delete treeMap[key];
+                        trees.splice(i, 1);
+                    }
+                }
+            }
+            
+            // Maintenir 10% des tuiles avec des arbres
+            const targetTrees = Math.floor(gridSize * gridSize * 0.1);
+            if (trees.length < targetTrees) {
+                spawnTree();
+            }
+            
+            drones.forEach(drone => {
+                // Créer des particules de trace moins fréquemment
+                if (Math.random() > 0.3) {
+                    particles.push({
+                        x: drone.x,
+                        y: drone.y,
+                        z: drone.z,
+                        size: 1.5 + Math.random() * 1.5,
+                        alpha: 0.6,
+                        life: 60
+                    });
+                }
+                
+                // Mouvement organique avec sinusoïdes
+                drone.angle += drone.angleSpeed;
+                drone.vx += Math.cos(drone.angle) * 0.0015;
+                drone.vy += Math.sin(drone.angle) * 0.0015;
+                
+                // Limiter la vitesse
+                const speed = Math.sqrt(drone.vx * drone.vx + drone.vy * drone.vy);
+                if (speed > 0.06) {
+                    drone.vx = (drone.vx / speed) * 0.06;
+                    drone.vy = (drone.vy / speed) * 0.06;
+                }
+                
+                drone.x += drone.vx;
+                drone.y += drone.vy;
+                drone.z += drone.vz;
+                drone.pulse += 0.05;
+                
+                // Rebondir doucement sur les bords
+                if (drone.x < 2 || drone.x > gridSize - 2) {
+                    drone.vx *= -0.8;
+                    drone.angle += Math.PI;
+                }
+                if (drone.y < 2 || drone.y > gridSize - 2) {
+                    drone.vy *= -0.8;
+                    drone.angle += Math.PI;
+                }
+                if (drone.z < 15 || drone.z > 35) drone.vz *= -1;
+                
+                // Garder dans les limites
+                drone.x = Math.max(2, Math.min(gridSize - 2, drone.x));
+                drone.y = Math.max(2, Math.min(gridSize - 2, drone.y));
+                drone.z = Math.max(15, Math.min(35, drone.z));
+            });
+            
+            // Mettre à jour et supprimer les anciennes particules
+            for (let i = particles.length - 1; i >= 0; i--) {
+                particles[i].life--;
+                // Easing quadratique pour un fade out plus doux
+                const t = particles[i].life / 60;
+                particles[i].alpha = t * t * 0.6;
+                if (particles[i].life <= 0) {
+                    particles.splice(i, 1);
+                }
+            }
+        }
+        
+        function animate() {
+            updateDrones();
+            drawTerrain();
+            requestAnimationFrame(animate);
+        }
+        
+        animate();
+    </script>
+</body>
+</html>

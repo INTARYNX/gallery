@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>M4G1C C4RP3T</title>
+<style>
+  html, body { margin:0; padding:0; background:#000; width:100%; height:100%; font-family:monospace; overflow:hidden; }
+  body { display:flex; justify-content:center; align-items:center; min-height:100vh; padding:20px; box-sizing:border-box; }
+  #wrap { width: min(90vw, 90vh); aspect-ratio: 1 / 1; box-shadow: 0 0 60px rgba(255,0,80,0.3); overflow:hidden; position:relative; background:#000; }
+  #scene { display:block; width:100%; height:100%; }
+  canvas#rug { display:none; }
+</style>
+</head>
+<body>
+<canvas id="rug" width="1024" height="1024"></canvas>
+<div id="wrap"><canvas id="scene"></canvas></div>
+<script>
+/* ========== 1) DESSIN DU TAPIS SOURCE ========== */
+const c = document.getElementById('rug');
+const ctx = c.getContext('2d');
+const W = c.width, H = c.height;
+
+const COL = {
+  bgDark:'#6b1d1d', bgMid:'#8b2424', bgLight:'#a83232',
+  cream:'#e8d5a8', navy:'#1a2a4a', gold:'#c89b3c',
+  green:'#2d5a3d', ivory:'#f5ecd0', rust:'#a04020', pink:'#c97a6a'
+};
+
+const bg = ctx.createRadialGradient(W/2,H/2,100,W/2,H/2,W);
+bg.addColorStop(0,COL.bgLight); bg.addColorStop(0.5,COL.bgMid); bg.addColorStop(1,COL.bgDark);
+ctx.fillStyle=bg; ctx.fillRect(0,0,W,H);
+
+function boteh(cx,cy,size,rot,fill){
+  ctx.save(); ctx.translate(cx,cy); ctx.rotate(rot); ctx.fillStyle=fill;
+  ctx.beginPath();
+  ctx.moveTo(0,-size);
+  ctx.bezierCurveTo(size*0.7,-size,size*0.9,-size*0.3,size*0.5,size*0.2);
+  ctx.bezierCurveTo(size*0.3,size*0.6,-size*0.2,size*0.8,-size*0.4,size*0.5);
+  ctx.bezierCurveTo(-size*0.7,size*0.1,-size*0.6,-size*0.6,0,-size);
+  ctx.fill();
+  ctx.fillStyle=COL.gold;
+  ctx.beginPath(); ctx.arc(0,-size*0.3,size*0.15,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+function flower(cx,cy,size,c1,c2){
+  ctx.fillStyle=c1;
+  for(let i=0;i<8;i++){
+    const a=(i/8)*Math.PI*2;
+    ctx.beginPath();
+    ctx.ellipse(cx+Math.cos(a)*size*0.5,cy+Math.sin(a)*size*0.5,size*0.4,size*0.25,a,0,Math.PI*2);
+    ctx.fill();
+  }
+  ctx.fillStyle=c2;
+  ctx.beginPath(); ctx.arc(cx,cy,size*0.35,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle=COL.gold;
+  ctx.beginPath(); ctx.arc(cx,cy,size*0.15,0,Math.PI*2); ctx.fill();
+}
+function rosette(cx,cy,size,c1,c2,c3){
+  ctx.save(); ctx.translate(cx,cy); ctx.fillStyle=c1;
+  ctx.beginPath();
+  for(let i=0;i<16;i++){
+    const r=i%2===0?size:size*0.5;
+    const a=(i/16)*Math.PI*2-Math.PI/2;
+    const x=Math.cos(a)*r,y=Math.sin(a)*r;
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  }
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle=c2; ctx.beginPath(); ctx.arc(0,0,size*0.4,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle=c3; ctx.beginPath(); ctx.arc(0,0,size*0.2,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+ctx.fillStyle=COL.cream; ctx.fillRect(40,40,W-80,H-80);
+ctx.fillStyle=COL.bgDark; ctx.fillRect(58,58,W-116,H-116);
+for(let x=78;x<W-78;x+=70){
+  boteh(x,80,26,0,COL.navy);
+  boteh(x,H-80,26,Math.PI,COL.navy);
+}
+for(let y=115;y<H-115;y+=70){
+  boteh(80,y,26,-Math.PI/2,COL.navy);
+  boteh(W-80,y,26,Math.PI/2,COL.navy);
+}
+ctx.fillStyle=COL.navy; ctx.fillRect(102,102,W-204,H-204);
+ctx.fillStyle=COL.cream; ctx.fillRect(122,122,W-244,H-244);
+for(let x=115;x<W-115;x+=32){
+  rosette(x,96,6,COL.gold,COL.ivory,COL.navy);
+  rosette(x,H-96,6,COL.gold,COL.ivory,COL.navy);
+}
+for(let y=115;y<H-115;y+=32){
+  rosette(96,y,6,COL.gold,COL.ivory,COL.navy);
+  rosette(W-96,y,6,COL.gold,COL.ivory,COL.navy);
+}
+ctx.fillStyle=COL.bgDark; ctx.fillRect(140,140,W-280,H-280);
+
+const FX=140,FY=140,FW=W-280,FH=H-280;
+const CX=W/2,CY=H/2;
+
+for(let y=FY+40;y<FY+FH-40;y+=58){
+  for(let x=FX+40;x<FX+FW-40;x+=58){
+    const offset=(Math.floor((y-FY)/58)%2)*29;
+    const px=x+offset;
+    if(px>FX+FW-40) continue;
+    // asymétrie légère : petit jitter de position
+    const jx = (Math.random() - 0.5) * 3;
+    const jy = (Math.random() - 0.5) * 3;
+    ctx.save(); ctx.translate(px+jx,y+jy); ctx.rotate(Math.PI/4 + (Math.random()-0.5)*0.15);
+    ctx.fillStyle=COL.navy; ctx.fillRect(-5,-5,10,10);
+    ctx.restore();
+    ctx.fillStyle=COL.gold;
+    ctx.beginPath(); ctx.arc(px+jx,y+jy,2,0,Math.PI*2); ctx.fill();
+  }
+}
+
+// Médaillon
+ctx.save();
+ctx.translate(CX,CY);
+function medShape(s){
+  const w=230*s,h=335*s;
+  ctx.beginPath();
+  ctx.moveTo(0,-h);
+  ctx.bezierCurveTo(w*0.3,-h*0.95,w*0.8,-h*0.5,w,0);
+  ctx.bezierCurveTo(w*0.8,h*0.5,w*0.3,h*0.95,0,h);
+  ctx.bezierCurveTo(-w*0.3,h*0.95,-w*0.8,h*0.5,-w,0);
+  ctx.bezierCurveTo(-w*0.8,-h*0.5,-w*0.3,-h*0.95,0,-h);
+  ctx.closePath();
+}
+ctx.fillStyle=COL.navy; medShape(1); ctx.fill();
+ctx.strokeStyle=COL.gold; ctx.lineWidth=2.5; ctx.stroke();
+ctx.fillStyle=COL.cream; medShape(0.75); ctx.fill();
+ctx.strokeStyle=COL.rust; ctx.lineWidth=2; ctx.stroke();
+ctx.fillStyle=COL.bgMid; medShape(0.4); ctx.fill();
+rosette(0,0,38,COL.gold,COL.navy,COL.cream);
+ctx.fillStyle=COL.green;
+for(let i=0;i<8;i++){
+  const a=(i/8)*Math.PI*2;
+  ctx.save(); ctx.rotate(a);
+  ctx.beginPath(); ctx.ellipse(58,0,19,9,0,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+ctx.restore();
+
+// Écoinçons
+function spandrel(cx,cy,rx,ry){
+  ctx.save(); ctx.translate(cx,cy); ctx.scale(rx,ry);
+  ctx.fillStyle=COL.navy;
+  ctx.beginPath();
+  ctx.moveTo(0,0); ctx.lineTo(205,0);
+  ctx.bezierCurveTo(205,102,102,205,0,205);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle=COL.gold; ctx.lineWidth=2; ctx.stroke();
+  ctx.fillStyle=COL.cream;
+  ctx.beginPath();
+  ctx.moveTo(13,13); ctx.lineTo(180,13);
+  ctx.bezierCurveTo(180,90,90,180,13,180);
+  ctx.closePath(); ctx.fill();
+  flower(65,65,32,COL.rust,COL.navy);
+  ctx.restore();
+}
+spandrel(FX,FY,1,1);
+spandrel(FX+FW,FY,-1,1);
+spandrel(FX,FY+FH,1,-1);
+spandrel(FX+FW,FY+FH,-1,-1);
+
+// --- USURE LÉGÈRE ---
+
+// Petits trous (points noirs)
+for (let i = 0; i < 15; i++){
+  const fx = Math.random() * W;
+  const fy = Math.random() * H;
+  const fr = 1 + Math.random() * 3;
+  ctx.fillStyle = `rgba(10, 5, 5, ${0.6 + Math.random() * 0.3})`;
+  ctx.beginPath();
+  ctx.arc(fx, fy, fr, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// Grain de poussière
+ctx.save();
+ctx.globalAlpha = 0.08;
+for (let i = 0; i < 2000; i++){
+  const px = Math.random() * W;
+  const py = Math.random() * H;
+  ctx.fillStyle = Math.random() > 0.5 ? '#000' : '#fff';
+  ctx.fillRect(px, py, 1, 1);
+}
+ctx.restore();
+
+/* ========== 2) RENDU GLITCH ========== */
+const scene = document.getElementById('scene');
+const sctx = scene.getContext('2d');
+const buffer = document.createElement('canvas');
+const bctx = buffer.getContext('2d');
+const frozenFrame = document.createElement('canvas');
+const fctx = frozenFrame.getContext('2d');
+
+// Étoiles & flocons
+const STARS = [];
+for (let k = 0; k < 200; k++){
+  STARS.push({ u: Math.random(), v: Math.random() * 0.65, size: Math.random() * 1.4 + 0.3, phase: Math.random() * Math.PI * 2, speed: 1 + Math.random() * 2 });
+}
+const SNOW = [];
+for (let k = 0; k < 80; k++){
+  SNOW.push({ u: Math.random(), v: Math.random(), size: Math.random() * 1.8 + 0.6, speed: 0.02 + Math.random() * 0.04, drift: Math.random() * Math.PI * 2 });
+}
+
+// Distorsions courbes (vagues qui traversent l'image)
+const waves = [];
+function triggerWaves(n){
+  for (let i = 0; i < n; i++){
+    waves.push({
+      yCenter: Math.random() * SH,
+      amp: rand(15, 60),
+      freq: rand(0.005, 0.025),
+      speed: rand(-200, 200),
+      life: rand(0.6, 1.8),
+      maxLife: 1.5,
+      phase: Math.random() * Math.PI * 2,
+      thickness: rand(SH * 0.15, SH * 0.4),
+      hue: rand(280, 340)
+    });
+  }
+}
+
+// Vortex ponctuels (déformation radiale)
+const vortices = [];
+function triggerVortex(){
+  vortices.push({
+    x: rand(SW * 0.2, SW * 0.8),
+    y: rand(SH * 0.2, SH * 0.8),
+    radius: rand(80, 200),
+    strength: rand(-40, 40),
+    life: rand(0.4, 1.0),
+    maxLife: 1.0
+  });
+}
+
+let SW, SH;
+function resize(){
+  const rect = scene.getBoundingClientRect();
+  SW = Math.floor(rect.width);
+  SH = Math.floor(rect.height);
+  scene.width = SW; scene.height = SH;
+  buffer.width = SW; buffer.height = SH;
+  frozenFrame.width = SW; frozenFrame.height = SH;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// --- Pseudo-3D ---
+const FOCAL = 700;
+const GRID = 24;
+const HALF = 1.6;
+const THICK = 0.08;
+
+function project(x, y, z, camZ){
+  const dz = z + camZ;
+  const s = FOCAL / dz;
+  return { x: x * s, y: y * s, s };
+}
+function rotate(p, ry, rx){
+  let x = p.x * Math.cos(ry) - p.z * Math.sin(ry);
+  let z = p.x * Math.sin(ry) + p.z * Math.cos(ry);
+  let y = p.y;
+  let y2 = y * Math.cos(rx) - z * Math.sin(rx);
+  let z2 = y * Math.sin(rx) + z * Math.cos(rx);
+  return { x, y: y2, z: z2 };
+}
+function drawTexturedTriangle(targetCtx, img, x0,y0, x1,y1, x2,y2, u0,v0, u1,v1, u2,v2){
+  targetCtx.save();
+  targetCtx.beginPath();
+  targetCtx.moveTo(x0, y0);
+  targetCtx.lineTo(x1, y1);
+  targetCtx.lineTo(x2, y2);
+  targetCtx.closePath();
+  targetCtx.clip();
+
+  const du1 = u1 - u0, dv1 = v1 - v0;
+  const du2 = u2 - u0, dv2 = v2 - v0;
+  const dx1 = x1 - x0, dy1 = y1 - y0;
+  const dx2 = x2 - x0, dy2 = y2 - y0;
+  const det = du1 * dv2 - du2 * dv1;
+  if (Math.abs(det) < 1e-8) { targetCtx.restore(); return; }
+  const invDet = 1 / det;
+  const a = (dx1 * dv2 - dx2 * dv1) * invDet;
+  const cc = (dx2 * du1 - dx1 * du2) * invDet;
+  const b = (dy1 * dv2 - dy2 * dv1) * invDet;
+  const d = (dy2 * du1 - dy1 * du2) * invDet;
+  const e = x0 - a * u0 - cc * v0;
+  const f = y0 - b * u0 - d * v0;
+  targetCtx.setTransform(a, b, cc, d, e, f);
+  targetCtx.drawImage(img, 0, 0);
+  targetCtx.setTransform(1, 0, 0, 1, 0, 0);
+  targetCtx.restore();
+}
+
+// Rend le tapis en pseudo-3D dans un contexte donné
+function renderRug3D(targetCtx, angle, cx, cy){
+  const ry = angle;
+  const rx = 0.55 + Math.sin(angle*0.5)*0.08;
+  const camZ = 5.5;
+  const floatAmp = 0.12;
+  const floatY = Math.sin(angle * 1.2) * floatAmp;
+
+  const top = [];
+  for (let j = 0; j <= GRID; j++){
+    for (let i = 0; i <= GRID; i++){
+      const u = i / GRID;
+      const v = j / GRID;
+      const x = (u - 0.5) * 2 * HALF;
+      const z = (v - 0.5) * 2 * HALF;
+      const wave =
+        Math.sin(x * 1.8 + angle * 2.0) * 0.06 +
+        Math.cos(z * 2.2 + angle * 1.6) * 0.05 +
+        Math.sin((x + z) * 1.3 + angle * 1.1) * 0.04;
+      const pt = rotate({ x, y: -THICK/2 + wave + floatY, z }, ry, rx);
+      const pr = project(pt.x, pt.y, pt.z, camZ);
+      top.push({ sx: cx + pr.x, sy: cy + pr.y });
+    }
+  }
+  const idx = (i,j) => j*(GRID+1) + i;
+  const tileU = W / GRID;
+  const tileV = H / GRID;
+
+  for (let j = 0; j < GRID; j++){
+    for (let i = 0; i < GRID; i++){
+      const p00 = top[idx(i, j)];
+      const p10 = top[idx(i+1, j)];
+      const p11 = top[idx(i+1, j+1)];
+      const p01 = top[idx(i, j+1)];
+      const area = (p10.sx - p00.sx)*(p11.sy - p00.sy) - (p10.sy - p00.sy)*(p11.sx - p00.sx);
+      if (area === 0) continue;
+      const u0 = i * tileU, v0 = j * tileV;
+      const u1 = (i+1)*tileU, v1 = j * tileV;
+      const u2 = (i+1)*tileU, v2 = (j+1)*tileV;
+      const u3 = i * tileU, v3 = (j+1)*tileV;
+      drawTexturedTriangle(targetCtx, c, p00.sx, p00.sy, p10.sx, p10.sy, p11.sx, p11.sy, u0, v0, u1, v1, u2, v2);
+      drawTexturedTriangle(targetCtx, c, p00.sx, p00.sy, p11.sx, p11.sy, p01.sx, p01.sy, u0, v0, u2, v2, u3, v3);
+    }
+  }
+}
+
+// État de corruption par bande horizontale (comme des scanlines)
+const BANDS = 40;
+const bandState = [];
+for (let i = 0; i < BANDS; i++){
+  bandState.push({
+    shiftX: 0,
+    targetShiftX: 0,
+    shiftY: 0,
+    targetShiftY: 0,
+    shear: 0,
+    targetShear: 0,
+    glitchTimer: 0,
+    colorShift: 0,
+    inverted: false,
+    dataLoss: 0,
+    frozen: false
+  });
+}
+
+// Colonnes verticales pour distorsion verticale
+const VBANDS = 20;
+const vbandState = [];
+for (let i = 0; i < VBANDS; i++){
+  vbandState.push({ shiftY: 0, targetShiftY: 0, timer: 0 });
+}
+
+// Frame figée (freeze)
+let freezeActive = false;
+let freezeTimer = 0;
+let freezeRegions = [];
+
+// Blocs de données "corrompus" (morceaux du tapis mal placés)
+let corruptBlocks = [];
+
+// Particules de "pixels morts" qui tombent
+const deadPixels = [];
+
+// Timer général de crises de glitch
+let nextCrisis = 0;
+let crisisIntensity = 0;
+
+let t = 0;
+let last = performance.now();
+
+function rand(a, b){ return a + Math.random() * (b - a); }
+
+function render(now){
+  const dt = (now - last) / 1000;
+  last = now;
+  t += dt;
+
+  // --- Crises de glitch périodiques ---
+  nextCrisis -= dt;
+  if (nextCrisis <= 0){
+    crisisIntensity = 1;
+    nextCrisis = rand(1.5, 4);
+    // Corrompre des bandes aléatoires
+    for (let i = 0; i < BANDS; i++){
+      if (Math.random() < 0.3){
+        bandState[i].targetShiftX = rand(-150, 150);
+        bandState[i].targetShiftY = Math.random() < 0.4 ? rand(-25, 25) : 0;
+        bandState[i].targetShear = Math.random() < 0.3 ? rand(-0.4, 0.4) : 0;
+        bandState[i].glitchTimer = rand(0.2, 0.8);
+        bandState[i].colorShift = rand(-30, 30);
+        bandState[i].inverted = Math.random() < 0.15;
+        bandState[i].dataLoss = Math.random() < 0.2 ? Math.random() : 0;
+      }
+    }
+    // Distorsion verticale (colonnes)
+    for (let i = 0; i < VBANDS; i++){
+      if (Math.random() < 0.25){
+        vbandState[i].targetShiftY = rand(-60, 60);
+        vbandState[i].timer = rand(0.15, 0.5);
+      }
+    }
+    // Freeze partiel : sauvegarde de la frame actuelle du buffer comme référence
+    if (Math.random() < 0.5){
+      freezeActive = true;
+      freezeTimer = rand(0.3, 1.2);
+      freezeRegions = [];
+      const nRegions = 1 + Math.floor(Math.random() * 3);
+      for (let i = 0; i < nRegions; i++){
+        freezeRegions.push({
+          x: rand(0, SW * 0.6),
+          y: rand(0, SH * 0.7),
+          w: rand(SW * 0.2, SW * 0.5),
+          h: rand(SH * 0.1, SH * 0.3)
+        });
+      }
+    }
+
+    // Ondes courbes (souvent pendant les crises)
+    if (Math.random() < 0.8) triggerWaves(1 + Math.floor(Math.random() * 2));
+    if (Math.random() < 0.4) triggerVortex();
+    // Générer des blocs corrompus
+    const nBlocks = Math.floor(rand(3, 12));
+    corruptBlocks = [];
+    for (let i = 0; i < nBlocks; i++){
+      corruptBlocks.push({
+        sx: Math.floor(rand(0, W - 100)),
+        sy: Math.floor(rand(0, H - 100)),
+        sw: Math.floor(rand(40, 200)),
+        sh: Math.floor(rand(20, 120)),
+        dx: rand(0, SW),
+        dy: rand(0, SH),
+        life: rand(0.1, 0.6),
+        scale: rand(0.3, 1.5)
+      });
+    }
+    // Pluie de pixels morts
+    for (let i = 0; i < 80; i++){
+      deadPixels.push({
+        x: rand(0, SW),
+        y: rand(-50, 0),
+        vy: rand(100, 400),
+        size: rand(8, 14),
+        glyph: Math.random() < 0.5 ? '0' : '1',
+        color: `hsl(${rand(320, 360)}, 100%, 60%)`,
+        life: 1
+      });
+    }
+  }
+  crisisIntensity = Math.max(0, crisisIntensity - dt * 1.5);
+
+  // Mise à jour des bandes (décroissance)
+  for (const b of bandState){
+    b.shiftX += (b.targetShiftX - b.shiftX) * Math.min(1, dt * 15);
+    b.shiftY += (b.targetShiftY - b.shiftY) * Math.min(1, dt * 15);
+    b.shear += (b.targetShear - b.shear) * Math.min(1, dt * 15);
+    b.glitchTimer -= dt;
+    if (b.glitchTimer <= 0){
+      b.targetShiftX *= 0.5;
+      b.targetShiftY *= 0.5;
+      b.targetShear *= 0.5;
+      if (Math.abs(b.targetShiftX) < 1) b.targetShiftX = 0;
+      if (Math.abs(b.targetShiftY) < 1) b.targetShiftY = 0;
+      if (Math.abs(b.targetShear) < 0.01) b.targetShear = 0;
+      b.colorShift *= 0.9;
+      b.inverted = false;
+      b.dataLoss = 0;
+    }
+  }
+  // Mise à jour colonnes verticales
+  for (const vb of vbandState){
+    vb.shiftY += (vb.targetShiftY - vb.shiftY) * Math.min(1, dt * 15);
+    vb.timer -= dt;
+    if (vb.timer <= 0){
+      vb.targetShiftY *= 0.5;
+      if (Math.abs(vb.targetShiftY) < 1) vb.targetShiftY = 0;
+    }
+  }
+  // Freeze timer
+  if (freezeActive){
+    freezeTimer -= dt;
+    if (freezeTimer <= 0) freezeActive = false;
+  }
+
+  // --- 1) Dessiner le fond (aurores + neige) + le tapis 3D dans le buffer ---
+  // Cycle de palettes
+  const palettes = [
+    { top: [5, 10, 30],    mid: [10, 40, 60],   horizon: [40, 120, 90],   bottom: [80, 140, 110],
+      floor1: [180, 200, 220], floor2: [220, 230, 240], dune: [200, 220, 230] },
+    { top: [8, 5, 40],     mid: [50, 20, 80],   horizon: [140, 50, 140],  bottom: [180, 100, 180],
+      floor1: [200, 190, 220], floor2: [230, 225, 240], dune: [215, 205, 230] },
+    { top: [5, 15, 45],    mid: [15, 60, 100],  horizon: [50, 180, 200],  bottom: [120, 220, 230],
+      floor1: [190, 220, 235], floor2: [225, 240, 250], dune: [210, 230, 240] },
+    { top: [10, 5, 35],    mid: [80, 30, 90],   horizon: [220, 100, 160], bottom: [100, 200, 180],
+      floor1: [210, 200, 220], floor2: [235, 230, 245], dune: [220, 215, 235] },
+  ];
+  const cycleRaw = t * 0.4;
+  const cycle = ((cycleRaw % palettes.length) + palettes.length) % palettes.length;
+  const i0 = Math.floor(cycle) % palettes.length;
+  const i1 = (i0 + 1) % palettes.length;
+  const tt = cycle - Math.floor(cycle);
+  const lerp = (a, b, k) => a + (b - a) * k;
+  const lerpCol = (c1, c2) => [Math.round(lerp(c1[0], c2[0], tt)), Math.round(lerp(c1[1], c2[1], tt)), Math.round(lerp(c1[2], c2[2], tt))];
+  const pA = palettes[i0], pB = palettes[i1];
+  const cTop = lerpCol(pA.top, pB.top);
+  const cMid = lerpCol(pA.mid, pB.mid);
+  const cHor = lerpCol(pA.horizon, pB.horizon);
+  const cBot = lerpCol(pA.bottom, pB.bottom);
+  const cF1 = lerpCol(pA.floor1, pB.floor1);
+  const cF2 = lerpCol(pA.floor2, pB.floor2);
+  const cDune = lerpCol(pA.dune, pB.dune);
+  const rgb = c => `rgb(${c[0]},${c[1]},${c[2]})`;
+  const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+
+  // Ciel
+  const bgGrad = bctx.createLinearGradient(0, 0, 0, SH);
+  bgGrad.addColorStop(0, rgb(cTop));
+  bgGrad.addColorStop(0.5, rgb(cMid));
+  bgGrad.addColorStop(0.85, rgb(cHor));
+  bgGrad.addColorStop(1, rgb(cBot));
+  bctx.fillStyle = bgGrad;
+  bctx.fillRect(0, 0, SW, SH);
+
+  // Étoiles
+  const skyLum = (cTop[0] + cTop[1] + cTop[2]) / (3 * 255);
+  const starAlpha = Math.max(0, 1 - skyLum * 2.5);
+  if (starAlpha > 0.02){
+    bctx.fillStyle = '#fff';
+    for (const s of STARS){
+      const sx = s.u * SW, sy = s.v * SH;
+      const twinkle = 0.4 + 0.6 * Math.abs(Math.sin(t * s.speed + s.phase));
+      bctx.globalAlpha = twinkle * 0.85 * starAlpha;
+      bctx.beginPath(); bctx.arc(sx, sy, s.size, 0, Math.PI * 2); bctx.fill();
+    }
+    bctx.globalAlpha = 1;
+  }
+
+  // Aurores boréales
+  bctx.save();
+  bctx.globalCompositeOperation = 'screen';
+  const auroraColors = [[80,255,160],[140,100,255],[100,220,255]];
+  for (let a = 0; a < 3; a++){
+    const col = auroraColors[a];
+    const yBase = SH * (0.15 + a * 0.06);
+    const phase = t * (0.6 + a * 0.3) + a * 2;
+    bctx.beginPath();
+    bctx.moveTo(0, yBase + 100);
+    for (let x = 0; x <= SW; x += 8){
+      const y = yBase + Math.sin(x * 0.004 + phase) * 40 + Math.sin(x * 0.011 + phase * 1.5) * 20 + Math.sin(x * 0.02 + phase * 0.7) * 10;
+      bctx.lineTo(x, y);
+    }
+    bctx.lineTo(SW, yBase + 180);
+    const grad = bctx.createLinearGradient(0, yBase - 30, 0, yBase + 180);
+    grad.addColorStop(0, `rgba(${col[0]},${col[1]},${col[2]},0)`);
+    grad.addColorStop(0.3, `rgba(${col[0]},${col[1]},${col[2]},0.55)`);
+    grad.addColorStop(0.7, `rgba(${col[0]},${col[1]},${col[2]},0.3)`);
+    grad.addColorStop(1, `rgba(${col[0]},${col[1]},${col[2]},0)`);
+    bctx.fillStyle = grad;
+    for (let x = SW; x >= 0; x -= 8){
+      const y = yBase + 180 + Math.sin(x * 0.004 + phase) * 10;
+      bctx.lineTo(x, y);
+    }
+    bctx.closePath();
+    bctx.fill();
+  }
+  bctx.restore();
+
+  // Sol neige
+  const floorGrad = bctx.createLinearGradient(0, SH * 0.75, 0, SH);
+  floorGrad.addColorStop(0, rgb(cF1));
+  floorGrad.addColorStop(1, rgb(cF2));
+  bctx.fillStyle = floorGrad;
+  bctx.fillRect(0, SH * 0.75, SW, SH * 0.25);
+
+  // Congères
+  bctx.fillStyle = rgba(cDune, 0.8);
+  bctx.beginPath();
+  bctx.moveTo(0, SH);
+  bctx.lineTo(0, SH * 0.82);
+  for (let x = 0; x <= SW; x += 30){
+    const y = SH * 0.82 - Math.sin(x * 0.005 + 2) * 20 - Math.sin(x * 0.012) * 10;
+    bctx.lineTo(x, y);
+  }
+  bctx.lineTo(SW, SH);
+  bctx.closePath();
+  bctx.fill();
+
+  // Flocons
+  bctx.fillStyle = 'rgba(255,255,255,0.85)';
+  for (const f of SNOW){
+    f.v = (f.v + f.speed * 0.01) % 1;
+    const sx = (f.u * SW + Math.sin(t * 2 + f.drift) * 15) % SW;
+    const sy = f.v * SH;
+    bctx.globalAlpha = 0.6 + 0.4 * Math.sin(t * 3 + f.drift);
+    bctx.beginPath(); bctx.arc(sx, sy, f.size, 0, Math.PI * 2); bctx.fill();
+  }
+  bctx.globalAlpha = 1;
+
+  renderRug3D(bctx, t * 0.5, SW/2, SH/2);
+
+  // --- 2) Lecture du buffer et reconstruction bande par bande avec corruption ---
+  const bandH = SH / BANDS;
+
+  sctx.fillStyle = '#000';
+  sctx.fillRect(0, 0, SW, SH);
+
+  for (let i = 0; i < BANDS; i++){
+    const b = bandState[i];
+    const y = i * bandH;
+    const h = Math.ceil(bandH) + 1;
+
+    // Perte de données : ne dessiner la bande que partiellement
+    if (b.dataLoss > 0 && Math.random() < b.dataLoss){
+      sctx.fillStyle = `hsl(${rand(320, 350)}, ${rand(60, 100)}%, ${rand(20, 50)}%)`;
+      sctx.fillRect(0, y, SW, h);
+      continue;
+    }
+
+    // Séparation RGB pour les bandes actives
+    if (Math.abs(b.shiftX) > 0.5 || Math.abs(b.colorShift) > 1){
+      const off = b.shiftX;
+      sctx.globalCompositeOperation = 'lighter';
+      sctx.globalAlpha = 0.85;
+      sctx.save();
+      sctx.beginPath(); sctx.rect(0, y, SW, h); sctx.clip();
+      sctx.drawImage(buffer, 0, y, SW, h, off + 4, y, SW, h);
+      sctx.restore();
+      sctx.globalCompositeOperation = 'source-over';
+      sctx.globalAlpha = 1;
+    }
+
+    // Dessiner la bande avec shift X, Y et shear (cisaillement)
+    sctx.save();
+    sctx.beginPath();
+    sctx.rect(0, y, SW, h);
+    sctx.clip();
+    if (b.inverted){
+      sctx.filter = 'invert(1) hue-rotate(180deg)';
+    }
+    // Shear : transform matrix [1, 0, shear, 1, 0, 0]
+    if (Math.abs(b.shear) > 0.001){
+      sctx.setTransform(1, 0, b.shear, 1, -b.shear * (y + h/2), 0);
+    }
+    sctx.drawImage(buffer, 0, y, SW, h, b.shiftX, y + b.shiftY, SW, h);
+    sctx.setTransform(1, 0, 0, 1, 0, 0);
+    sctx.filter = 'none';
+    sctx.restore();
+  }
+
+  // --- 2b) Distorsion verticale par colonnes ---
+  const colW = SW / VBANDS;
+  for (let i = 0; i < VBANDS; i++){
+    const vb = vbandState[i];
+    if (Math.abs(vb.shiftY) < 0.5) continue;
+    const x = i * colW;
+    const w = Math.ceil(colW) + 1;
+    sctx.save();
+    sctx.beginPath();
+    sctx.rect(x, 0, w, SH);
+    sctx.clip();
+    // Re-dessiner la colonne décalée verticalement par-dessus
+    sctx.drawImage(buffer, x, 0, w, SH, x, vb.shiftY, w, SH);
+    sctx.restore();
+  }
+
+  // --- 2c) Freeze partiel : zones figées de la frame précédente ---
+  if (freezeActive){
+    for (const r of freezeRegions){
+      sctx.save();
+      sctx.globalAlpha = 0.9;
+      const jx = (Math.random() - 0.5) * 2;
+      const jy = (Math.random() - 0.5) * 2;
+      sctx.drawImage(frozenFrame, r.x, r.y, r.w, r.h, r.x + jx, r.y + jy, r.w, r.h);
+      sctx.strokeStyle = `rgba(255, 50, 120, ${0.3 + Math.random() * 0.4})`;
+      sctx.lineWidth = 1;
+      sctx.strokeRect(r.x, r.y, r.w, r.h);
+      sctx.restore();
+    }
+  }
+
+  // --- 2d) Ondes courbes (distorsion sinusoïdale) ---
+  for (let i = waves.length - 1; i >= 0; i--){
+    const w = waves[i];
+    w.life -= dt;
+    w.yCenter += w.speed * dt;
+    w.phase += dt * 4;
+    if (w.life <= 0 || w.yCenter < -100 || w.yCenter > SH + 100){
+      waves.splice(i, 1);
+      continue;
+    }
+    const alpha = Math.min(1, w.life / w.maxLife);
+    const sliceH = 2;
+    sctx.save();
+    for (let y = Math.max(0, w.yCenter - w.thickness/2); y < Math.min(SH, w.yCenter + w.thickness/2); y += sliceH){
+      // Atténuation gaussienne depuis le centre de l'onde
+      const dy = y - w.yCenter;
+      const env = Math.exp(-(dy*dy) / (w.thickness * w.thickness * 0.15));
+      const offX = Math.sin(y * w.freq + w.phase) * w.amp * env * alpha;
+      if (Math.abs(offX) < 0.5) continue;
+      sctx.save();
+      sctx.beginPath();
+      sctx.rect(0, y, SW, sliceH);
+      sctx.clip();
+      sctx.globalAlpha = 0.95;
+      sctx.drawImage(buffer, 0, y, SW, sliceH, offX, y, SW, sliceH);
+      sctx.restore();
+      // Liseré coloré sur le bord de l'onde
+      if (Math.abs(env) > 0.85){
+        sctx.fillStyle = `hsla(${w.hue}, 100%, 65%, ${0.3 * alpha})`;
+        sctx.fillRect(offX, y, SW, sliceH);
+      }
+    }
+    sctx.restore();
+  }
+
+  // --- 2e) Vortex (déformation radiale par anneaux) ---
+  for (let i = vortices.length - 1; i >= 0; i--){
+    const v = vortices[i];
+    v.life -= dt;
+    if (v.life <= 0){ vortices.splice(i, 1); continue; }
+    const alpha = Math.min(1, v.life / v.maxLife);
+    const rings = 30;
+    sctx.save();
+    for (let k = 0; k < rings; k++){
+      const t0 = k / rings;
+      const t1 = (k + 1) / rings;
+      const r0 = t0 * v.radius;
+      const r1 = t1 * v.radius;
+      // Décalage angulaire qui varie avec le rayon
+      const twist = v.strength * (1 - t0) * alpha * 0.03;
+      sctx.save();
+      sctx.beginPath();
+      sctx.arc(v.x, v.y, r1, 0, Math.PI * 2);
+      sctx.arc(v.x, v.y, r0, 0, Math.PI * 2, true);
+      sctx.clip();
+      sctx.translate(v.x, v.y);
+      sctx.rotate(twist);
+      sctx.translate(-v.x, -v.y);
+      sctx.drawImage(buffer, 0, 0);
+      sctx.restore();
+    }
+    // Anneau lumineux au bord du vortex
+    sctx.strokeStyle = `hsla(320, 100%, 70%, ${0.4 * alpha})`;
+    sctx.lineWidth = 2;
+    sctx.beginPath();
+    sctx.arc(v.x, v.y, v.radius, 0, Math.PI * 2);
+    sctx.stroke();
+    sctx.restore();
+  }
+
+  // --- 3) Blocs corrompus (morceaux mal placés) ---
+  corruptBlocks = corruptBlocks.filter(blk => {
+    blk.life -= dt;
+    if (blk.life <= 0) return false;
+    sctx.save();
+    sctx.globalAlpha = Math.min(1, blk.life * 3);
+    // Teinte magenta-ish
+    sctx.filter = 'hue-rotate(' + (Math.sin(t * 10) * 60) + 'deg)';
+    sctx.drawImage(c, blk.sx, blk.sy, blk.sw, blk.sh,
+                   blk.dx, blk.dy, blk.sw * blk.scale, blk.sh * blk.scale);
+    sctx.filter = 'none';
+    sctx.restore();
+    return true;
+  });
+
+  // --- 4) Scanlines CRT ---
+  sctx.save();
+  sctx.globalAlpha = 0.12;
+  sctx.fillStyle = '#000';
+  for (let y = 0; y < SH; y += 3){
+    sctx.fillRect(0, y, SW, 1);
+  }
+  sctx.restore();
+
+  // --- 5) Barres de défilement verticales (VHS style) ---
+  const vhsY = ((t * 80) % (SH + 100)) - 50;
+  const vhsGrad = sctx.createLinearGradient(0, vhsY, 0, vhsY + 40);
+  vhsGrad.addColorStop(0, 'rgba(255,255,255,0)');
+  vhsGrad.addColorStop(0.5, 'rgba(255,255,255,0.15)');
+  vhsGrad.addColorStop(1, 'rgba(255,255,255,0)');
+  sctx.fillStyle = vhsGrad;
+  sctx.fillRect(0, vhsY, SW, 40);
+
+  // --- 6) Pixels morts qui tombent (0 et 1) ---
+  sctx.save();
+  sctx.font = 'bold 12px monospace';
+  sctx.textBaseline = 'top';
+  for (let i = deadPixels.length - 1; i >= 0; i--){
+    const p = deadPixels[i];
+    p.y += p.vy * dt;
+    p.life -= dt * 0.5;
+    if (p.life <= 0 || p.y > SH){ deadPixels.splice(i, 1); continue; }
+    sctx.fillStyle = p.color;
+    sctx.globalAlpha = p.life;
+    sctx.font = `bold ${p.size}px monospace`;
+    sctx.fillText(p.glyph, p.x, p.y);
+  }
+  sctx.globalAlpha = 1;
+  sctx.restore();
+
+  // --- 7) (codes glitch retirés) ---
+
+  // --- 8) Aberration chromatique globale en crise ---
+  if (crisisIntensity > 0.5){
+    sctx.save();
+    sctx.globalCompositeOperation = 'screen';
+    sctx.globalAlpha = crisisIntensity * 0.3;
+    sctx.fillStyle = '#ff0066';
+    sctx.fillRect(0, 0, SW, SH);
+    sctx.restore();
+  }
+
+  // --- 9) Vignette ---
+  const vig = sctx.createRadialGradient(SW/2, SH/2, Math.min(SW,SH)*0.3, SW/2, SH/2, Math.max(SW,SH)*0.7);
+  vig.addColorStop(0, 'rgba(0,0,0,0)');
+  vig.addColorStop(1, 'rgba(0,0,0,0.6)');
+  sctx.fillStyle = vig;
+  sctx.fillRect(0, 0, SW, SH);
+
+  // Sauvegarder la frame courante pour les freeze futurs (uniquement quand pas en crise)
+  if (!freezeActive && crisisIntensity < 0.2){
+    fctx.drawImage(scene, 0, 0);
+  }
+
+  requestAnimationFrame(render);
+}
+requestAnimationFrame(render);
+</script>
+</body>
+</html>

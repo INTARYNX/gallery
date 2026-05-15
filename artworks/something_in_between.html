@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Something between a microscope slide and a forgotten planet</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: #0a0a0a;
+            overflow: hidden;
+        }
+        canvas {
+            box-shadow: 0 0 60px rgba(0, 0, 0, 0.8);
+            max-width: 90vmin;
+            max-height: 90vmin;
+            width: 100%;
+            height: auto;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const S = 800;
+        canvas.width = S;
+        canvas.height = S;
+
+        let time = 0;
+        let rotationAngle = 0;
+        const sunX = S / 2;
+        const sunY = S * 0.25;
+
+        /* =========================================================
+           SIMPLEX NOISE
+           ========================================================= */
+
+        const perm = new Uint8Array(512);
+        const grad3 = [
+            [1,1,0],[-1,1,0],[1,-1,0],[-1,-1,0],
+            [1,0,1],[-1,0,1],[1,0,-1],[-1,0,-1],
+            [0,1,1],[0,-1,1],[0,1,-1],[0,-1,-1]
+        ];
+        {
+            const p = new Uint8Array(256);
+            for (let i = 0; i < 256; i++) p[i] = i;
+            for (let i = 255; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [p[i], p[j]] = [p[j], p[i]];
+            }
+            for (let i = 0; i < 512; i++) perm[i] = p[i & 255];
+        }
+
+        function dot2(g, x, y) { return g[0] * x + g[1] * y; }
+
+        function noise2D(x, y) {
+            const F2 = 0.5 * (Math.sqrt(3) - 1);
+            const G2 = (3 - Math.sqrt(3)) / 6;
+            const s = (x + y) * F2;
+            let i = Math.floor(x + s), j = Math.floor(y + s);
+            const t = (i + j) * G2;
+            const x0 = x - (i - t), y0 = y - (j - t);
+            const i1 = x0 > y0 ? 1 : 0, j1 = x0 > y0 ? 0 : 1;
+            const x1 = x0 - i1 + G2, y1 = y0 - j1 + G2;
+            const x2 = x0 - 1 + 2 * G2, y2 = y0 - 1 + 2 * G2;
+            i &= 255; j &= 255;
+            const gi0 = perm[i + perm[j]] % 12;
+            const gi1 = perm[i + i1 + perm[j + j1]] % 12;
+            const gi2 = perm[i + 1 + perm[j + 1]] % 12;
+            let n0 = 0, n1 = 0, n2 = 0;
+            let t0 = 0.5 - x0 * x0 - y0 * y0;
+            if (t0 > 0) { t0 *= t0; n0 = t0 * t0 * dot2(grad3[gi0], x0, y0); }
+            let t1 = 0.5 - x1 * x1 - y1 * y1;
+            if (t1 > 0) { t1 *= t1; n1 = t1 * t1 * dot2(grad3[gi1], x1, y1); }
+            let t2 = 0.5 - x2 * x2 - y2 * y2;
+            if (t2 > 0) { t2 *= t2; n2 = t2 * t2 * dot2(grad3[gi2], x2, y2); }
+            return 70 * (n0 + n1 + n2);
+        }
+
+        function fbm(x, y, oct = 4) {
+            let v = 0, a = 0.5, f = 1;
+            for (let i = 0; i < oct; i++) {
+                v += a * noise2D(x * f, y * f);
+                f *= 2; a *= 0.5;
+            }
+            return v;
+        }
+
+        /* =========================================================
+           DRAWING HELPERS
+           ========================================================= */
+
+        function drawSmoothBlob(pts) {
+            const n = pts.length;
+            ctx.beginPath();
+            for (let i = 0; i < n; i++) {
+                const p0 = pts[(i - 1 + n) % n];
+                const p1 = pts[i];
+                const p2 = pts[(i + 1) % n];
+                const p3 = pts[(i + 2) % n];
+                const cp1x = p1.x + (p2.x - p0.x) / 6;
+                const cp1y = p1.y + (p2.y - p0.y) / 6;
+                const cp2x = p2.x - (p3.x - p1.x) / 6;
+                const cp2y = p2.y - (p3.y - p1.y) / 6;
+                if (i === 0) ctx.moveTo(p1.x, p1.y);
+                ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
+            }
+            ctx.closePath();
+        }
+
+        /* =========================================================
+           COLOR PALETTES
+           ========================================================= */
+
+        const darkTones = [
+            [25,50,58],[18,38,48],[30,55,52],[20,45,55],
+            [22,42,50],[28,52,45],[15,35,42],[32,48,56],
+            [20,55,50],[26,40,52],[18,48,42],[24,58,54],
+            [30,44,48],[16,36,46],[28,50,60]
+        ];
+
+        const warmTones = [
+            [60,180,160],[50,160,140],[45,140,125],
+            [70,190,170],[55,150,135]
+        ];
+
+        /* =========================================================
+           CELL CLASS
+           ========================================================= */
+
+        class Cell {
+            constructor(x, y, r) {
+                this.x = x;
+                this.y = y;
+                this.r = r;
+                this.seed = Math.random() * 1000;
+
+                this.vx = (Math.random() - 0.5) * 0.3;
+                this.vy = (Math.random() - 0.5) * 0.3;
+
+                const shade = darkTones[Math.floor(Math.random() * darkTones.length)];
+                this.cr = shade[0]; this.cg = shade[1]; this.cb = shade[2];
+                this.tr = this.cr; this.tg = this.cg; this.tb = this.cb;
+                this.colorTimer = 200 + Math.random() * 600;
+
+                this.numPts = 16 + Math.floor(Math.random() * 6);
+                this.baseAngles = [];
+                this.baseRadii = [];
+                this.pts = [];
+                this.targetPts = [];
+                for (let i = 0; i < this.numPts; i++) {
+                    const a = (i / this.numPts) * Math.PI * 2;
+                    const br = 0.95 + Math.random() * 0.08;
+                    this.baseAngles.push(a);
+                    this.baseRadii.push(br);
+                    this.pts.push({ x: Math.cos(a) * br * r, y: Math.sin(a) * br * r });
+                    this.targetPts.push({ x: Math.cos(a) * br * r, y: Math.sin(a) * br * r });
+                }
+
+                this.pseudoIdx = -1;
+                this.pseudoTimer = 100 + Math.random() * 300;
+                this.hasGeo = Math.random() < 0.3;
+                this.geoType = Math.floor(Math.random() * 5);
+            }
+
+            update(t, cells) {
+                // Color drift
+                this.colorTimer--;
+                if (this.colorTimer <= 0) {
+                    const s = darkTones[Math.floor(Math.random() * darkTones.length)];
+                    this.tr = s[0]; this.tg = s[1]; this.tb = s[2];
+                    this.colorTimer = 400 + Math.random() * 800;
+                }
+                this.cr += (this.tr - this.cr) * 0.005;
+                this.cg += (this.tg - this.cg) * 0.005;
+                this.cb += (this.tb - this.cb) * 0.005;
+
+                // Flow-field movement
+                const nx = fbm(this.x * 0.002 + t * 0.015, this.y * 0.002 + this.seed, 2);
+                const ny = fbm(this.x * 0.002 + this.seed, this.y * 0.002 + t * 0.015, 2);
+                this.vx += nx * 0.005;
+                this.vy += ny * 0.005;
+                this.vx *= 0.992;
+                this.vy *= 0.992;
+
+                for (const c of cells) {
+                    if (c === this) continue;
+                    const dx = this.x - c.x, dy = this.y - c.y;
+                    const d = Math.sqrt(dx * dx + dy * dy);
+                    const minD = this.r + c.r + 6;
+                    if (d < minD && d > 0) {
+                        const f = (minD - d) * 0.0015;
+                        this.vx += (dx / d) * f;
+                        this.vy += (dy / d) * f;
+                    }
+                }
+
+                const m = this.r + 30;
+                if (this.x < m) this.vx += 0.015;
+                if (this.x > S - m) this.vx -= 0.015;
+                if (this.y < m) this.vy += 0.015;
+                if (this.y > S - m) this.vy -= 0.015;
+                this.x += this.vx;
+                this.y += this.vy;
+
+                // Membrane deformation
+                for (let i = 0; i < this.numPts; i++) {
+                    const a = this.baseAngles[i];
+                    const br = this.baseRadii[i];
+                    const n1 = noise2D(a * 2 + t * 0.12 + this.seed, t * 0.08 + this.seed * 0.5);
+                    const n2 = noise2D(a * 3.5 + this.seed + 77, t * 0.06);
+                    const def = this.r * br * (1 + n1 * 0.06 + n2 * 0.03);
+                    this.targetPts[i].x = Math.cos(a) * def;
+                    this.targetPts[i].y = Math.sin(a) * def;
+                }
+
+                this.pseudoTimer--;
+                if (this.pseudoTimer <= 0) {
+                    this.pseudoIdx = Math.floor(Math.random() * this.numPts);
+                    this.pseudoTimer = 250 + Math.random() * 500;
+                }
+                if (this.pseudoIdx >= 0) {
+                    for (let d = -2; d <= 2; d++) {
+                        const idx = (this.pseudoIdx + d + this.numPts) % this.numPts;
+                        const str = 1 - Math.abs(d) / 3;
+                        const ext = (Math.sin(time * 0.25 + this.seed) * 0.1 + 0.18) * str;
+                        const a = this.baseAngles[idx];
+                        this.targetPts[idx].x += Math.cos(a) * this.r * ext;
+                        this.targetPts[idx].y += Math.sin(a) * this.r * ext;
+                    }
+                }
+
+                for (let i = 0; i < this.numPts; i++) {
+                    this.pts[i].x += (this.targetPts[i].x - this.pts[i].x) * 0.025;
+                    this.pts[i].y += (this.targetPts[i].y - this.pts[i].y) * 0.025;
+                }
+            }
+
+            computeColor() {
+                const dx = this.x - sunX, dy = this.y - sunY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                const proximity = Math.max(0, 1 - dist / (S * 0.35));
+                let lr = this.cr, lg = this.cg, lb = this.cb;
+
+                if (proximity > 0) {
+                    const idx = (time * 0.15 + this.seed) % warmTones.length;
+                    const i0 = Math.floor(idx) % warmTones.length;
+                    const i1 = (i0 + 1) % warmTones.length;
+                    const frac = idx - Math.floor(idx);
+                    const wr = warmTones[i0][0] + (warmTones[i1][0] - warmTones[i0][0]) * frac;
+                    const wg = warmTones[i0][1] + (warmTones[i1][1] - warmTones[i0][1]) * frac;
+                    const wb = warmTones[i0][2] + (warmTones[i1][2] - warmTones[i0][2]) * frac;
+                    const pulse = proximity * (0.5 + Math.sin(time * 1.2 + this.seed) * 0.3);
+                    lr = this.cr + (wr - this.cr) * pulse;
+                    lg = this.cg + (wg - this.cg) * pulse;
+                    lb = this.cb + (wb - this.cb) * pulse;
+                }
+                return { r: lr | 0, g: lg | 0, b: lb | 0 };
+            }
+
+            draw() {
+                const col = this.computeColor();
+                const toSunX = sunX - this.x, toSunY = sunY - this.y;
+                const toSunDist = Math.sqrt(toSunX * toSunX + toSunY * toSunY) || 1;
+                const snx = toSunX / toSunDist, sny = toSunY / toSunDist;
+
+                ctx.save();
+                ctx.translate(this.x, this.y);
+
+                // Base fill
+                drawSmoothBlob(this.pts);
+                ctx.fillStyle = `rgb(${col.r},${col.g},${col.b})`;
+                ctx.fill();
+
+                // Directional light/shadow
+                drawSmoothBlob(this.pts);
+                ctx.save();
+                ctx.clip();
+                const litGrad = ctx.createLinearGradient(
+                    snx * this.r * 0.6, sny * this.r * 0.6,
+                    -snx * this.r * 0.8, -sny * this.r * 0.8
+                );
+                litGrad.addColorStop(0, `rgba(${Math.min(255, col.r + 35)},${Math.min(255, col.g + 25)},${Math.min(255, col.b + 15)},0.35)`);
+                litGrad.addColorStop(0.5, 'rgba(0,0,0,0)');
+                litGrad.addColorStop(1, 'rgba(0,0,0,0.3)');
+                ctx.fillStyle = litGrad;
+                ctx.fillRect(-this.r * 1.5, -this.r * 1.5, this.r * 3, this.r * 3);
+                ctx.restore();
+
+                // Edge
+                drawSmoothBlob(this.pts);
+                ctx.strokeStyle = `rgba(${Math.min(255, col.r + 20)},${Math.min(255, col.g + 15)},${Math.min(255, col.b + 10)},0.4)`;
+                ctx.lineWidth = 1.2;
+                ctx.stroke();
+
+                // Internal geometry (rare)
+                if (this.hasGeo) this.drawGeometry(col);
+
+                // Atmospheric fog
+                const cx = this.x - S / 2, cy = this.y - S / 2;
+                const cdist = Math.sqrt(cx * cx + cy * cy);
+                const fog = Math.max(0, Math.min(1, (cdist - S * 0.2) / (S * 0.35)));
+                if (fog > 0) {
+                    drawSmoothBlob(this.pts);
+                    ctx.fillStyle = `rgba(18,14,10,${fog * 0.45})`;
+                    ctx.fill();
+                }
+
+                ctx.restore();
+            }
+
+            drawGeometry(col) {
+                drawSmoothBlob(this.pts);
+                ctx.save();
+                ctx.clip();
+                ctx.strokeStyle = `rgba(${Math.min(255, col.r + 80)},${Math.min(255, col.g + 60)},${Math.min(255, col.b + 40)},0.55)`;
+                ctx.lineWidth = 1.5;
+                const rot = time * 0.02 + this.seed;
+
+                switch (this.geoType) {
+                    case 0:
+                        for (let ring = 0; ring < 3; ring++) {
+                            const sides = 3 + (Math.floor(this.seed * 4) % 4);
+                            const rr = this.r * (0.25 + ring * 0.2);
+                            ctx.beginPath();
+                            for (let i = 0; i <= sides; i++) {
+                                const a = (i / sides) * Math.PI * 2 + rot + ring * 0.3;
+                                if (i === 0) ctx.moveTo(Math.cos(a) * rr, Math.sin(a) * rr);
+                                else ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+                            }
+                            ctx.closePath(); ctx.stroke();
+                        }
+                        break;
+                    case 1:
+                        const spokes = 5 + (Math.floor(this.seed * 5) % 4);
+                        for (let i = 0; i < spokes; i++) {
+                            const a = (i / spokes) * Math.PI * 2 + rot;
+                            ctx.beginPath(); ctx.moveTo(0, 0);
+                            ctx.lineTo(Math.cos(a) * this.r * 0.75, Math.sin(a) * this.r * 0.75);
+                            ctx.stroke();
+                        }
+                        ctx.beginPath(); ctx.arc(0, 0, this.r * 0.3, 0, Math.PI * 2); ctx.stroke();
+                        break;
+                    case 2:
+                        const sp = this.r * 0.3;
+                        const cs = Math.cos(rot * 0.5), sn = Math.sin(rot * 0.5);
+                        for (let k = -3; k <= 3; k++) {
+                            ctx.beginPath();
+                            ctx.moveTo(cs * (-this.r) + sn * (k * sp), sn * (-this.r) - cs * (k * sp));
+                            ctx.lineTo(cs * this.r + sn * (k * sp), sn * this.r - cs * (k * sp));
+                            ctx.stroke();
+                            ctx.beginPath();
+                            ctx.moveTo(cs * (k * sp) + sn * (-this.r), sn * (k * sp) - cs * (-this.r));
+                            ctx.lineTo(cs * (k * sp) + sn * this.r, sn * (k * sp) - cs * this.r);
+                            ctx.stroke();
+                        }
+                        break;
+                    case 3:
+                        for (let ring = 0; ring < 3; ring++) {
+                            const rr = this.r * (0.2 + ring * 0.22);
+                            const r2 = rot * (ring % 2 === 0 ? 1 : -0.7) + ring * 1.2;
+                            ctx.beginPath();
+                            for (let i = 0; i <= 3; i++) {
+                                const a = (i / 3) * Math.PI * 2 + r2;
+                                if (i === 0) ctx.moveTo(Math.cos(a) * rr, Math.sin(a) * rr);
+                                else ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+                            }
+                            ctx.closePath(); ctx.stroke();
+                        }
+                        break;
+                    case 4:
+                        ctx.beginPath();
+                        for (let i = 0; i < 80; i++) {
+                            const t2 = i / 80;
+                            const a = t2 * Math.PI * 4 + rot;
+                            const rr = t2 * this.r * 0.7;
+                            if (i === 0) ctx.moveTo(Math.cos(a) * rr, Math.sin(a) * rr);
+                            else ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+                        }
+                        ctx.stroke();
+                        ctx.beginPath(); ctx.arc(0, 0, this.r * 0.12, 0, Math.PI * 2); ctx.stroke();
+                        break;
+                }
+                ctx.restore();
+            }
+        }
+
+        /* =========================================================
+           CELLS
+           ========================================================= */
+
+        const cells = [];
+
+        function spawnCells() {
+            cells.length = 0;
+            for (let i = 0; i < 18; i++) {
+                let x, y, r, ok = false, att = 0;
+                while (!ok && att < 300) {
+                    r = 28 + Math.random() * 60;
+                    x = r + 50 + Math.random() * (S - 2 * r - 100);
+                    y = r + 50 + Math.random() * (S - 2 * r - 100);
+                    ok = true;
+                    for (const c of cells) {
+                        if (Math.sqrt((x - c.x) ** 2 + (y - c.y) ** 2) < r + c.r + 10) {
+                            ok = false; break;
+                        }
+                    }
+                    att++;
+                }
+                if (ok) cells.push(new Cell(x, y, r));
+            }
+        }
+
+        /* =========================================================
+           BACKGROUND (cached)
+           ========================================================= */
+
+        const bgCanvas = document.createElement('canvas');
+        bgCanvas.width = S;
+        bgCanvas.height = S;
+        const bgCtx = bgCanvas.getContext('2d');
+        {
+            const id = bgCtx.createImageData(S, S);
+            for (let y = 0; y < S; y++) {
+                for (let x = 0; x < S; x++) {
+                    const i = (y * S + x) * 4;
+                    const n = fbm(x * 0.006, y * 0.006, 3) * 0.5 + 0.5;
+                    const grain = Math.random() * 12;
+                    const v = n * 20 + grain + 8;
+                    id.data[i] = v; id.data[i + 1] = v; id.data[i + 2] = v; id.data[i + 3] = 255;
+                }
+            }
+            bgCtx.putImageData(id, 0, 0);
+            const grad = bgCtx.createRadialGradient(S / 2, S / 2, 50, S / 2, S / 2, S * 0.625);
+            grad.addColorStop(0, 'rgba(60,50,40,0.7)');
+            grad.addColorStop(1, 'rgba(20,15,10,0.9)');
+            bgCtx.fillStyle = grad;
+            bgCtx.fillRect(0, 0, S, S);
+        }
+
+        /* =========================================================
+           FROTTAGE — diffuse point clouds
+           ========================================================= */
+
+        const fdots = [];
+        for (let i = 0; i < 1200; i++) {
+            const cx = Math.random() * S, cy = Math.random() * S;
+            const angle = Math.random() * Math.PI * 2;
+            const spread = 10 + Math.random() * 40;
+            const count = 3 + Math.floor(Math.random() * 6);
+            for (let j = 0; j < count; j++) {
+                const along = (j / count - 0.5) * spread;
+                const perp = (Math.random() - 0.5) * spread * 0.3;
+                fdots.push({
+                    x: cx + Math.cos(angle) * along + Math.cos(angle + Math.PI / 2) * perp,
+                    y: cy + Math.sin(angle) * along + Math.sin(angle + Math.PI / 2) * perp,
+                    r: 0.5 + Math.random() * 2,
+                    seed: Math.random() * 1000,
+                    opacity: 0.08 + Math.random() * 0.25
+                });
+            }
+        }
+
+        function drawFrottage(t) {
+            for (const d of fdots) {
+                const dx = noise2D(d.seed + t * 0.005, d.seed * 0.5) * 15;
+                const dy = noise2D(d.seed * 0.5, d.seed + t * 0.005) * 15;
+                const op = d.opacity * (0.6 + 0.4 * Math.abs(noise2D(d.seed * 3 + t * 0.008, 0)));
+                ctx.fillStyle = `rgba(190,170,145,${op})`;
+                ctx.beginPath();
+                ctx.arc(d.x + dx, d.y + dy, d.r, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        /* =========================================================
+           FLOATING PARTICLES
+           ========================================================= */
+
+        const particles = [];
+        for (let i = 0; i < 60; i++) {
+            particles.push({
+                x: Math.random() * S, y: Math.random() * S,
+                r: 0.5 + Math.random() * 1.5,
+                phase: Math.random() * Math.PI * 2,
+                speed: 0.003 + Math.random() * 0.006
+            });
+        }
+
+        function drawParticles(t) {
+            ctx.fillStyle = 'rgba(150,135,110,0.2)';
+            for (const p of particles) {
+                p.phase += p.speed;
+                const px = p.x + Math.sin(p.phase) * 15 + noise2D(p.x * 0.01 + t * 0.015, p.y * 0.01) * 10;
+                const py = p.y + Math.cos(p.phase * 0.7) * 15 + noise2D(p.y * 0.01, p.x * 0.01 + t * 0.015) * 10;
+                ctx.beginPath();
+                ctx.arc(((px % S) + S) % S, ((py % S) + S) % S, p.r, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        /* =========================================================
+           FILAMENTS
+           ========================================================= */
+
+        function drawFilaments(t) {
+            ctx.save();
+            ctx.globalAlpha = 0.1;
+            ctx.strokeStyle = 'rgba(180,160,130,1)';
+            ctx.lineWidth = 0.5;
+            for (let i = 0; i < cells.length; i++) {
+                for (let j = i + 1; j < cells.length; j++) {
+                    const a = cells[i], b = cells[j];
+                    const d = Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
+                    if (d < (a.r + b.r) * 2.2) {
+                        const mx = (a.x + b.x) / 2 + noise2D(t * 0.04 + i, j) * 25;
+                        const my = (a.y + b.y) / 2 + noise2D(i, t * 0.04 + j) * 25;
+                        ctx.beginPath();
+                        ctx.moveTo(a.x, a.y);
+                        ctx.quadraticCurveTo(mx, my, b.x, b.y);
+                        ctx.stroke();
+                    }
+                }
+            }
+            ctx.restore();
+        }
+
+        /* =========================================================
+           BRAMBLES — generative thorny vines from edges
+           ========================================================= */
+
+        const brambles = [];
+        let brambleGrowth = 0;
+        const BRAMBLE_GROW_SPEED = 0.0004;
+
+        function growBranch(x, y, angle, depth, maxDepth, side) {
+            if (depth > maxDepth) return;
+            const len = 15 + Math.random() * 25 - depth * 2;
+            const ex = x + Math.cos(angle) * len;
+            const ey = y + Math.sin(angle) * len;
+            brambles.push({
+                x1: x, y1: y, x2: ex, y2: ey,
+                depth, seed: Math.random() * 1000,
+                thickness: Math.max(0.5, 3.5 - depth * 0.4),
+                hasLeaf: depth > 2 && Math.random() < 0.4,
+                hasThorn: depth > 1 && Math.random() < 0.3,
+                leafSeed: Math.random() * 1000,
+                growDelay: depth * (0.3 + Math.random() * 0.7) + Math.random() * 0.15
+            });
+            const drift = (Math.random() - 0.5) * 0.6;
+            const inward = side === 'left' ? 0.05 : side === 'right' ? -0.05 : side === 'top' ? 0.05 : -0.05;
+            growBranch(ex, ey, angle + drift + inward, depth + 1, maxDepth, side);
+            if (Math.random() < 0.45 && depth < maxDepth - 1) {
+                const forkAngle = angle + (Math.random() > 0.5 ? 1 : -1) * (0.4 + Math.random() * 0.8);
+                growBranch(ex, ey, forkAngle, depth + 1, maxDepth - 1, side);
+            }
+        }
+
+        function regenerateBrambles() {
+            brambles.length = 0;
+            brambleGrowth = 0;
+            for (let i = 0; i < 12; i++) growBranch(0, Math.random() * S, (Math.random() - 0.3) * 0.8, 0, 6 + Math.floor(Math.random() * 4), 'left');
+            for (let i = 0; i < 12; i++) growBranch(S, Math.random() * S, Math.PI + (Math.random() - 0.5) * 0.8, 0, 6 + Math.floor(Math.random() * 4), 'right');
+            for (let i = 0; i < 8; i++) growBranch(Math.random() * S, S, -Math.PI / 2 + (Math.random() - 0.5) * 0.8, 0, 7 + Math.floor(Math.random() * 4), 'bottom');
+            for (let i = 0; i < 5; i++) {
+                const x = Math.random() < 0.5 ? Math.random() * S * 0.2 : S - Math.random() * S * 0.2;
+                growBranch(x, 0, Math.PI / 2 + (Math.random() - 0.5) * 0.6, 0, 5 + Math.floor(Math.random() * 3), 'top');
+            }
+            // Sort by growDelay so each branch appears at its own pace
+            brambles.sort((a, b) => a.growDelay - b.growDelay);
+            // Normalize delays to 0-1 range
+            const maxDelay = brambles.length > 0 ? brambles[brambles.length - 1].growDelay : 1;
+            for (const b of brambles) b.growDelay /= maxDelay;
+        }
+
+        function drawBrambles(t) {
+            if (brambleGrowth < 1) brambleGrowth = Math.min(1, brambleGrowth + BRAMBLE_GROW_SPEED);
+
+            ctx.save();
+
+            for (let i = 0; i < brambles.length; i++) {
+                const b = brambles[i];
+                if (b.growDelay > brambleGrowth) continue;
+
+                // Fade in based on how recently this branch appeared
+                const age = (brambleGrowth - b.growDelay) / 0.05;
+                const fadeAlpha = Math.min(1, age);
+
+                const sway = noise2D(b.seed + t * 0.008, b.seed * 0.3) * 2;
+                const mx = (b.x1 + b.x2) / 2 + sway;
+                const my = (b.y1 + b.y2) / 2 + sway * 0.7;
+
+                const green = 35 + Math.floor(noise2D(b.seed, 0) * 20);
+                const brightness = 45 + b.depth * 4;
+                const alpha = (0.85 - b.depth * 0.05) * fadeAlpha;
+
+                ctx.strokeStyle = `rgba(${brightness},${green + brightness},${Math.floor(brightness * 0.5)},${alpha})`;
+                ctx.lineWidth = b.thickness;
+                ctx.beginPath();
+                ctx.moveTo(b.x1, b.y1);
+                ctx.quadraticCurveTo(mx, my, b.x2, b.y2);
+                ctx.stroke();
+
+                if (b.hasThorn && fadeAlpha > 0.5) {
+                    const tx = (b.x1 + b.x2) / 2, ty = (b.y1 + b.y2) / 2;
+                    const ang = Math.atan2(b.y2 - b.y1, b.x2 - b.x1);
+                    const side = b.seed > 500 ? 1 : -1;
+                    const ta = ang + side * Math.PI * 0.4;
+                    ctx.strokeStyle = `rgba(${brightness + 10},${green + brightness - 10},${Math.floor(brightness * 0.4)},${0.5 * fadeAlpha})`;
+                    ctx.lineWidth = 0.8;
+                    ctx.beginPath();
+                    ctx.moveTo(tx, ty);
+                    ctx.lineTo(tx + Math.cos(ta) * 5, ty + Math.sin(ta) * 5);
+                    ctx.stroke();
+                }
+
+                if (b.hasLeaf && fadeAlpha > 0.3) {
+                    const lx = b.x2 + sway * 0.3, ly = b.y2 + sway * 0.2;
+                    const la = Math.atan2(b.y2 - b.y1, b.x2 - b.x1) + noise2D(b.leafSeed + t * 0.01, 0) * 0.2;
+                    const ls = 3 + Math.abs(noise2D(b.leafSeed, 1)) * 4;
+                    const gv = 40 + Math.floor(noise2D(b.leafSeed, 0) * 20);
+                    ctx.fillStyle = `rgba(${25 + b.depth * 3},${gv + 30},${15},${0.65 * fadeAlpha})`;
+                    ctx.beginPath();
+                    ctx.ellipse(lx + Math.cos(la) * ls, ly + Math.sin(la) * ls, ls * 1.3, ls * 0.5, la, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+            ctx.restore();
+        }
+
+        /* =========================================================
+           SUN
+           ========================================================= */
+
+        function drawSun() {
+            // Outer ring — noise-deformed
+            ctx.fillStyle = 'rgba(200,180,140,0.8)';
+            ctx.beginPath();
+            for (let i = 0; i < 64; i++) {
+                const a = (i / 64) * Math.PI * 2;
+                const r = 60 * (1 + noise2D(a * 3 + time * 0.05, time * 0.03 + 1) * 0.04);
+                if (i === 0) ctx.moveTo(sunX + Math.cos(a) * r, sunY + Math.sin(a) * r);
+                else ctx.lineTo(sunX + Math.cos(a) * r, sunY + Math.sin(a) * r);
+            }
+            ctx.closePath();
+            ctx.fill();
+
+            // Red center
+            ctx.fillStyle = 'rgba(120,25,15,0.9)';
+            ctx.beginPath();
+            ctx.arc(sunX, sunY, 25, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Inner spokes — hubcap
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(sunX, sunY, 58, 0, Math.PI * 2);
+            ctx.clip();
+            ctx.strokeStyle = 'rgba(220,200,160,0.5)';
+            ctx.lineWidth = 2.5;
+            for (let i = 0; i < 8; i++) {
+                const a = (i / 8) * Math.PI * 2 + rotationAngle * 0.3;
+                ctx.beginPath();
+                ctx.moveTo(sunX + Math.cos(a) * 26, sunY + Math.sin(a) * 26);
+                ctx.quadraticCurveTo(
+                    sunX + Math.cos(a + 0.15) * 42, sunY + Math.sin(a + 0.15) * 42,
+                    sunX + Math.cos(a) * 57, sunY + Math.sin(a) * 57
+                );
+                ctx.stroke();
+            }
+            ctx.strokeStyle = 'rgba(210,190,150,0.35)';
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            ctx.arc(sunX, sunY, 42, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+
+            // Outer rays
+            ctx.strokeStyle = 'rgba(180,160,130,0.4)';
+            ctx.lineWidth = 2;
+            for (let i = 0; i < 16; i++) {
+                const a = (i / 16) * Math.PI * 2 + rotationAngle;
+                ctx.beginPath();
+                ctx.moveTo(sunX + Math.cos(a) * 60, sunY + Math.sin(a) * 60);
+                ctx.lineTo(sunX + Math.cos(a) * 120, sunY + Math.sin(a) * 120);
+                ctx.stroke();
+            }
+        }
+
+        /* =========================================================
+           INIT & CLICK
+           ========================================================= */
+
+        spawnCells();
+        regenerateBrambles();
+        brambleGrowth = 1;
+
+        canvas.addEventListener('click', () => {
+            spawnCells();
+            regenerateBrambles();
+            sunSpeed = 0.01; // sun reborn
+        });
+
+        /* =========================================================
+           ANIMATION LOOP
+           ========================================================= */
+
+        let lastTime = 0;
+        let sunSpeed = 0.01;
+        const SUN_DECAY = 0.99997; // very slow deceleration
+        const SUN_MIN_SPEED = 0.001;
+
+        function animate(timestamp) {
+            // Delta time for consistent speed regardless of framerate
+            if (!lastTime) lastTime = timestamp;
+            const dt = Math.min((timestamp - lastTime) / 16.667, 3); // cap at 3x to avoid jumps
+            lastTime = timestamp;
+
+            time += 0.016 * dt;
+
+            ctx.drawImage(bgCanvas, 0, 0);
+
+            drawFrottage(time);
+            drawParticles(time);
+            drawFilaments(time);
+
+            for (const c of cells) c.update(time, cells);
+            cells.sort((a, b) => a.r - b.r);
+            for (const c of cells) c.draw();
+
+            drawBrambles(time);
+            drawSun();
+
+            // Sun slowly exhausts itself
+            sunSpeed = Math.max(SUN_MIN_SPEED, sunSpeed * SUN_DECAY);
+            rotationAngle += sunSpeed * dt;
+
+            requestAnimationFrame(animate);
+        }
+
+        animate(0);
+    </script>
+</body>
+</html>

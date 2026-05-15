@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Prisma</title>
+<style>
+    html, body {
+        margin: 0;
+        background: black;
+        overflow: hidden;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+    }
+    canvas {
+        width: 90vmin;
+        height: 90vmin;
+    }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<script>
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+const S = 800;
+canvas.width = canvas.height = S;
+
+const cx = S / 2;
+const cy = S / 2;
+const R = S * 0.45;
+
+let t = 0;
+
+// -------- STORY TIMING ----------
+function phase() {
+    if (t < 15) return 0;       // Éveil
+    if (t < 35) return 1;       // Flux
+    if (t < 60) return 2;       // Conflit
+    return 3;                  // Transcendance
+}
+
+// -------- CORE ARTEFACT ----------
+function drawArtefact(time, chaos) {
+    const s = 70;
+    const a = time * 0.4;
+    const b = time * 0.6;
+
+    const verts3D = [];
+    for (let i = 0; i < 8; i++) {
+        const x = (i & 1 ? 1 : -1) * s;
+        const y = (i & 2 ? 1 : -1) * s;
+        const z = (i & 4 ? 1 : -1) * s;
+        verts3D.push({x, y, z});
+    }
+
+    const rotated = verts3D.map((v, i) => {
+        let x = v.x * Math.cos(a) - v.z * Math.sin(a);
+        let z = v.x * Math.sin(a) + v.z * Math.cos(a);
+        let y = v.y * Math.cos(b) - z * Math.sin(b);
+        z = v.y * Math.sin(b) + z * Math.cos(b);
+        
+        const distortion = Math.sin(time * 2 + i) * chaos;
+        return {
+            x: x + distortion,
+            y: y + distortion,
+            z: z,
+            sx: cx + x + distortion,
+            sy: cy + y + distortion
+        };
+    });
+
+    const faces = [
+        {idx: [0,1,3,2]},
+        {idx: [4,5,7,6]},
+        {idx: [0,1,5,4]},
+        {idx: [2,3,7,6]},
+        {idx: [0,2,6,4]},
+        {idx: [1,3,7,5]}
+    ];
+
+    const light = {x: 1, y: -0.8, z: 1.5};
+    const lnorm = Math.sqrt(light.x**2 + light.y**2 + light.z**2);
+    light.x /= lnorm; light.y /= lnorm; light.z /= lnorm;
+
+    const processed = faces.map((f, fidx) => {
+        const v0 = rotated[f.idx[0]];
+        const v1 = rotated[f.idx[1]];
+        const v2 = rotated[f.idx[2]];
+        
+        const e1 = {x: v1.x - v0.x, y: v1.y - v0.y, z: v1.z - v0.z};
+        const e2 = {x: v2.x - v0.x, y: v2.y - v0.y, z: v2.z - v0.z};
+        
+        const nx = e1.y * e2.z - e1.z * e2.y;
+        const ny = e1.z * e2.x - e1.x * e2.z;
+        const nz = e1.x * e2.y - e1.y * e2.x;
+        const nlen = Math.sqrt(nx*nx + ny*ny + nz*nz);
+        
+        const dot = (nx * light.x + ny * light.y + nz * light.z) / nlen;
+        const diffuse = Math.max(0, dot);
+        
+        const avgZ = f.idx.reduce((sum, i) => sum + rotated[i].z, 0) / f.idx.length;
+        
+        const hue = 180 + fidx * 60 + Math.sin(time + fidx) * 30;
+        
+        return {idx: f.idx, diffuse, avgZ, hue};
+    });
+
+    processed.sort((a, b) => a.avgZ - b.avgZ);
+
+    processed.forEach(f => {
+        ctx.beginPath();
+        ctx.moveTo(rotated[f.idx[0]].sx, rotated[f.idx[0]].sy);
+        for (let i = 1; i < f.idx.length; i++) {
+            ctx.lineTo(rotated[f.idx[i]].sx, rotated[f.idx[i]].sy);
+        }
+        ctx.closePath();
+        
+        const cx1 = f.idx.reduce((sum, i) => sum + rotated[i].sx, 0) / f.idx.length;
+        const cy1 = f.idx.reduce((sum, i) => sum + rotated[i].sy, 0) / f.idx.length;
+        
+        const v0 = rotated[f.idx[0]];
+        const v1 = rotated[f.idx[1]];
+        const v2 = rotated[f.idx[2]];
+        
+        const e1 = {x: v1.x - v0.x, y: v1.y - v0.y, z: v1.z - v0.z};
+        const e2 = {x: v2.x - v0.x, y: v2.y - v0.y, z: v2.z - v0.z};
+        
+        const nx = e1.y * e2.z - e1.z * e2.y;
+        const ny = e1.z * e2.x - e1.x * e2.z;
+        const nz = e1.x * e2.y - e1.y * e2.x;
+        const nlen = Math.sqrt(nx*nx + ny*ny + nz*nz);
+        
+        const reflectX = 2 * (nx/nlen) * f.diffuse - light.x;
+        const reflectY = 2 * (ny/nlen) * f.diffuse - light.y;
+        
+        const offset = 40;
+        const gx0 = cx1 + reflectX * offset;
+        const gy0 = cy1 + reflectY * offset;
+        
+        const maxDist = Math.max(...f.idx.map(i => 
+            Math.sqrt((rotated[i].sx - gx0)**2 + (rotated[i].sy - gy0)**2)
+        ));
+        
+        const gradient = ctx.createRadialGradient(gx0, gy0, 0, gx0, gy0, maxDist);
+        
+        const baseLightness = 40 + f.diffuse * 30;
+        const edgeLightness = 30 + f.diffuse * 20;
+        
+        gradient.addColorStop(0, `hsla(${f.hue}, 35%, ${baseLightness + 10}%, 0.4)`);
+        gradient.addColorStop(0.5, `hsla(${f.hue}, 30%, ${baseLightness}%, 0.35)`);
+        gradient.addColorStop(0.8, `hsla(${f.hue + 15}, 25%, ${edgeLightness}%, 0.3)`);
+        gradient.addColorStop(1, `hsla(${f.hue + 25}, 20%, ${edgeLightness - 10}%, 0.25)`);
+        
+        ctx.fillStyle = gradient;
+        ctx.fill();
+        
+        const edgeBrightness = 45 + f.diffuse * 25;
+        ctx.strokeStyle = `hsla(${f.hue}, 40%, ${edgeBrightness}%, 0.7)`;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        
+        if (f.diffuse > 0.6) {
+            const hGrad = ctx.createRadialGradient(gx0, gy0, 0, gx0, gy0, maxDist * 0.3);
+            hGrad.addColorStop(0, `rgba(255, 255, 255, ${f.diffuse * 0.25})`);
+            hGrad.addColorStop(0.6, `rgba(255, 255, 255, ${f.diffuse * 0.1})`);
+            hGrad.addColorStop(1, `rgba(255, 255, 255, 0)`);
+            ctx.fillStyle = hGrad;
+            ctx.fill();
+        }
+    });
+}
+
+// -------- ENERGY FLOWS ----------
+function drawField(time, intensity) {
+    const count = 12;
+    for (let i = 0; i < count; i++) {
+        const angle = i / count * Math.PI * 2 + time * 0.2;
+        const brightness = 100 + (Math.sin(time + i) * 50);
+        ctx.beginPath();
+
+        for (let p = -1; p <= 1; p += 0.02) {
+            const d = p * R;
+            const wave =
+                Math.sin(d * 0.03 + time * 3 + i) *
+                30 * intensity;
+
+            const x = cx + d * Math.cos(angle) + wave * Math.cos(angle + Math.PI / 2);
+            const y = cy + d * Math.sin(angle) + wave * Math.sin(angle + Math.PI / 2);
+
+            p === -1 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+        }
+
+        ctx.strokeStyle = `rgba(${brightness}, ${brightness}, ${brightness}, ${0.15 * intensity})`;
+        ctx.stroke();
+    }
+}
+
+// -------- LIGHT DISSOLUTION ----------
+function drawGlow(time) {
+    const dissolve = Math.min(1, (time - 60) / 10);
+    
+    for (let i = 0; i < 6; i++) {
+        const hue = 180 + i * 60;
+        const angle = i / 6 * Math.PI * 2 + time * 0.3;
+        const spread = dissolve * R * 0.6;
+        
+        const gx = cx + Math.cos(angle) * spread;
+        const gy = cy + Math.sin(angle) * spread;
+        
+        const saturation = 40 * (1 - dissolve);
+        const lightness = 50 - dissolve * 30;
+        const gray = 60 - dissolve * 40;
+        
+        const g = ctx.createRadialGradient(gx, gy, 0, gx, gy, R * (0.3 + dissolve * 0.4));
+        g.addColorStop(0, `hsla(${hue}, ${saturation}%, ${lightness}%, ${0.3 * (1 - dissolve * 0.7)})`);
+        g.addColorStop(0.4, `hsla(${hue}, ${saturation * 0.5}%, ${lightness - 10}%, ${0.2 * (1 - dissolve * 0.8)})`);
+        g.addColorStop(0.7, `rgba(${gray}, ${gray}, ${gray}, ${0.1 * (1 - dissolve * 0.9)})`);
+        g.addColorStop(1, `rgba(0,0,0,0)`);
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(gx, gy, R * (0.3 + dissolve * 0.4), 0, Math.PI * 2);
+        ctx.fill();
+    }
+    
+    const centralGray = 80 - dissolve * 60;
+    const centralGlow = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * dissolve);
+    centralGlow.addColorStop(0, `rgba(${centralGray}, ${centralGray}, ${centralGray}, ${0.15 * dissolve})`);
+    centralGlow.addColorStop(0.6, `rgba(${centralGray * 0.5}, ${centralGray * 0.5}, ${centralGray * 0.5}, ${0.08 * dissolve})`);
+    centralGlow.addColorStop(1, `rgba(0,0,0,0)`);
+    ctx.fillStyle = centralGlow;
+    ctx.beginPath();
+    ctx.arc(cx, cy, R * dissolve, 0, Math.PI * 2);
+    ctx.fill();
+}
+
+// -------- MAIN LOOP ----------
+function animate() {
+    ctx.fillStyle = "rgba(0,0,0,0.08)";
+    ctx.fillRect(0, 0, S, S);
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, Math.PI * 2);
+    ctx.clip();
+
+    const p = phase();
+
+    if (p >= 1) drawField(t, Math.min(1, (t-10)/10));
+    if (p >= 2) drawField(t + 10, 1.5);
+    if (p === 3) drawGlow(t);
+
+    if (p < 3) drawArtefact(t, p === 2 ? 12 : 2);
+
+    ctx.restore();
+
+    t += 0.016;
+    requestAnimationFrame(animate);
+}
+
+animate();
+</script>
+</body>
+</html>

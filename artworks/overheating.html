@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Neon Time</title>
+<style>
+body{margin:0;background:#0a0a12;overflow:hidden;display:flex;justify-content:center;align-items:center;min-height:100vh}
+canvas{display:block;max-width:100vmin;max-height:100vmin;width:100%;height:100%}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const cv=document.getElementById("c"),cx=cv.getContext("2d",{alpha:false});
+let W,H;
+function resize(){const s=Math.min(innerWidth,innerHeight);W=cv.width=s;H=cv.height=s}
+addEventListener("resize",resize);resize();
+
+let t=0,exploded=false,expT=0,shk=0;
+const frags=[],sparks=[],mpts=[],gsnap=[];
+const ESPD=4,RDEL=4;
+
+function mR(dR,dT,nT,cA){return-(dT/nT)*dR+cA*(1+dT/nT)+Math.PI/nT}
+
+const pal=[{h:215,s:8,l:52},{h:210,s:6,l:44},{h:220,s:10,l:38},{h:200,s:5,l:32},{h:225,s:7,l:26}];
+function sC(d,i){return pal[(i+d)%pal.length]}
+
+function dG(x,y,pR,te,rot,ci,dep){
+  if(!exploded)gsnap.push({x,y,pR,te,rot,ci,dep});
+  cx.save();cx.translate(x,y);cx.rotate(rot);
+  const md=2*pR/te,oR=pR+md*.7,rR=pR-md*.9,pt=2*Math.PI/te,hw=pt*.2,bw=pt*.3;
+  const dF=Math.max(.4,1-dep*.18);
+  const spd=.4+t*.25,ht=Math.min(1,Math.max(0,(spd-.8)/3.2));
+  function hH(b){if(ht<.1)return b;if(ht<.4)return b+(360-b)*((ht-.1)/.3);if(ht<.85)return 360;return 360+((ht-.85)/.15)*30}
+  function hS(b){if(ht<.1)return b;if(ht<.4)return b+(90-b)*((ht-.1)/.3);return 90+((ht-.4)/.6)*10}
+  function hL(b){if(ht<.1)return b;if(ht<.35)return b+(18-b)*((ht-.1)/.25);if(ht<.6)return 18+((ht-.35)/.25)*14;if(ht<.85)return 32+((ht-.6)/.25)*13;return 45+((ht-.85)/.15)*40}
+
+  // Gear teeth
+  cx.beginPath();
+  for(let i=0;i<te;i++){const a=i*pt;
+    if(i===0)cx.moveTo(Math.cos(a-bw)*rR,Math.sin(a-bw)*rR);
+    else cx.lineTo(Math.cos(a-bw)*rR,Math.sin(a-bw)*rR);
+    cx.lineTo(Math.cos(a-hw)*oR,Math.sin(a-hw)*oR);
+    cx.lineTo(Math.cos(a+hw)*oR,Math.sin(a+hw)*oR);
+    cx.lineTo(Math.cos(a+bw)*rR,Math.sin(a+bw)*rR)}
+  cx.closePath();
+
+  // Flat industrial steel fill
+  const baseL=38*dF, baseS=5;
+  const g=cx.createLinearGradient(-oR,-oR,oR,oR);
+  g.addColorStop(0,`hsla(215,${baseS}%,${(baseL+8)}%,.95)`);
+  g.addColorStop(.5,`hsla(215,${baseS}%,${baseL}%,.95)`);
+  g.addColorStop(1,`hsla(215,${baseS}%,${(baseL-6)}%,.95)`);
+  cx.fillStyle=g;cx.fill();
+
+  // Heat overlay on edges
+  if(ht>.1){
+    const hg=cx.createRadialGradient(0,0,rR*.5,0,0,oR*1.1);
+    hg.addColorStop(0,`hsla(${hH(215)},${hS(5)}%,${hL(baseL)}%,0)`);
+    hg.addColorStop(.6,`hsla(${hH(215)},${hS(30)}%,${hL(baseL)}%,${ht*.5})`);
+    hg.addColorStop(1,`hsla(${hH(215)},${hS(60)}%,${hL(baseL+5)}%,${ht*.7})`);
+    cx.fillStyle=hg;cx.fill();
+  }
+
+  // Heat glow
+  if(ht>.2){cx.shadowColor=`hsla(${hH(215)},100%,${Math.min(hL(30)+15,90)}%,${ht-.2})`;cx.shadowBlur=ht*20}
+
+  // Hard edge — thick dark stroke
+  cx.strokeStyle=`hsla(215,4%,${(10+ht*25)*dF}%,.9)`;cx.lineWidth=2;cx.stroke();
+  cx.shadowColor="transparent";cx.shadowBlur=0;
+
+  // Tooth tip heat glow
+  if(ht>.25){const tg=(ht-.25)/.75;for(let i=0;i<te;i++){const a=i*pt,tx=Math.cos(a)*oR,ty=Math.sin(a)*oR;
+    const tG=cx.createRadialGradient(tx,ty,0,tx,ty,md*1.5);
+    tG.addColorStop(0,`hsla(${hH(215)},100%,${Math.min(hL(30)+10,90)}%,${tg*.5})`);
+    tG.addColorStop(1,`hsla(${hH(215)},100%,${Math.min(hL(30)+10,90)}%,0)`);
+    cx.fillStyle=tG;cx.beginPath();cx.arc(tx,ty,md*1.5,0,Math.PI*2);cx.fill()}}
+
+  // Raised hub (moyeu)
+  const hbR=pR*.22;
+  const hubG=cx.createRadialGradient(-hbR*.3,-hbR*.3,0,0,0,hbR*1.1);
+  hubG.addColorStop(0,`hsla(215,6%,${(baseL+14)*dF}%,.95)`);
+  hubG.addColorStop(.5,`hsla(215,5%,${(baseL+6)*dF}%,.95)`);
+  hubG.addColorStop(1,`hsla(215,4%,${(baseL-2)*dF}%,.9)`);
+  cx.beginPath();cx.arc(0,0,hbR,0,Math.PI*2);
+  cx.fillStyle=hubG;cx.fill();
+  cx.strokeStyle=`hsla(215,4%,${(baseL+18)*dF}%,.4)`;cx.lineWidth=1;cx.stroke();
+
+  // Hub edge highlight
+  cx.beginPath();cx.arc(0,0,hbR*.95,0,Math.PI*2);
+  cx.strokeStyle=`hsla(215,5%,${(baseL+22)*dF}%,.2)`;cx.lineWidth=.5;cx.stroke();
+
+  // Axle dot
+  cx.beginPath();cx.arc(0,0,hbR*.25,0,Math.PI*2);
+  cx.fillStyle=`hsla(215,4%,${(baseL-8)*dF}%,.9)`;cx.fill();
+
+  cx.restore();
+}
+
+function addMP(x1,y1,x2,y2,a){mpts.push({x:(x1+x2)/2,y:(y1+y2)/2,angle:a+Math.PI/2})}
+
+function drawTrain(){
+  const m=W*.005,mg=m*.55;mpts.length=0;gsnap.length=0;
+  const spd=.4+t*.25,CX=W/2,CY=H/2;
+
+  // Barrel
+  const bT=48,bR=m*bT/2,bRo=t*spd*.3;
+  dG(CX,CY,bR,bT,bRo,0,0);
+
+  // Chain 1: right
+  const c1T=28,c1R=m*c1T/2,c1A=.4,c1D=bR+c1R;
+  const c1x=CX+Math.cos(c1A)*c1D,c1y=CY+Math.sin(c1A)*c1D;
+  const c1Ro=mR(bRo,bT,c1T,c1A);
+  dG(c1x,c1y,c1R,c1T,c1Ro,1,1);addMP(CX,CY,c1x,c1y,c1A);
+
+  const t1T=22,t1R=m*t1T/2,t1A=-.3,t1D=c1R+t1R;
+  const t1x=c1x+Math.cos(t1A)*t1D,t1y=c1y+Math.sin(t1A)*t1D;
+  const t1C=Math.atan2(t1y-c1y,t1x-c1x),t1Ro=mR(c1Ro,c1T,t1T,t1C);
+  dG(t1x,t1y,t1R,t1T,t1Ro,2,1);addMP(c1x,c1y,t1x,t1y,t1C);
+
+  const f1T=16,f1R=m*f1T/2,f1A=-1.2,f1D=t1R+f1R;
+  const f1x=t1x+Math.cos(f1A)*f1D,f1y=t1y+Math.sin(f1A)*f1D;
+  const f1C=Math.atan2(f1y-t1y,f1x-t1x),f1Ro=mR(t1Ro,t1T,f1T,f1C);
+  dG(f1x,f1y,f1R,f1T,f1Ro,3,2);addMP(t1x,t1y,f1x,f1y,f1C);
+
+  const e1T=10,e1R=m*e1T/2,e1A=-.6,e1D=f1R+e1R;
+  const e1x=f1x+Math.cos(e1A)*e1D,e1y=f1y+Math.sin(e1A)*e1D;
+  const e1C=Math.atan2(e1y-f1y,e1x-f1x),e1Ro=mR(f1Ro,f1T,e1T,e1C);
+  dG(e1x,e1y,e1R,e1T,e1Ro,4,3);addMP(f1x,f1y,e1x,e1y,e1C);
+
+  // Chain 2: left-down
+  const c2T=32,c2R=m*c2T/2,c2A=Math.PI-.5,c2D=bR+c2R;
+  const c2x=CX+Math.cos(c2A)*c2D,c2y=CY+Math.sin(c2A)*c2D;
+  const c2Ro=mR(bRo,bT,c2T,c2A);
+  dG(c2x,c2y,c2R,c2T,c2Ro,1,1);addMP(CX,CY,c2x,c2y,c2A);
+
+  const i2T=18,i2R=m*i2T/2,i2A=Math.PI+.4,i2D=c2R+i2R;
+  const i2x=c2x+Math.cos(i2A)*i2D,i2y=c2y+Math.sin(i2A)*i2D;
+  const i2C=Math.atan2(i2y-c2y,i2x-c2x),i2Ro=mR(c2Ro,c2T,i2T,i2C);
+  dG(i2x,i2y,i2R,i2T,i2Ro,2,2);addMP(c2x,c2y,i2x,i2y,i2C);
+
+  const s2T=12,s2R=m*s2T/2,s2A=Math.PI-.1,s2D=i2R+s2R;
+  const s2x=i2x+Math.cos(s2A)*s2D,s2y=i2y+Math.sin(s2A)*s2D;
+  const s2C=Math.atan2(s2y-i2y,s2x-i2x),s2Ro=mR(i2Ro,i2T,s2T,s2C);
+  dG(s2x,s2y,s2R,s2T,s2Ro,3,2);addMP(i2x,i2y,s2x,s2y,s2C);
+
+  const z2T=8,z2R=m*z2T/2,z2A=Math.PI+.8,z2D=s2R+z2R;
+  const z2x=s2x+Math.cos(z2A)*z2D,z2y=s2y+Math.sin(z2A)*z2D;
+  const z2C=Math.atan2(z2y-s2y,z2x-s2x),z2Ro=mR(s2Ro,s2T,z2T,z2C);
+  dG(z2x,z2y,z2R,z2T,z2Ro,4,3);addMP(s2x,s2y,z2x,z2y,z2C);
+
+  // Chain 3: down
+  const c3T=24,c3R=m*c3T/2,c3A=Math.PI/2+.3,c3D=bR+c3R;
+  const c3x=CX+Math.cos(c3A)*c3D,c3y=CY+Math.sin(c3A)*c3D;
+  const c3Ro=mR(bRo,bT,c3T,c3A);
+  dG(c3x,c3y,c3R,c3T,c3Ro,0,1);addMP(CX,CY,c3x,c3y,c3A);
+
+  const o3aT=14,o3aR=m*o3aT/2,o3aA=Math.PI/2-.5,o3aD=c3R+o3aR;
+  const o3ax=c3x+Math.cos(o3aA)*o3aD,o3ay=c3y+Math.sin(o3aA)*o3aD;
+  const o3aC=Math.atan2(o3ay-c3y,o3ax-c3x),o3aRo=mR(c3Ro,c3T,o3aT,o3aC);
+  dG(o3ax,o3ay,o3aR,o3aT,o3aRo,1,2);addMP(c3x,c3y,o3ax,o3ay,o3aC);
+
+  const o3bT=20,o3bR=m*o3bT/2,o3bA=Math.PI/2+1.1,o3bD=c3R+o3bR;
+  const o3bx=c3x+Math.cos(o3bA)*o3bD,o3by=c3y+Math.sin(o3bA)*o3bD;
+  const o3bC=Math.atan2(o3by-c3y,o3bx-c3x),o3bRo=mR(c3Ro,c3T,o3bT,o3bC);
+  dG(o3bx,o3by,o3bR,o3bT,o3bRo,2,1);addMP(c3x,c3y,o3bx,o3by,o3bC);
+
+  const o3cT=10,o3cR=m*o3cT/2,o3cA=Math.PI+.2,o3cD=o3bR+o3cR;
+  const o3cx=o3bx+Math.cos(o3cA)*o3cD,o3cy=o3by+Math.sin(o3cA)*o3cD;
+  const o3cC=Math.atan2(o3cy-o3by,o3cx-o3bx),o3cRo=mR(o3bRo,o3bT,o3cT,o3cC);
+  dG(o3cx,o3cy,o3cR,o3cT,o3cRo,3,2);addMP(o3bx,o3by,o3cx,o3cy,o3cC);
+
+  // Chain 4: upper left
+  const c4T=20,c4R=m*c4T/2,c4A=-Math.PI/2-.4,c4D=bR+c4R;
+  const c4x=CX+Math.cos(c4A)*c4D,c4y=CY+Math.sin(c4A)*c4D;
+  const c4Ro=mR(bRo,bT,c4T,c4A);
+  dG(c4x,c4y,c4R,c4T,c4Ro,3,1);addMP(CX,CY,c4x,c4y,c4A);
+
+  const o4T=14,o4R=m*o4T/2,o4A=-Math.PI/2+.3,o4D=c4R+o4R;
+  const o4x=c4x+Math.cos(o4A)*o4D,o4y=c4y+Math.sin(o4A)*o4D;
+  const o4C=Math.atan2(o4y-c4y,o4x-c4x),o4Ro=mR(c4Ro,c4T,o4T,o4C);
+  dG(o4x,o4y,o4R,o4T,o4Ro,4,2);addMP(c4x,c4y,o4x,o4y,o4C);
+
+  const o4bT=8,o4bR=m*o4bT/2,o4bA=-Math.PI/2-.8,o4bD=o4R+o4bR;
+  const o4bx=o4x+Math.cos(o4bA)*o4bD,o4by=o4y+Math.sin(o4bA)*o4bD;
+  const o4bC=Math.atan2(o4by-o4y,o4bx-o4x),o4bRo=mR(o4Ro,o4T,o4bT,o4bC);
+  dG(o4bx,o4by,o4bR,o4bT,o4bRo,0,3);addMP(o4x,o4y,o4bx,o4by,o4bC);
+}
+
+function emitSp(spd){
+  const n=Math.floor(spd*2.5);
+  for(let i=0;i<n;i++){if(!mpts.length)break;
+    const mp=mpts[Math.floor(Math.random()*mpts.length)];
+    const ea=mp.angle+(Math.random()-.5)*.8,v=(1.5+Math.random()*3)*Math.min(spd*.3,6);
+    sparks.push({x:mp.x+(Math.random()-.5)*4,y:mp.y+(Math.random()-.5)*4,
+      vx:Math.cos(ea)*v,vy:Math.sin(ea)*v,life:1,decay:.02+Math.random()*.025,
+      size:.5+Math.random()*1.5,trail:[]})}}
+
+function drawSp(){
+  for(let i=sparks.length-1;i>=0;i--){const s=sparks[i];
+    s.trail.push({x:s.x,y:s.y});if(s.trail.length>6)s.trail.shift();
+    s.vx*=.97;s.vy*=.97;s.vy+=.25;s.x+=s.vx;s.y+=s.vy;s.life-=s.decay;
+    if(s.life<=0){sparks.splice(i,1);continue}
+    cx.globalCompositeOperation="lighter";
+    if(s.trail.length>1){cx.beginPath();cx.moveTo(s.trail[0].x,s.trail[0].y);
+      for(let j=1;j<s.trail.length;j++)cx.lineTo(s.trail[j].x,s.trail[j].y);
+      cx.lineTo(s.x,s.y);cx.strokeStyle=`hsla(35,100%,50%,${s.life*.3})`;cx.lineWidth=s.size*s.life*.6;cx.stroke()}
+    cx.fillStyle=`hsla(${20+s.life*25},100%,${40+s.life*55}%,${s.life})`;
+    cx.beginPath();cx.arc(s.x,s.y,s.size*s.life,0,Math.PI*2);cx.fill();
+    cx.globalCompositeOperation="source-over"}
+  if(sparks.length>1200)sparks.splice(0,sparks.length-1200)}
+
+function triggerExp(){
+  exploded=true;expT=0;frags.length=0;
+  const rot=t*1.5,cosR=Math.cos(rot),sinR=Math.sin(rot);
+  for(const g of gsnap){
+    const dx=g.x-W/2,dy=g.y-H/2;
+    const sx=W/2+dx*cosR-dy*sinR,sy=H/2+dx*sinR+dy*cosR;
+    const dirX=sx-W/2,dirY=sy-H/2,dist=Math.hypot(dirX,dirY)||1;
+    const f=3+Math.random()*5;
+    frags.push({x:sx,y:sy,vx:(dirX/dist)*f+(Math.random()-.5)*4,
+      vy:(dirY/dist)*f+(Math.random()-.5)*4-2,rot:g.rot+rot,
+      vr:(Math.random()-.5)*.3,pR:g.pR,te:g.te,ci:g.ci,dep:g.dep,
+      life:1,decay:.005+Math.random()*.005})}
+  for(let i=0;i<600;i++){const a=Math.random()*Math.PI*2,v=2+Math.random()*12;
+    sparks.push({x:W/2+(Math.random()-.5)*W*.3,y:H/2+(Math.random()-.5)*H*.3,
+      vx:Math.cos(a)*v,vy:Math.sin(a)*v-Math.random()*4,life:1,
+      decay:.01+Math.random()*.02,size:1+Math.random()*3,trail:[]})}}
+
+function drawFrags(){
+  for(let i=frags.length-1;i>=0;i--){const f=frags[i];
+    f.vx*=.995;f.vy*=.995;f.vy+=.12;f.x+=f.vx;f.y+=f.vy;f.rot+=f.vr;f.vr*=.998;f.life-=f.decay;
+    if(f.life>.3&&Math.random()<.15)sparks.push({x:f.x+(Math.random()-.5)*4,y:f.y+(Math.random()-.5)*4,
+      vx:(Math.random()-.5)*.5,vy:-.5-Math.random()*1.5,life:.6,decay:.015+Math.random()*.01,size:1+Math.random()*2,trail:[]});
+    if(f.life<=0){frags.splice(i,1);continue}
+    cx.save();cx.globalAlpha=f.life;cx.translate(f.x,f.y);cx.rotate(f.rot);
+    const md=2*f.pR/f.te,oR=f.pR+md*.7,rR=f.pR-md*.9,pt=2*Math.PI/f.te,hw2=pt*.2,bw2=pt*.3;
+    cx.beginPath();
+    for(let j=0;j<f.te;j++){const a=j*pt;
+      if(j===0)cx.moveTo(Math.cos(a-bw2)*rR,Math.sin(a-bw2)*rR);
+      else cx.lineTo(Math.cos(a-bw2)*rR,Math.sin(a-bw2)*rR);
+      cx.lineTo(Math.cos(a-hw2)*oR,Math.sin(a-hw2)*oR);
+      cx.lineTo(Math.cos(a+hw2)*oR,Math.sin(a+hw2)*oR);
+      cx.lineTo(Math.cos(a+bw2)*rR,Math.sin(a+bw2)*rR)}
+    cx.closePath();
+    const hue=f.life>.5?0:15+(.5-f.life)*40;
+    cx.fillStyle=`hsla(${hue},${60+f.life*40}%,${20+f.life*30}%,.9)`;cx.fill();
+    cx.strokeStyle=`hsla(${hue},50%,15%,.6)`;cx.lineWidth=1;cx.stroke();
+    if(f.life>.4){cx.shadowColor=`hsla(${hue},100%,50%,${(f.life-.4)*1.2})`;cx.shadowBlur=12;
+      cx.strokeStyle=`hsla(${hue},100%,55%,${(f.life-.4)*.6})`;cx.lineWidth=.8;cx.stroke();cx.shadowBlur=0}
+    cx.restore()}}
+
+function drawExpFX(et){
+  if(et<.3){const fl=1-et/.3;cx.globalCompositeOperation="lighter";
+    const fg=cx.createRadialGradient(W/2,H/2,0,W/2,H/2,W*.4);
+    fg.addColorStop(0,`hsla(40,100%,95%,${fl*.8})`);fg.addColorStop(.3,`hsla(30,100%,60%,${fl*.5})`);
+    fg.addColorStop(1,"hsla(15,100%,30%,0)");cx.fillStyle=fg;cx.fillRect(0,0,W,H);cx.globalCompositeOperation="source-over"}
+  if(et<1){const p=et,rr=p*W*.5;cx.strokeStyle=`hsla(35,80%,55%,${(1-p)*.5})`;
+    cx.lineWidth=3*(1-p);cx.beginPath();cx.arc(W/2,H/2,rr,0,Math.PI*2);cx.stroke()}
+  if(et<2.5){const sa=Math.max(0,.15*(1-et/2.5)),sr=W*.15+et*W*.1;
+    const sg=cx.createRadialGradient(W/2,H/2-et*15,0,W/2,H/2,sr);
+    sg.addColorStop(0,`hsla(25,30%,15%,${sa})`);sg.addColorStop(1,"hsla(20,20%,10%,0)");
+    cx.fillStyle=sg;cx.fillRect(0,0,W,H)}}
+
+function draw(){
+  const bg=cx.createRadialGradient(W/2,H/2,0,W/2,H/2,W*.55);
+  bg.addColorStop(0,"#1a1a22");bg.addColorStop(.4,"#101018");bg.addColorStop(1,"#06060c");
+  cx.fillStyle=bg;cx.fillRect(0,0,W,H);
+  cx.save();
+  if(shk>.5){cx.translate((Math.random()-.5)*shk,(Math.random()-.5)*shk);shk*=.95}
+  const spd=.4+t*.25;
+  if(!exploded){
+    if(spd>ESPD*.7)shk=Math.max(shk,((spd-ESPD*.7)/(ESPD*.3))*8);
+    cx.save();cx.translate(W/2,H/2);cx.rotate(t*1.5);cx.translate(-W/2,-H/2);
+    drawTrain();
+    // Comic speed swooshes behind gears
+    const swooshInt=Math.min(1,(spd-.5)/3);
+    if(swooshInt>0){
+      cx.save();cx.globalAlpha=swooshInt*.55;cx.lineCap="round";
+      for(const g of gsnap){
+        const nS=Math.max(3,Math.floor(g.te/5));
+        for(let i=0;i<nS;i++){
+          const a=g.rot+(i/nS)*Math.PI*2;
+          const oR=g.pR*1.18;
+          const arcLen=(.35+swooshInt*1)*Math.PI;
+          const startA=a-arcLen;
+          const r=oR+3+i*2;
+          cx.beginPath();cx.arc(g.x,g.y,r,startA,a);
+          cx.strokeStyle=`hsla(200,18%,65%,${swooshInt*(.2+i*.06)})`;
+          cx.lineWidth=2-i*.2;cx.stroke()}}
+      cx.restore()}
+    const rot=t*1.5,cosR=Math.cos(rot),sinR=Math.sin(rot);
+    for(const mp of mpts){const dx=mp.x-W/2,dy=mp.y-H/2;
+      mp.x=W/2+dx*cosR-dy*sinR;mp.y=H/2+dx*sinR+dy*cosR;mp.angle+=rot}
+    emitSp(spd);drawSp();cx.restore();
+    // Global rotation swooshes (around whole assembly)
+    const gSwInt=Math.min(1,(spd-.6)/3);
+    if(gSwInt>0){
+      cx.save();cx.globalAlpha=gSwInt*.4;cx.lineCap="round";
+      const gRot=t*1.5;
+      const radii=[W*.32,W*.36,W*.40,W*.44];
+      for(let i=0;i<radii.length;i++){
+        const arcLen=(.3+gSwInt*.9)*Math.PI;
+        const endA=gRot+i*.8;
+        const startA=endA-arcLen;
+        cx.beginPath();cx.arc(W/2,H/2,radii[i],startA,endA);
+        cx.strokeStyle=`hsla(200,15%,60%,${gSwInt*(.15+i*.04)})`;
+        cx.lineWidth=2-i*.3;cx.stroke();
+        // Opposite side
+        cx.beginPath();cx.arc(W/2,H/2,radii[i],startA+Math.PI,endA+Math.PI);
+        cx.stroke()}
+      cx.restore()}
+    if(spd>=ESPD){shk=30;triggerExp()}
+  }else{
+    expT+=.016;drawExpFX(expT);drawFrags();drawSp();
+    if(expT>RDEL){exploded=false;t=0;frags.length=0;sparks.length=0;shk=0}}
+  cx.restore();
+  const vg=cx.createRadialGradient(W/2,H/2,W*.2,W/2,H/2,W*.55);
+  vg.addColorStop(0,"rgba(0,0,0,0)");vg.addColorStop(1,"rgba(0,0,0,.5)");
+  cx.fillStyle=vg;cx.fillRect(0,0,W,H);
+  if(!exploded)t+=.02;
+  requestAnimationFrame(draw)}
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>
