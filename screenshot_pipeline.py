@@ -2,7 +2,8 @@ import os
 import json
 import shutil
 import asyncio
-import stat
+import subprocess
+from datetime import datetime
 from pathlib import Path
 from playwright.async_api import async_playwright
 import paramiko
@@ -20,9 +21,12 @@ VIEWPORT = {"width": 800, "height": 600}
 SSH_HOST = "fournier-digital.ch"
 SSH_PORT = 22
 SSH_USER = "almalinux"
-SSH_KEY = Path.home() / ".ssh" / "id_rsa"
 REMOTE_DIR = "/home/almalinux/upstride_ch"
 SYNC_PATHS = ["index.html", "artworks.json", "intarynx.jpg", "favicon.ico", "artworks", "screenshots"]
+
+# ── Git config ──
+GIT_ENABLED = True
+GIT_BRANCH = "main"
 
 
 def id_to_title(stem: str) -> str:
@@ -143,13 +147,10 @@ def sync_path(sftp, local: Path, remote: str):
 
 
 def sync_to_server():
-    if not SSH_KEY.exists():
-        print(f"[SSH ERR] Key not found: {SSH_KEY}")
-        return
     print(f"\n=== Syncing to {SSH_USER}@{SSH_HOST}:{REMOTE_DIR} ===")
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(SSH_HOST, port=SSH_PORT, username=SSH_USER, key_filename=str(SSH_KEY))
+    client.connect(SSH_HOST, port=SSH_PORT, username=SSH_USER, allow_agent=True, look_for_keys=False)
     sftp = client.open_sftp()
     try:
         for p in SYNC_PATHS:
@@ -162,6 +163,27 @@ def sync_to_server():
         sftp.close()
         client.close()
     print("=== Sync complete ===")
+
+
+# ── Git sync ──
+def git_sync():
+    if not GIT_ENABLED:
+        return
+    print("\n=== Git sync ===")
+    try:
+        status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True, check=True)
+        if not status.stdout.strip():
+            print("[GIT] Nothing to commit")
+            return
+        subprocess.run(["git", "add", "-A"], check=True)
+        msg = f"Update gallery {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        subprocess.run(["git", "commit", "-m", msg], check=True)
+        subprocess.run(["git", "push", "origin", GIT_BRANCH], check=True)
+        print(f"[GIT] Pushed: {msg}")
+    except subprocess.CalledProcessError as e:
+        print(f"[GIT ERR] {e}")
+    except FileNotFoundError:
+        print("[GIT ERR] git not found in PATH")
 
 
 async def main():
@@ -185,6 +207,7 @@ async def main():
                     print(f"[ERR] {f.name}: {e}")
 
     sync_to_server()
+    git_sync()
 
 
 if __name__ == "__main__":
