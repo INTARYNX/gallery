@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Stitched — a pointillist experiment</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #0e0e0f;
+    overflow: hidden;
+  }
+  .frame {
+    position: relative;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 4px;
+    background: #161617;
+    width: min(92vw, 92vh, 720px);
+    height: min(92vw, 92vh, 720px);
+    overflow: hidden;
+  }
+  .frame::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.55) 100%);
+    z-index: 10;
+    border-radius: 3px;
+  }
+  .frame::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 11;
+    border-radius: 3px;
+    opacity: 0.06;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  }
+  canvas {
+    display: block;
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
+    border-radius: 3px;
+  }
+  #srcCanvas { background: #0a0a0b; }
+  #crtCanvas { pointer-events: none; z-index: 12; }
+</style>
+</head>
+<body>
+<div class="frame">
+  <canvas id="srcCanvas"></canvas>
+  <canvas id="crtCanvas"></canvas>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/simplex-noise@2.4.0/simplex-noise.min.js"></script>
+<script>
+const cv = document.getElementById('srcCanvas');
+const srcCanvas = cv;
+const crtCanvas = document.getElementById('crtCanvas');
+const ctx = srcCanvas.getContext('2d');
+const crtCtx = crtCanvas.getContext('2d');
+
+const lowCanvas = document.createElement('canvas');
+const lowCtx = lowCanvas.getContext('2d', { willReadFrequently: true });
+
+let W, H;
+let leaves = [];
+let bgCanvas = null;
+let grid = {};
+let cellSize = 20;
+let rafId = null;
+let time = 0;
+let phosphorPattern = null;
+let scanlinePattern = null;
+
+function buildPhosphorPattern() {
+  const c = document.createElement('canvas');
+  c.width = 3; c.height = 1;
+  const cx = c.getContext('2d');
+  cx.fillStyle = 'rgba(255, 200, 200, 0.9)'; cx.fillRect(0, 0, 1, 1);
+  cx.fillStyle = 'rgba(200, 255, 200, 0.9)'; cx.fillRect(1, 0, 1, 1);
+  cx.fillStyle = 'rgba(200, 200, 255, 0.9)'; cx.fillRect(2, 0, 1, 1);
+  phosphorPattern = crtCtx.createPattern(c, 'repeat');
+}
+
+function buildScanlinePattern() {
+  const c = document.createElement('canvas');
+  c.width = 1; c.height = 3;
+  const cx = c.getContext('2d');
+  cx.fillStyle = 'rgba(0, 0, 0, 0.35)'; cx.fillRect(0, 0, 1, 1);
+  cx.fillStyle = 'rgba(255, 255, 255, 0)'; cx.fillRect(0, 1, 1, 2);
+  scanlinePattern = crtCtx.createPattern(c, 'repeat');
+}
+
+const DPR = window.devicePixelRatio || 1;
+const simplex = new SimplexNoise();
+
+const CRT = {
+  pixelSize: 4,
+  brightness: 1.5,
+  blur: 1.0,
+  glow: 0.4,
+  chromaShift: 0,
+  scanRoll: 0,
+  jitterX: 0,
+  jitterY: 0,
+  tearY: -1,
+  tearShift: 0,
+  invert: 0,
+  distort: 0
+};
+
+const rand = (a, b) => a + Math.random() * (b - a);
+
+function randomLeafColor() {
+  const t = Math.random();
+  let h, s, l;
+  if (t < 0.38) { h = rand(340, 355); s = rand(60, 85); l = rand(82, 95); }      // rose pâle dominant
+  else if (t < 0.6) { h = rand(345, 360); s = rand(70, 95); l = rand(70, 82); }  // rose vif
+  else if (t < 0.78) { h = 0; s = 0; l = rand(95, 100); }                         // blanc
+  else if (t < 0.9) { h = rand(320, 340); s = rand(50, 75); l = rand(75, 88); }  // rose-magenta
+  else { h = rand(75, 100); s = rand(40, 65); l = rand(55, 75); }                // vert tendre (jeunes feuilles)
+  return [h, s, l];
+}
+
+function hslStr(c) {
+  return `hsl(${c[0]}, ${c[1]}%, ${c[2]}%)`;
+}
+
+function lerpHSL(a, b, t) {
+  let dh = b[0] - a[0];
+  if (dh > 180) dh -= 360;
+  if (dh < -180) dh += 360;
+  return [a[0] + dh * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+}
+
+function drawBackground() {
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#7a98b8');
+  g.addColorStop(0.4, '#a8b4c4');
+  g.addColorStop(0.6, '#b0a4a8');
+  g.addColorStop(0.72, '#7a90a8');
+  g.addColorStop(0.8, '#8aa0b8');   // eau plus claire pour mieux voir le fond
+  g.addColorStop(0.88, '#6a8298');
+  g.addColorStop(0.94, '#4a6838');
+  g.addColorStop(1, '#2a4818');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  // helper: dessine des points groupés par couleur (un seul Path par groupe)
+  function paintDots(dots) {
+    const buckets = {};
+    for (const d of dots) {
+      const key = `${d.h | 0},${d.s | 0},${d.l | 0},${d.a.toFixed(2)}`;
+      if (!buckets[key]) buckets[key] = [];
+      buckets[key].push(d);
+    }
+    for (const key in buckets) {
+      const [h, s, l, a] = key.split(',');
+      ctx.fillStyle = `hsla(${h},${s}%,${l}%,${a})`;
+      ctx.beginPath();
+      for (const d of buckets[key]) {
+        ctx.moveTo(d.x + d.size, d.y);
+        ctx.arc(d.x, d.y, d.size, 0, Math.PI * 2);
+      }
+      ctx.fill();
+    }
+  }
+
+  const dots = [];
+
+  // CIEL — légèrement assombri
+  const skyEnd = H * 0.6;
+  const skyN = Math.floor((W * skyEnd) / 8);
+  for (let i = 0; i < skyN; i++) {
+    const x = rand(0, W);
+    const y = rand(0, skyEnd);
+    const depth = y / skyEnd;
+    const t = Math.random();
+    let h, s, l;
+    if (t < 0.45) { h = 210; s = 30; l = 58 + depth * 6; }
+    else if (t < 0.7) { h = 0; s = 0; l = 70; }
+    else if (t < 0.88) { h = 350; s = 30; l = 66; }
+    else { h = 220; s = 20; l = 60; }
+    dots.push({ x, y, size: rand(1, 3), h, s, l, a: rand(0.5, 0.95) });
+  }
+
+  // MONTAGNES — légèrement assombries
+  const mtnStart = H * 0.6, mtnEnd = H * 0.75;
+  function mtnHeight(x) {
+    const left = mtnStart + Math.sin(x / W * Math.PI * 1.2) * 30 + 20;
+    const right = mtnStart + Math.cos((x / W - 0.3) * Math.PI * 1.5) * 25 + 25;
+    return Math.min(left, right);
+  }
+  const mtnN = Math.floor((W * (mtnEnd - mtnStart)) / 6);
+  for (let i = 0; i < mtnN; i++) {
+    const x = rand(0, W);
+    const topY = mtnHeight(x);
+    if (topY > mtnEnd) continue;
+    const y = rand(topY, mtnEnd);
+    const t = Math.random();
+    let h, s, l;
+    if (t < 0.55) { h = 220; s = 15; l = 38; }
+    else if (t < 0.82) { h = 200; s = 10; l = 45; }
+    else { h = 340; s = 15; l = 42; }
+    dots.push({ x, y, size: rand(1.5, 3), h, s, l, a: rand(0.6, 0.95) });
+  }
+
+  // LAC — bleu de fond visible + reflets ondulés
+  const lakeStart = H * 0.72, lakeEnd = H * 0.88;
+  const lakeN = Math.floor((W * (lakeEnd - lakeStart)) / 5);  // un peu plus dense
+  for (let i = 0; i < lakeN; i++) {
+    const x = rand(0, W);
+    const y = rand(lakeStart, lakeEnd);
+    const depth = (y - lakeStart) / (lakeEnd - lakeStart);
+    const topFade = (y - lakeStart) / (H * 0.05);
+    if (topFade < 1 && Math.random() > topFade) continue;
+    const wave = Math.sin(x * 0.02 + depth * 3) * 4;
+    const yy = y + wave;
+    const t = Math.random();
+    let h, s, l;
+    if (t < 0.55) { h = rand(205, 220); s = rand(30, 50); l = (32 + depth * 8); }     // dominante bleu profond
+    else if (t < 0.78) { h = rand(200, 215); s = rand(22, 38); l = rand(48, 58); }    // bleu moyen
+    else if (t < 0.88) { h = 0; s = 0; l = rand(72, 85); }                             // reflets clairs
+    else if (t < 0.95) { h = rand(340, 358); s = rand(40, 60); l = rand(60, 72); }    // pétales
+    else { h = rand(190, 210); s = 28; l = 62; }
+    dots.push({ x, y: yy, size: rand(1.2, 2.8), h, s, l, a: rand(0.7, 0.95) });
+  }
+
+  // Stries de reflets — ondulées, longueurs et hauteurs variables
+  for (let i = 0; i < 60; i++) {
+    const baseY = rand(lakeStart + 5, lakeEnd - 3);
+    const x0 = rand(0, W);
+    const len = rand(15, 90);
+    const waveAmp = rand(1, 3);
+    const waveFreq = rand(0.08, 0.2);
+    const brightness = rand(72, 92);
+    const alpha = rand(0.4, 0.75);
+    for (let k = 0; k < len; k += 1.8) {
+      const fade = 1 - Math.abs(k - len / 2) / (len / 2) * 0.6;
+      dots.push({
+        x: x0 + k,
+        y: baseY + Math.sin(k * waveFreq) * waveAmp,
+        size: rand(0.6, 1.3),
+        h: 0, s: 0, l: brightness,
+        a: alpha * fade
+      });
+    }
+  }
+
+  // Reflets bleus subtils — touche de couleur dans l'eau
+  for (let i = 0; i < 30; i++) {
+    const baseY = rand(lakeStart + 8, lakeEnd - 3);
+    const x0 = rand(0, W);
+    const len = rand(20, 60);
+    for (let k = 0; k < len; k += 2) {
+      dots.push({
+        x: x0 + k,
+        y: baseY + Math.sin(k * 0.15) * 1.5,
+        size: rand(0.6, 1.1),
+        h: rand(200, 215), s: 35, l: rand(45, 58),
+        a: rand(0.35, 0.6)
+      });
+    }
+  }
+
+  // SOL / COLLINE — relief, touffes d'herbe, variations de lumière
+  const groundStart = H * 0.88;
+
+  // Noise simple pour créer du relief : zones plus claires (bosses) et sombres (creux)
+  function reliefLight(x, y) {
+    return (
+      Math.sin(x * 0.02) * 0.5 +
+      Math.sin(x * 0.08 + y * 0.05) * 0.3 +
+      Math.sin(x * 0.15 + 100) * 0.2
+    );
+  }
+
+  const groundN = Math.floor((W * (H - groundStart)) / 2.5);
+  for (let i = 0; i < groundN; i++) {
+    const x = rand(0, W);
+    const y = rand(groundStart, H);
+    const rightBoost = Math.pow(x / W, 2) * 60;
+    if (y < groundStart - rightBoost) continue;
+    const depth = (y - groundStart) / (H - groundStart);
+    const distFromTrunk = Math.abs(x - W * 0.92);
+    const shadowAmount = Math.max(0, 1 - distFromTrunk / (W * 0.25)) * (1 - depth * 0.6);
+    const relief = reliefLight(x, y); // -1 à 1
+    const reliefBoost = relief * 18; // ±18 sur la luminosité
+
+    const t = Math.random();
+    let h, s, l;
+    if (t < 0.5) {
+      h = rand(75, 95); s = rand(30, 55); l = (28 + depth * 6) - shadowAmount * 10 + reliefBoost;
+    } else if (t < 0.72) {
+      h = rand(70, 90); s = rand(40, 65); l = (38 + depth * 6) - shadowAmount * 8 + reliefBoost;
+    } else if (t < 0.8) {
+      h = rand(95, 115); s = rand(35, 55); l = rand(20, 32) + reliefBoost * 0.5; // verts foncés
+    } else if (t < 0.86) {
+      h = rand(35, 55); s = rand(30, 50); l = rand(28, 38) + reliefBoost * 0.5; // terre
+    } else if (t < 0.91) {
+      h = rand(340, 355); s = rand(50, 70); l = rand(58, 70);
+    } else if (t < 0.94) {
+      h = 0; s = 0; l = 75;
+    } else {
+      h = rand(45, 60); s = rand(60, 80); l = rand(50, 62);
+    }
+    dots.push({ x, y, size: rand(1.4, 3.5), h, s, l: Math.max(8, Math.min(85, l)), a: rand(0.7, 1) });
+  }
+
+  // Touffes d'herbe : groupes de brins serrés
+  for (let g = 0; g < 50; g++) {
+    const cx = rand(0, W);
+    const cy = rand(groundStart + 8, H - 6);
+    const tuftSize = rand(8, 18);
+    const blades = Math.floor(rand(5, 12));
+    const relief = reliefLight(cx, cy);
+    for (let b = 0; b < blades; b++) {
+      const bx = cx + rand(-tuftSize / 2, tuftSize / 2);
+      const baseY = cy + rand(-2, 2);
+      const len = rand(4, 10);
+      const lean = rand(-0.3, 0.3);
+      const baseHue = rand(80, 100);
+      const baseSat = rand(45, 70);
+      const baseLight = rand(35, 55) + relief * 10;
+      for (let k = 0; k < len; k++) {
+        dots.push({
+          x: bx + lean * k,
+          y: baseY - k * 1.3,
+          size: rand(0.7, 1.3),
+          h: baseHue,
+          s: baseSat,
+          l: baseLight + k * 1.5, // pointes plus claires
+          a: rand(0.6, 0.95)
+        });
+      }
+    }
+  }
+
+  // Brins isolés (densifie sans alourdir)
+  for (let i = 0; i < 150; i++) {
+    const x = rand(0, W);
+    const baseY = rand(groundStart + 5, H - 2);
+    const len = rand(3, 7);
+    const relief = reliefLight(x, baseY);
+    for (let k = 0; k < len; k++) {
+      dots.push({
+        x: x + rand(-0.5, 0.5),
+        y: baseY - k * 1.5,
+        size: rand(0.8, 1.4),
+        h: rand(80, 100), s: rand(45, 65),
+        l: rand(32, 45) + relief * 10 + k * 1.2,
+        a: rand(0.5, 0.9)
+      });
+    }
+  }
+
+  // Petites fleurs disséminées en grappes
+  for (let f = 0; f < 25; f++) {
+    const cx = rand(0, W);
+    const cy = rand(groundStart + 10, H - 4);
+    const count = Math.floor(rand(3, 8));
+    const t = Math.random();
+    let fh, fs, fl;
+    if (t < 0.6) { fh = rand(340, 358); fs = rand(55, 80); fl = rand(62, 78); }
+    else if (t < 0.85) { fh = 0; fs = 0; fl = rand(75, 92); }
+    else { fh = rand(45, 60); fs = rand(70, 90); fl = rand(58, 72); }
+    for (let k = 0; k < count; k++) {
+      dots.push({
+        x: cx + rand(-6, 6),
+        y: cy + rand(-3, 3),
+        size: rand(1, 2),
+        h: fh, s: fs, l: fl,
+        a: rand(0.7, 1)
+      });
+    }
+  }
+
+  paintDots(dots);
+}
+
+function drawTreeAndLeaves() {
+  const trunkX = W * 0.92;
+  const trunkBase = H * 1.15;
+
+  const tips = [];
+  const segments = [];
+
+  // arc de courbe au lieu de segments droits : utilise un pas plus fin
+  function branch(x, y, angle, len, width, depth, curvature) {
+    if (depth === 0 || len < 2 || width < 0.3) {
+      tips.push({ x, y, depth });
+      return;
+    }
+
+    // segmente la branche en petits morceaux pour la courber
+    const STEPS = 8;
+    const stepLen = len / STEPS;
+    let cx = x, cy = y, a = angle;
+    for (let i = 0; i < STEPS; i++) {
+      const w = width * (1 - i / STEPS * 0.3);
+      const nx = cx + Math.cos(a) * stepLen;
+      const ny = cy + Math.sin(a) * stepLen;
+      segments.push({ x1: cx, y1: cy, x2: nx, y2: ny, w });
+      cx = nx; cy = ny;
+      a += curvature;
+    }
+
+    // tip principal
+    if (depth < 6) tips.push({ x: cx, y: cy, depth });
+
+    // pas de ramifications tant qu'on est dans le bas du tronc
+    if (cy > H * 0.55) {
+      branch(cx, cy, a + rand(-0.05, 0.05), len * 0.95, width * 0.95, depth - 1, curvature * 0.5 + rand(-0.005, 0.005));
+      return;
+    }
+
+    // ramifications organiques
+    const nb = depth > 6 ? 2 : (2 + (Math.random() < 0.35 ? 1 : 0));
+    for (let i = 0; i < nb; i++) {
+      const isMain = i === 0;
+      const sign = i === 0 ? -1 : (i === 1 ? 1 : (Math.random() < 0.5 ? -1 : 1));
+      // angle d'écartement : plus large dans la couronne
+      const spread = depth > 7 ? rand(0.25, 0.55) : rand(0.5, 1.1);
+      const na = a + sign * spread + rand(-0.1, 0.1);
+      // courbure qui ramène la branche vers la verticale (effet pleureur léger)
+      const targetAngle = -Math.PI / 2 + sign * 0.3;
+      const curve = (targetAngle - na) * 0.015 + rand(-0.01, 0.01);
+      const childLen = len * (isMain ? rand(0.72, 0.85) : rand(0.6, 0.75));
+      const childWidth = width * (isMain ? 0.7 : rand(0.45, 0.6));
+      branch(cx, cy, na, childLen, childWidth, depth - 1, curve);
+    }
+  }
+
+  // tronc principal avec légère courbure naturelle
+  branch(trunkX, trunkBase, -Math.PI / 2 - 0.35, H * 0.14, 32, 11, -0.008);
+
+  // tronc/branches en pointillisme
+  for (const s of segments) {
+    const dx = s.x2 - s.x1;
+    const dy = s.y2 - s.y1;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    const density = Math.max(6, Math.floor(len * s.w * 0.4));
+    const perpX = -dy / len;
+    const perpY = dx / len;
+    for (let i = 0; i < density; i++) {
+      const t = Math.random();
+      const px = s.x1 + dx * t;
+      const py = s.y1 + dy * t;
+      const offset = (Math.random() - 0.5) * s.w;
+      const x = px + perpX * offset;
+      const y = py + perpY * offset;
+      const size = rand(1, 2.5);
+      const r = Math.random();
+      let h, sat, l;
+      if (r < 0.6) { h = 20; sat = 8; l = rand(15, 25); }
+      else if (r < 0.85) { h = 25; sat = 12; l = rand(28, 40); }
+      else { h = 30; sat = 6; l = rand(42, 55); }
+      ctx.fillStyle = `hsl(${h}, ${sat}%, ${l}%)`;
+      ctx.globalAlpha = rand(0.7, 1);
+      ctx.beginPath();
+      ctx.arc(x, y, size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1;
+
+  // feuillage
+  leaves = [];
+  const dotsPerTip = Math.max(1, Math.floor((W * H) / 40 / tips.length));
+  for (const tip of tips) {
+    const spread = 30 + (10 - tip.depth) * 15;
+    for (let i = 0; i < dotsPerTip; i++) {
+      const a = rand(0, Math.PI * 2);
+      const r = Math.pow(Math.random(), 0.6) * spread;
+      const x = tip.x + Math.cos(a) * r;
+      const y = tip.y + Math.sin(a) * r * 0.9;
+      if (y > H * 0.78 || x > W * 0.99 || x < 0 || y < 0) continue;
+      const c = randomLeafColor();
+      leaves.push({ x, y, size: rand(2, 5), from: c, to: c, t: 1 });
+    }
+  }
+}
+
+function buildGrid() {
+  grid = {};
+  for (let i = 0; i < leaves.length; i++) {
+    const l = leaves[i];
+    const cx = Math.floor(l.x / cellSize);
+    const cy = Math.floor(l.y / cellSize);
+    const key = cx + ',' + cy;
+    if (!grid[key]) grid[key] = [];
+    grid[key].push(i);
+  }
+}
+
+function findNeighbor(leaf) {
+  const cx = Math.floor(leaf.x / cellSize);
+  const cy = Math.floor(leaf.y / cellSize);
+  const candidates = [];
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      const key = (cx + dx) + ',' + (cy + dy);
+      const cell = grid[key];
+      if (cell) for (const idx of cell) candidates.push(idx);
+    }
+  }
+  if (!candidates.length) return -1;
+  return candidates[Math.floor(Math.random() * candidates.length)];
+}
+
+function step() {
+  if (!leaves.length) return;
+  const N = Math.max(1, Math.floor(leaves.length * 0.0015));
+  for (let k = 0; k < N; k++) {
+    const i = Math.floor(Math.random() * leaves.length);
+    const li = leaves[i];
+    if (!li || li.t < 1) continue;
+    const j = findNeighbor(li);
+    if (j < 0 || j === i) continue;
+    const lj = leaves[j];
+    if (!lj || lj.t < 1) continue;
+    const ci = li.to, cj = lj.to;
+    li.from = ci; li.to = cj; li.t = 0;
+    lj.from = cj; lj.to = ci; lj.t = 0;
+  }
+  const dt = 0.015;
+  for (const l of leaves) if (l.t < 1) l.t = Math.min(1, l.t + dt);
+}
+
+function drawLeaves() {
+  // groupe les feuilles par couleur arrondie pour minimiser les changements de fillStyle
+  const buckets = {};
+  for (const l of leaves) {
+    const c = l.t >= 1 ? l.to : lerpHSL(l.from, l.to, l.t);
+    const key = `${(c[0] | 0)},${(c[1] | 0)},${(c[2] | 0)}`;
+    if (!buckets[key]) buckets[key] = [];
+    buckets[key].push(l);
+  }
+  for (const key in buckets) {
+    const [h, s, ll] = key.split(',');
+    ctx.fillStyle = `hsl(${h},${s}%,${ll}%)`;
+    ctx.beginPath();
+    for (const l of buckets[key]) {
+      ctx.moveTo(l.x + l.size, l.y);
+      ctx.arc(l.x, l.y, l.size, 0, Math.PI * 2);
+    }
+    ctx.fill();
+  }
+}
+
+function updateCRTFX() {
+  const t = time;
+  const basePix = 2.8 + Math.sin(t * 0.04) * 1 + Math.sin(t * 0.09) * 0.6;
+  const beatPhase = (t % 60) / 60;
+  let beatPix = 0;
+  if (beatPhase < 0.08) beatPix = 1.5;
+  else if (beatPhase > 0.5 && beatPhase < 0.55) beatPix = -1;
+  CRT.pixelSize = Math.max(2, Math.round(basePix + beatPix));
+
+  CRT.chromaShift = Math.sin(t * 0.04) * 0.8 + Math.sin(t * 0.011) * 1.2;
+  CRT.scanRoll = (t * 0.6) % 1000;
+  CRT.jitterX = 0;
+  CRT.jitterY = 0;
+  CRT.tearY = -1;
+  CRT.tearShift = 0;
+  CRT.invert = 0;
+
+  if (Math.random() < 0.03) {
+    CRT.jitterX = (Math.random() - 0.5) * 8;
+    CRT.jitterY = (Math.random() - 0.5) * 3;
+  }
+  if (Math.random() < 0.02) {
+    CRT.tearY = Math.random() * H;
+    CRT.tearShift = (Math.random() - 0.5) * 25;
+  }
+
+  CRT.brightness = 1.5 + Math.sin(t * 0.05) * 0.15;
+  CRT.blur = 0.3 + Math.abs(Math.sin(t * 0.008)) * 0.4;
+  CRT.glow = 0.15 + Math.abs(Math.sin(t * 0.02)) * 0.15;
+  CRT.distort = Math.max(0, Math.sin(t * 0.006)) * 3;
+}
+
+function applyCRT() {
+  updateCRTFX();
+
+  const pixelSize = CRT.pixelSize;
+  const lowCols = Math.ceil(W / pixelSize);
+  const lowRows = Math.ceil(H / pixelSize);
+  if (lowCanvas.width !== lowCols || lowCanvas.height !== lowRows) {
+    lowCanvas.width = lowCols;
+    lowCanvas.height = lowRows;
+  }
+
+  const sw = srcCanvas.width;
+  const sh = srcCanvas.height;
+  lowCtx.imageSmoothingEnabled = true;
+  lowCtx.drawImage(srcCanvas, 0, 0, sw, sh, 0, 0, lowCols, lowRows);
+
+  const imgData = lowCtx.getImageData(0, 0, lowCols, lowRows).data;
+
+  crtCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  crtCtx.fillStyle = '#000';
+  crtCtx.fillRect(0, 0, W, H);
+
+  // "respiration" : centre d'une zone nette qui se déplace lentement
+  const focusX = W * (0.5 + Math.sin(time * 0.003) * 0.3);
+  const focusY = H * (0.5 + Math.cos(time * 0.0025) * 0.25);
+  const focusRadius = W * (0.25 + Math.sin(time * 0.005) * 0.08);
+
+  // zones où le chroma shift s'applique : bandes verticales mouvantes
+  // largeur qui pulse selon le temps (s'élargit puis se rétracte)
+  const bandPulse = (Math.sin(time * 0.015) * 0.5 + 0.5); // 0..1
+  const chromaBandX = (Math.sin(time * 0.03) * 0.5 + 0.5) * W;
+  const chromaBandW = W * (0.03 + bandPulse * 0.18); // 3% à 21%
+  const chromaActive = Math.abs(CRT.chromaShift) > 0.5;
+
+  // bruit animé subtil sur taille/offset
+  const noiseTime = time * 0.02;
+
+  const baseRadius = pixelSize * 0.45;
+  const jx = CRT.jitterX;
+  const jy = CRT.jitterY;
+
+  for (let y = 0; y < lowRows; y++) {
+    for (let x = 0; x < lowCols; x++) {
+      const i = (y * lowCols + x) * 4;
+      const r = imgData[i];
+      const g = imgData[i + 1];
+      const b = imgData[i + 2];
+      if (r + g + b < 15) continue;
+
+      const cx = x * pixelSize + pixelSize / 2 + jx;
+      const cy = y * pixelSize + pixelSize / 2 + jy;
+
+      // luminosité perçue
+      const lum = (r * 0.299 + g * 0.587 + b * 0.114) / 255;
+
+      // taille selon luminosité : points clairs plus gros, points sombres plus fins
+      let radius = baseRadius * (0.55 + lum * 0.7);
+
+      // bruit de Perlin (animé) sur la taille
+      const noise = simplex.noise3D(x * 0.08, y * 0.08, time * 0.01) * 0.12;
+      radius *= 1 + noise;
+
+      // "respiration" : zone nette = points plus contrastés, zone floue = points adoucis
+      const distFocus = Math.sqrt((cx - focusX) ** 2 + (cy - focusY) ** 2);
+      const sharpness = Math.max(0, 1 - distFocus / focusRadius); // 1 net, 0 flou
+      const softness = 1 - sharpness * 0.5;
+      radius *= 0.85 + sharpness * 0.3;
+
+      // dans la bande de chroma, séparer R/G/B
+      const inChromaBand = chromaActive && Math.abs(cx - chromaBandX) < chromaBandW;
+
+      if (inChromaBand) {
+        const shift = CRT.chromaShift * 1.5;
+        crtCtx.globalCompositeOperation = 'lighter';
+        crtCtx.globalAlpha = 0.7;
+        crtCtx.fillStyle = `rgb(${r},0,0)`;
+        crtCtx.beginPath();
+        crtCtx.arc(cx - shift, cy, radius, 0, Math.PI * 2);
+        crtCtx.fill();
+        crtCtx.fillStyle = `rgb(0,${g},0)`;
+        crtCtx.beginPath();
+        crtCtx.arc(cx, cy, radius, 0, Math.PI * 2);
+        crtCtx.fill();
+        crtCtx.fillStyle = `rgb(0,0,${b})`;
+        crtCtx.beginPath();
+        crtCtx.arc(cx + shift, cy, radius, 0, Math.PI * 2);
+        crtCtx.fill();
+        crtCtx.globalAlpha = 1;
+        crtCtx.globalCompositeOperation = 'source-over';
+      } else {
+        crtCtx.globalAlpha = softness;
+        crtCtx.fillStyle = `rgb(${r},${g},${b})`;
+        crtCtx.beginPath();
+        crtCtx.arc(cx, cy, radius, 0, Math.PI * 2);
+        crtCtx.fill();
+      }
+    }
+  }
+  crtCtx.globalAlpha = 1;
+
+  // tear glitch (animé)
+  if (CRT.tearY >= 0) {
+    const srcY = (CRT.tearY / H) * lowRows;
+    crtCtx.drawImage(lowCanvas, 0, srcY, lowCols, 30 / H * lowRows,
+      CRT.tearShift, CRT.tearY, W, 30);
+  }
+
+  // rolling band
+  const rollY = (CRT.scanRoll % H);
+  const barH = H * 0.15;
+  crtCtx.globalCompositeOperation = 'lighter';
+  crtCtx.fillStyle = `rgba(255,255,255,0.04)`;
+  crtCtx.fillRect(0, rollY - barH, W, barH * 2);
+  crtCtx.globalCompositeOperation = 'source-over';
+
+  // vignettage
+  const vgrad = crtCtx.createRadialGradient(
+    W / 2, H / 2, Math.min(W, H) * 0.3,
+    W / 2, H / 2, Math.max(W, H) * 0.75
+  );
+  vgrad.addColorStop(0, 'rgba(0,0,0,0)');
+  vgrad.addColorStop(0.6, 'rgba(0,0,0,0.25)');
+  vgrad.addColorStop(1, 'rgba(0,0,0,0.85)');
+  crtCtx.fillStyle = vgrad;
+  crtCtx.fillRect(0, 0, W, H);
+}
+
+function init() {
+  drawBackground();
+  drawTreeAndLeaves();
+  bgCanvas = document.createElement('canvas');
+  bgCanvas.width = W * DPR;
+  bgCanvas.height = H * DPR;
+  const bgCtx = bgCanvas.getContext('2d');
+  bgCtx.drawImage(srcCanvas, 0, 0);
+  buildGrid();
+  if (rafId) cancelAnimationFrame(rafId);
+  // démarre l'anim au prochain frame pour laisser le navigateur respirer
+  requestAnimationFrame(() => requestAnimationFrame(loop));
+}
+
+function loop() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(bgCanvas, 0, 0);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  step();
+  drawLeaves();
+  applyCRT();
+  time++;
+  rafId = requestAnimationFrame(loop);
+}
+
+let resizeTimer = null;
+function resize() {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(doResize, 150);
+}
+function doResize() {
+  const rect = srcCanvas.parentElement.getBoundingClientRect();
+  const s = Math.floor(Math.min(rect.width, rect.height));
+  if (s === W) return; // skip if size unchanged
+  W = s;
+  H = s;
+
+  srcCanvas.width = s * DPR;
+  srcCanvas.height = s * DPR;
+  srcCanvas.style.width = s + 'px';
+  srcCanvas.style.height = s + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+  crtCanvas.width = s * DPR;
+  crtCanvas.height = s * DPR;
+  crtCanvas.style.width = s + 'px';
+  crtCanvas.style.height = s + 'px';
+
+  phosphorPattern = null;
+  scanlinePattern = null;
+
+  init();
+}
+window.addEventListener('resize', resize);
+doResize();
+</script>
+</body>
+</html>
