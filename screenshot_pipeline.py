@@ -21,7 +21,7 @@ VIEWPORT = {"width": 800, "height": 600}
 SSH_HOST = "fournier-digital.ch"
 SSH_PORT = 22
 SSH_USER = "almalinux"
-REMOTE_DIR = "/home/almalinux/upstride_ch"
+REMOTE_DIR = "/opt/www/upstride_ch"
 SYNC_PATHS = ["index.html", "artworks.json", "intarynx.jpg", "favicon.ico", "artworks", "screenshots"]
 
 # ── Git config ──
