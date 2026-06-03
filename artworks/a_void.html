@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>arty void</title>
+<style>
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #0a0a0a;
+    padding: 20px;
+    box-sizing: border-box;
+  }
+  .frame {
+    width: min(92vw, 92vh, 820px);
+    aspect-ratio: 1 / 1;
+  }
+  canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+    box-shadow: 0 40px 100px rgba(0,0,0,0.8);
+  }
+</style>
+</head>
+<body>
+  <div class="frame">
+    <canvas id="art" width="1400" height="1400"></canvas>
+  </div>
+
+<script>
+// arty void
+//
+// un ciel, des montagnes, des ombres.
+// toutes les trois secondes, ça se retourne.
+// rien d'autre.
+
+const visibleCanvas = document.getElementById('art');
+const visibleCtx = visibleCanvas.getContext('2d');
+const W = visibleCanvas.width, H = visibleCanvas.height;
+const HORIZON = H * 0.58;
+
+const sceneCanvas = document.createElement('canvas');
+sceneCanvas.width = W; sceneCanvas.height = H;
+const ctx = sceneCanvas.getContext('2d');
+
+// le ciel
+const bgCanvas = document.createElement('canvas');
+bgCanvas.width = W; bgCanvas.height = H;
+const bg = bgCanvas.getContext('2d');
+
+bg.fillStyle = '#0a1a14';
+bg.fillRect(0, 0, W, H);
+
+function paintField(y0, y1, baseColors) {
+  const steps = 200;
+  for (let i = 0; i < steps; i++) {
+    const t = i / steps;
+    const y = y0 + (y1 - y0) * t;
+    const h = (y1 - y0) / steps + 2;
+    const cIdx = t * (baseColors.length - 1);
+    const i0 = Math.floor(cIdx);
+    const i1 = Math.min(i0 + 1, baseColors.length - 1);
+    const lt = cIdx - i0;
+    const col = baseColors[i0].map((v, k) => v + (baseColors[i1][k] - v) * lt);
+    bg.fillStyle = `rgb(${col[0]|0},${col[1]|0},${col[2]|0})`;
+    bg.fillRect(0, y, W, h);
+  }
+}
+paintField(0, H * 0.58, [[10,58,42],[18,92,68],[22,112,82],[16,78,58],[10,48,36]]);
+paintField(H * 0.55, H * 0.68, [[10,48,36],[12,32,26],[10,22,20],[8,16,16]]);
+paintField(H * 0.66, H, [[8,16,16],[6,12,14],[5,10,12],[4,8,10]]);
+
+function pigmentCloud(c2, x, y, radius, color) {
+  const g = c2.createRadialGradient(x, y, 0, x, y, radius);
+  g.addColorStop(0, color);
+  g.addColorStop(1, color.replace(/[\d.]+\)$/, '0)'));
+  c2.fillStyle = g;
+  c2.beginPath();
+  c2.arc(x, y, radius, 0, Math.PI * 2);
+  c2.fill();
+}
+for (let i = 0; i < 25; i++) {
+  const x = Math.random() * W, y = Math.random() * H * 0.55;
+  const r = 80 + Math.random() * 280;
+  const warm = Math.random() < 0.5;
+  const col = warm
+    ? `rgba(${30 + Math.random()*30}, ${140 + Math.random()*40}, ${100 + Math.random()*30}, ${0.06 + Math.random()*0.08})`
+    : `rgba(${5 + Math.random()*10}, ${25 + Math.random()*15}, ${20 + Math.random()*10}, ${0.1 + Math.random()*0.12})`;
+  pigmentCloud(bg, x, y, r, col);
+}
+for (let i = 0; i < 20; i++) {
+  const x = Math.random() * W;
+  const y = H * 0.68 + Math.random() * H * 0.32;
+  const r = 100 + Math.random() * 300;
+  pigmentCloud(bg, x, y, r, `rgba(${5 + Math.random()*15}, ${20 + Math.random()*15}, ${18 + Math.random()*15}, ${0.08 + Math.random()*0.1})`);
+}
+
+// les montagnes
+function seededRand(seed) {
+  let s = seed;
+  return () => { s = (s * 9301 + 49297) % 233280; return s / 233280; };
+}
+function makeNoise1D(seed, n = 128) {
+  const rand = seededRand(seed);
+  const vals = Array.from({length: n}, () => rand() * 2 - 1);
+  return (t) => {
+    const x = t * n;
+    const i = Math.floor(x);
+    const f = x - i;
+    const a = vals[((i) % n + n) % n];
+    const b = vals[((i + 1) % n + n) % n];
+    const u = f * f * (3 - 2 * f);
+    return a * (1 - u) + b * u;
+  };
+}
+function buildCrest(xStart, xEnd, baseY, amp, seed, detailScale, nPoints = 400) {
+  const low = makeNoise1D(seed, 8);
+  const mid = makeNoise1D(seed + 1, 24);
+  const hi = makeNoise1D(seed + 2, 80);
+  const pts = [];
+  for (let i = 0; i <= nPoints; i++) {
+    const tt = i / nPoints;
+    const x = xStart + (xEnd - xStart) * tt;
+    const ts = tt * detailScale;
+    const v = Math.abs(low(ts)) * 1.0 + Math.abs(mid(ts * 1.7 + 0.3)) * 0.55 + Math.abs(hi(ts * 3.1 + 0.9)) * 0.25;
+    pts.push({x, y: baseY - v * amp, t: tt});
+  }
+  return pts;
+}
+function findPeaksAndSaddles(crest, minSpacing = 25) {
+  const peaks = [], saddles = [];
+  for (let i = 2; i < crest.length - 2; i++) {
+    const y = crest[i].y;
+    if (y < crest[i-1].y && y < crest[i-2].y && y < crest[i+1].y && y < crest[i+2].y) {
+      if (peaks.length === 0 || i - peaks[peaks.length-1].i >= minSpacing) peaks.push({...crest[i], i});
+    }
+    if (y > crest[i-1].y && y > crest[i-2].y && y > crest[i+1].y && y > crest[i+2].y) {
+      if (saddles.length === 0 || i - saddles[saddles.length-1].i >= minSpacing) saddles.push({...crest[i], i});
+    }
+  }
+  return { peaks, saddles };
+}
+function descendingRidge(sx, sy, baseY, side, length, roughness, seed, steps = 40) {
+  const noise = makeNoise1D(seed, 32);
+  const pts = [{x: sx, y: sy}];
+  const targetX = sx + side * length * 0.5;
+  const targetY = Math.min(baseY, sy + length);
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    const baseX = sx + (targetX - sx) * t;
+    const baseYInterp = sy + (targetY - sy) * t;
+    const atten = Math.sin(t * Math.PI * 0.8);
+    const offset = noise(t) * roughness * atten;
+    const dx = targetX - sx, dy = targetY - sy;
+    const len = Math.sqrt(dx*dx + dy*dy) || 1;
+    const nxu = -dy / len, nyu = dx / len;
+    pts.push({ x: baseX + nxu * offset, y: baseYInterp + nyu * offset * 0.3 });
+  }
+  return pts;
+}
+
+const BG_CONFIG = { xStart: -20, xEnd: W + 20, baseY: HORIZON + 50, amp: 90, seed: 100, detail: 5, color: 'rgba(232, 80, 130, 0.35)', fill: 'rgba(232, 80, 130, 0.04)', width: 1.0, ridgeLength: 80, ridgeRough: 12, waveScale: 0.35, phase: 0 };
+const MID_CONFIG = { xStart: -40, xEnd: W + 40, baseY: HORIZON + 180, amp: 180, seed: 400, detail: 3.5, color: 'rgba(232, 80, 130, 0.6)', fill: 'rgba(232, 80, 130, 0.07)', width: 1.4, ridgeLength: 180, ridgeRough: 28, waveScale: 0.65, phase: 1.7 };
+const FG_CONFIG = { xStart: -60, xEnd: W + 60, baseY: HORIZON + 360, amp: 240, seed: 700, detail: 2.5, color: 'rgba(232, 80, 130, 0.92)', fill: 'rgba(232, 80, 130, 0.12)', peakFill: 'rgba(8, 8, 8, 1)', peakThreshold: 0.55, width: 1.8, ridgeLength: 340, ridgeRough: 48, waveScale: 1.0, phase: 3.1 };
+
+function buildRangeGeometry(config) {
+  const { xStart, xEnd, baseY, amp, seed, detail, ridgeLength, ridgeRough } = config;
+  const crest = buildCrest(xStart, xEnd, baseY, amp, seed, detail, 600);
+  const { peaks, saddles } = findPeaksAndSaddles(crest);
+  const tagT = (pts) => pts.map(p => ({ ...p, t: (p.x - xStart) / (xEnd - xStart) }));
+  const ridges = [];
+  peaks.forEach((p, idx) => {
+    ridges.push(tagT(descendingRidge(p.x, p.y, baseY + ridgeLength, -1, ridgeLength * (0.8 + (idx % 3) * 0.15), ridgeRough, seed + idx * 31 + 7)));
+    ridges.push(tagT(descendingRidge(p.x, p.y, baseY + ridgeLength, 1, ridgeLength * (0.8 + ((idx + 1) % 3) * 0.15), ridgeRough, seed + idx * 31 + 13)));
+  });
+  saddles.forEach((s, idx) => {
+    const side = (idx % 2 === 0) ? -1 : 1;
+    ridges.push(tagT(descendingRidge(s.x, s.y, baseY + ridgeLength * 0.7, side, ridgeLength * 0.6, ridgeRough * 0.7, seed + idx * 17 + 101)));
+  });
+  const hatches = [];
+  for (let k = 0; k < ridges.length - 1; k += 2) {
+    const a = ridges[k], b = ridges[k + 1];
+    if (!a || !b) continue;
+    for (let j = 0; j < 3; j++) {
+      const tt = 0.3 + j * 0.2;
+      const ia = Math.floor(tt * (a.length - 1));
+      const ib = Math.floor(tt * (b.length - 1));
+      const pa = a[ia], pb = b[ib];
+      if (!pa || !pb) continue;
+      hatches.push({ pa: { ...pa }, pb: { ...pb }, midOffsetY: 4 });
+    }
+  }
+  return { crest, ridges, hatches };
+}
+
+const BG_GEO = buildRangeGeometry(BG_CONFIG);
+const MID_GEO = buildRangeGeometry(MID_CONFIG);
+const FG_GEO = buildRangeGeometry(FG_CONFIG);
+
+// Temps organique : la dérivée de la phase varie lentement entre ~0.15 et ~1.
+// On intègre ça dans une variable globale `mountainTime` mise à jour chaque frame.
+let mountainTime = 0;
+function breathFactor(t) {
+  // somme de sinus incommensurables → motif non périodique perceptible
+  const a = Math.sin(t * 0.13 + 0.7);
+  const b = Math.sin(t * 0.071 + 2.3);
+  const c = Math.sin(t * 0.029 - 1.1);
+  const raw = (a * 0.55 + b * 0.3 + c * 0.15); // [-1, 1] env.
+  // remap vers [0.08, 1.0] avec des creux plus marqués (souffle qui retient)
+  const n = (raw + 1) / 2; // [0,1]
+  const eased = Math.pow(n, 1.6);
+  return 0.08 + eased * 0.92;
+}
+
+function waveOffset(tNorm, t, scale, phase) {
+  return Math.sin(tNorm * Math.PI * 2 * 14 + t * 4 + phase) * 18 * scale
+       + Math.sin(tNorm * Math.PI * 2 * 31 - t * 7 + phase * 1.3) * 10 * scale
+       + Math.sin(tNorm * Math.PI * 2 * 57 + t * 11 + phase * 0.7) * 5 * scale;
+}
+
+function smoothStroke(getPoint, n) {
+  if (n < 2) return;
+  const p0 = getPoint(0);
+  ctx.moveTo(p0.x, p0.y);
+  if (n === 2) {
+    const p1 = getPoint(1);
+    ctx.lineTo(p1.x, p1.y);
+    return;
+  }
+  for (let i = 1; i < n - 1; i++) {
+    const pi = getPoint(i);
+    const pn = getPoint(i + 1);
+    const mx = (pi.x + pn.x) / 2;
+    const my = (pi.y + pn.y) / 2;
+    ctx.quadraticCurveTo(pi.x, pi.y, mx, my);
+  }
+  const last = getPoint(n - 1);
+  ctx.quadraticCurveTo(last.x, last.y, last.x, last.y);
+}
+
+function drawAnimatedRange(geo, config, t, fillDir) {
+  const { waveScale, phase, color, fill, peakFill, peakThreshold, width } = config;
+  const hatchColor = color.replace(/[\d.]+\)$/, (parseFloat(color.match(/[\d.]+(?=\))/)[0]) * 0.4) + ')');
+
+  if (fill) {
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    const edgeY = fillDir === 'up' ? -10 : H + 10;
+    const first = geo.crest[0];
+    ctx.moveTo(first.x, edgeY);
+    for (let i = 0; i < geo.crest.length; i++) {
+      const p = geo.crest[i];
+      const y = p.y + waveOffset(p.t, t, waveScale, phase);
+      if (i === 0) ctx.lineTo(p.x, y);
+      else {
+        const pn = geo.crest[Math.min(i + 1, geo.crest.length - 1)];
+        const yn = pn.y + waveOffset(pn.t, t, waveScale, phase);
+        const mx = (p.x + pn.x) / 2;
+        const my = (y + yn) / 2;
+        ctx.quadraticCurveTo(p.x, y, mx, my);
+      }
+    }
+    const last = geo.crest[geo.crest.length - 1];
+    ctx.lineTo(last.x, edgeY);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  if (peakFill && fillDir !== 'up') {
+    let yMin = Infinity, yMax = -Infinity;
+    for (const p of geo.crest) {
+      const y = p.y + waveOffset(p.t, t, waveScale, phase);
+      if (y < yMin) yMin = y;
+      if (y > yMax) yMax = y;
+    }
+    const cutY = yMin + (yMax - yMin) * peakThreshold;
+    const grad = ctx.createLinearGradient(0, yMin, 0, cutY);
+    const m = peakFill.match(/rgba?\(([^)]+)\)/);
+    const parts = m[1].split(',').map(s => s.trim());
+    const r = parts[0], g = parts[1], b = parts[2];
+    grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, 1)`);
+    grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i < geo.crest.length; i++) {
+      const p = geo.crest[i];
+      const y = p.y + waveOffset(p.t, t, waveScale, phase);
+      if (y <= cutY) {
+        if (!started) { ctx.moveTo(p.x, cutY); ctx.lineTo(p.x, y); started = true; }
+        else ctx.lineTo(p.x, y);
+      } else {
+        if (started) { ctx.lineTo(p.x, cutY); ctx.closePath(); ctx.fill(); ctx.beginPath(); started = false; }
+      }
+    }
+    if (started) {
+      const lastP = geo.crest[geo.crest.length - 1];
+      ctx.lineTo(lastP.x, cutY);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width * 0.85;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  for (const r of geo.ridges) {
+    ctx.beginPath();
+    smoothStroke(i => {
+      const p = r[i];
+      return { x: p.x, y: p.y + waveOffset(p.t, t, waveScale, phase) };
+    }, r.length);
+    ctx.stroke();
+  }
+
+  ctx.strokeStyle = hatchColor;
+  ctx.lineWidth = width * 0.4;
+  for (const h of geo.hatches) {
+    const yA = h.pa.y + waveOffset(h.pa.t, t, waveScale, phase);
+    const yB = h.pb.y + waveOffset(h.pb.t, t, waveScale, phase);
+    const midY = (yA + yB) / 2 + h.midOffsetY;
+    ctx.beginPath();
+    ctx.moveTo(h.pa.x, yA);
+    ctx.quadraticCurveTo((h.pa.x + h.pb.x) / 2, midY, h.pb.x, yB);
+    ctx.stroke();
+  }
+
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.beginPath();
+  smoothStroke(i => {
+    const p = geo.crest[i];
+    return { x: p.x, y: p.y + waveOffset(p.t, t, waveScale, phase) };
+  }, geo.crest.length);
+  ctx.stroke();
+}
+
+// la foule
+function buildCrowd(count, seed) {
+  const rand = seededRand(seed);
+  const figures = [];
+  
+  // On répartit en quelques rangs implicites (z biaisé vers l'avant mais avec
+  // une distribution plus nette que pow 0.6).
+  for (let i = 0; i < count; i++) {
+    const z = Math.pow(rand(), 0.45);
+    // Espacement horizontal régulier perturbé légèrement
+    const worldX = (rand() - 0.5) * 2;
+    
+    // Largeur du plan augmente avec z (perspective)
+    const screenX = W / 2 + worldX * (W * 0.6) * (0.2 + z * 1.1);
+    
+    const groundY = HORIZON + 90 + z * (H - HORIZON - 50);
+    const scale = 0.5 + z * 4.2;
+    
+    const armsUp = rand() < 0.35;
+    const armSpread = 0.5 + rand() * 0.5;
+    figures.push({ x: screenX, yBase: groundY, scale, armsUp, armSpread, depth: z });
+  }
+  figures.sort((a, b) => a.depth - b.depth);
+  return figures;
+}
+
+const CROWD = buildCrowd(70, 42);
+
+// Canvas offscreen : on dessine la foule UNE FOIS avec ombres et flou, puis on la copie.
+const crowdCanvas = document.createElement('canvas');
+crowdCanvas.width = W; crowdCanvas.height = H;
+const cc = crowdCanvas.getContext('2d');
+
+// Source lumineuse : le carré au centre du ciel.
+const LIGHT_X = W / 2;
+const LIGHT_Y = HORIZON / 2;
+
+// Source lumineuse : le carré au centre du ciel (en haut, devant).
+// La lumière descend → les ombres tombent vers le bas, en s'écartant latéralement
+// selon la position de la figure par rapport à l'axe central.
+for (const f of CROWD) {
+  const dx = f.x - LIGHT_X;
+  const shearX = dx / W * 0.6;
+  const flattenY = -0.25;
+  const shadowAlpha = 0.3 + f.depth * 0.35;
+  
+  cc.save();
+  cc.translate(f.x, f.yBase);
+  cc.transform(1, 0, shearX, flattenY, 0, 0);
+  cc.translate(-f.x, -f.yBase);
+  drawFigure(cc, f, `rgba(0, 0, 0, ${shadowAlpha})`);
+  cc.restore();
+}
+
+// Figures — pas de flou, juste un rendu net
+for (const f of CROWD) {
+  const alpha = 0.4 + f.depth * 0.55;
+  drawFigure(cc, f, `rgba(8, 8, 12, ${alpha})`);
+}
+
+function drawFigure(ctx, f, color) {
+  ctx.fillStyle = color;
+  ctx.strokeStyle = color;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  
+  const s = f.scale;
+  const cx = f.x;
+  // Canon : 7 têtes pour silhouette complète. Les pieds sont à f.yBase.
+  const headR = 4.5 * s;
+  const headD = headR * 2;
+  const totalH = headD * 7;
+  const topY = f.yBase - totalH;
+  
+  // Tête
+  const headCY = topY + headR;
+  ctx.beginPath();
+  ctx.arc(cx, headCY, headR, 0, Math.PI * 2);
+  ctx.fill();
+  
+  // Cou
+  const neckY = headCY + headR;
+  const shoulderY = neckY + headR * 0.4;
+  ctx.lineWidth = headR * 0.7;
+  ctx.beginPath();
+  ctx.moveTo(cx, neckY);
+  ctx.lineTo(cx, shoulderY);
+  ctx.stroke();
+  
+  // Torse (épaules → taille → hanches)
+  const shoulderW = headR * 1.7;
+  const waistW = headR * 1.2;
+  const hipW = headR * 1.5;
+  const torsoMidY = shoulderY + headD * 1.4;
+  const hipY = shoulderY + headD * 2.4;
+  
+  ctx.beginPath();
+  ctx.moveTo(cx - shoulderW, shoulderY);
+  ctx.quadraticCurveTo(cx - waistW * 0.95, torsoMidY, cx - hipW, hipY);
+  ctx.lineTo(cx + hipW, hipY);
+  ctx.quadraticCurveTo(cx + waistW * 0.95, torsoMidY, cx + shoulderW, shoulderY);
+  ctx.closePath();
+  ctx.fill();
+  
+  // Jambes : hanches → genoux → pieds
+  const legWidth = headR * 1.5;
+  const upperLegLen = headD * 1.7;
+  const lowerLegLen = headD * 1.7;
+  const kneeY = hipY + upperLegLen;
+  const footY = f.yBase;
+  const stance = headR * 0.5; // écartement des pieds
+  
+  ctx.lineWidth = legWidth;
+  // Jambe gauche
+  ctx.beginPath();
+  ctx.moveTo(cx - hipW * 0.55, hipY);
+  ctx.lineTo(cx - hipW * 0.55, kneeY);
+  ctx.lineTo(cx - stance, footY);
+  ctx.stroke();
+  // Jambe droite
+  ctx.beginPath();
+  ctx.moveTo(cx + hipW * 0.55, hipY);
+  ctx.lineTo(cx + hipW * 0.55, kneeY);
+  ctx.lineTo(cx + stance, footY);
+  ctx.stroke();
+  
+  // Bras
+  const armWidth = headR * 0.7;
+  const upperArmLen = headD * 1.3;
+  const forearmLen = headD * 1.2;
+  
+  function drawArm(side) {
+    const sx = cx + side * shoulderW * 0.85;
+    const sy = shoulderY + headR * 0.2;
+    let elbowX, elbowY, handX, handY;
+    
+    if (f.armsUp) {
+      elbowX = sx + side * upperArmLen * 0.45;
+      elbowY = sy - upperArmLen * 0.85;
+      handX = elbowX + side * forearmLen * 0.15;
+      handY = elbowY - forearmLen * 0.95;
+    } else {
+      elbowX = sx + side * upperArmLen * 0.15;
+      elbowY = sy + upperArmLen * 0.95;
+      handX = elbowX + side * forearmLen * 0.05;
+      handY = elbowY + forearmLen * 0.9;
+    }
+    
+    ctx.lineWidth = armWidth;
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(elbowX, elbowY);
+    ctx.lineTo(handX, handY);
+    ctx.stroke();
+    
+    if (f.armsUp) {
+      ctx.beginPath();
+      ctx.arc(handX, handY, armWidth * 0.7, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  
+  drawArm(-1);
+  drawArm(1);
+}
+// le vent
+const OVERSCAN = 200;
+const SIM_W = W + OVERSCAN * 2;
+const wCanvas = document.createElement('canvas');
+wCanvas.width = SIM_W; wCanvas.height = H;
+const wc = wCanvas.getContext('2d');
+
+const PARTICLE_COUNT = 2200;
+const particles = [];
+
+let flipped = false;
+
+function spawnParticle(p, fromEdge = false) {
+  if (fromEdge) {
+    p.x = flipped ? W + Math.random() * 30 : -OVERSCAN + Math.random() * 30;
+  } else {
+    p.x = -OVERSCAN + Math.random() * SIM_W;
+  }
+  p.y = Math.random() * HORIZON;
+  p.life = 80 + Math.random() * 220;
+  p.age = 0;
+  p.speed = 0.6 + Math.random() * 1.3;
+}
+for (let i = 0; i < PARTICLE_COUNT; i++) {
+  const p = {};
+  spawnParticle(p);
+  p.age = Math.random() * p.life;
+  particles.push(p);
+}
+
+function windAngleAt(x, y, t) {
+  const nx = x / W, ny = y / H;
+  const dir = flipped ? Math.PI : 0;
+  return dir
+       + Math.sin(nx * Math.PI * 1.8 + 0.4 + t * 0.15) * 0.5
+       + Math.cos(ny * Math.PI * 2.4 - 0.2 + t * 0.1) * 0.35
+       + Math.sin((nx * 2 + ny * 1.3) * Math.PI + t * 0.2) * 0.25;
+}
+function windDensityAt(x, y) {
+  const t = y / HORIZON;
+  const vertical = Math.sin(t * Math.PI) * 0.9 + 0.1;
+  const gust = 0.7 + 0.3 * Math.sin(x / W * Math.PI * 2.1 + 1.2);
+  return Math.max(0, vertical * gust);
+}
+
+// boucle
+let time = 0;
+let lastFlipTime = 0;
+
+function frame() {
+  time += 0.016;
+  mountainTime += 0.016 * breathFactor(time);
+
+  if (time - lastFlipTime >= 3) {
+    flipped = !flipped;
+    lastFlipTime = time;
+  }
+
+  wc.globalCompositeOperation = 'destination-out';
+  wc.fillStyle = 'rgba(0,0,0,0.05)';
+  wc.fillRect(0, 0, SIM_W, H);
+  wc.globalCompositeOperation = 'source-over';
+
+  wc.lineCap = 'round';
+  for (const p of particles) {
+    const a = windAngleAt(p.x, p.y, time);
+    const dens = windDensityAt(p.x, p.y);
+    const speed = p.speed * (0.4 + dens);
+    const nx = p.x + Math.cos(a) * speed;
+    const ny = p.y + Math.sin(a) * speed;
+    const ageT = p.age / p.life;
+    const envelope = Math.sin(ageT * Math.PI);
+    const alpha = (0.08 + dens * 0.18) * envelope;
+    wc.strokeStyle = `rgba(245, 240, 232, ${alpha})`;
+    wc.lineWidth = 0.4 + dens * 0.9;
+    wc.beginPath();
+    wc.moveTo(p.x + OVERSCAN, p.y);
+    wc.lineTo(nx + OVERSCAN, ny);
+    wc.stroke();
+    p.x = nx; p.y = ny; p.age++;
+    if (p.age >= p.life || p.y < -20 || p.y > HORIZON) spawnParticle(p);
+    else if (p.x > W + OVERSCAN + 20) spawnParticle(p, true);
+    else if (p.x < -OVERSCAN - 20) spawnParticle(p, true);
+  }
+
+  // ciel + vent (flippés ensemble)
+  ctx.save();
+  ctx.clearRect(0, 0, W, H);
+  if (flipped) {
+    ctx.translate(0, H);
+    ctx.scale(1, -1);
+  }
+  ctx.drawImage(bgCanvas, 0, 0);
+  ctx.drawImage(wCanvas, OVERSCAN, 0, W, H, 0, 0, W, H);
+  ctx.restore();
+
+  // un carré dans un cercle
+  ctx.save();
+  const skyCenterY = flipped ? H - HORIZON / 2 : HORIZON / 2;
+  ctx.translate(W / 2, skyCenterY);
+
+  const circleR = 140;
+  const sq = circleR * Math.SQRT2;
+  const half = sq / 2;
+  const angle = time * 0.5 * (flipped ? -1 : 1);
+  
+  const cs = Math.cos(angle), sn = Math.sin(angle);
+  const corners = [
+    [-half, -half], [half, -half], [half, half], [-half, half]
+  ].map(([x, y]) => [x * cs - y * sn, x * sn + y * cs]);
+  
+  // Fond du carré : on y dessine le ciel (bgCanvas) sans le vent, clippé au carré tourné.
+  // Quand flipped, on dessine le bg flippé verticalement pour rester cohérent avec le ciel autour.
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(corners[0][0], corners[0][1]);
+  for (let i = 1; i < 4; i++) ctx.lineTo(corners[i][0], corners[i][1]);
+  ctx.closePath();
+  ctx.clip();
+  if (flipped) {
+    // Flip vertical autour de notre origine locale
+    ctx.scale(1, -1);
+    ctx.drawImage(bgCanvas, -W / 2, -(H - skyCenterY));
+  } else {
+    ctx.drawImage(bgCanvas, -W / 2, -skyCenterY);
+  }
+  ctx.restore();
+  
+  // Remplissage entre cercle et carré (mode evenodd)
+  ctx.fillStyle = 'rgba(245, 240, 232, 1)';
+  ctx.beginPath();
+  ctx.arc(0, 0, circleR, 0, Math.PI * 2, false);
+  ctx.moveTo(corners[0][0], corners[0][1]);
+  for (let i = 3; i >= 0; i--) {
+    ctx.lineTo(corners[i][0], corners[i][1]);
+  }
+  ctx.closePath();
+  ctx.fill('evenodd');
+  
+  // Formes géométriques récursives à l'intérieur du carré.
+  // On entre dans le système de coordonnées tourné du carré, puis on dessine
+  // une suite de carrés concentriques alternés, chacun tourné de 45° par rapport
+  // au précédent. Récursion par taille décroissante.
+  ctx.rotate(angle);
+  
+  function recursiveShape(size, depth, rot) {
+    if (depth === 0 || size < 4) return;
+    ctx.save();
+    ctx.rotate(rot);
+    
+    // Carré (ou losange si rot ≠ 0)
+    const alpha = 0.4 + (1 - depth / 6) * 0.5;
+    ctx.strokeStyle = `rgba(245, 240, 232, ${alpha})`;
+    ctx.lineWidth = 2.5 + depth * 0.7;
+    ctx.lineJoin = 'round';
+    ctx.strokeRect(-size / 2, -size / 2, size, size);
+    
+    // Triangles blancs remplis dans les 4 coins entre ce carré et le losange inscrit.
+    // Le losange inscrit a ses sommets aux milieux des côtés du carré.
+    // Chaque coin du carré forme donc un triangle rectangle isocèle avec ces deux milieux.
+    const h = size / 2;
+    const fillAlpha = 0.85 + (1 - depth / 6) * 0.15;
+    ctx.fillStyle = `rgba(245, 240, 232, ${fillAlpha})`;
+    const corners = [
+      [[-h, -h], [0, -h], [-h, 0]], // haut-gauche
+      [[ h, -h], [ h, 0], [0, -h]], // haut-droit
+      [[ h,  h], [0,  h], [ h, 0]], // bas-droit
+      [[-h,  h], [-h, 0], [0,  h]], // bas-gauche
+    ];
+    for (const tri of corners) {
+      ctx.beginPath();
+      ctx.moveTo(tri[0][0], tri[0][1]);
+      ctx.lineTo(tri[1][0], tri[1][1]);
+      ctx.lineTo(tri[2][0], tri[2][1]);
+      ctx.closePath();
+      ctx.fill();
+    }
+    
+    ctx.restore();
+    // Récursion : taille × cos(45°) ≈ 0.707 (pour qu'un losange inscrit tienne dans le carré)
+    recursiveShape(size * Math.SQRT1_2, depth - 1, rot + Math.PI / 4);
+  }
+  
+  recursiveShape(sq * 0.85, 6, 0);
+  
+  ctx.restore();
+
+  // montagnes — décalées vers le haut quand le sens s'inverse
+  ctx.save();
+  if (flipped) {
+    ctx.translate(0, -(H - HORIZON) - 80);
+  }
+  const fillDir = flipped ? 'up' : 'down';
+  drawAnimatedRange(BG_GEO, BG_CONFIG, mountainTime, fillDir);
+  drawAnimatedRange(MID_GEO, MID_CONFIG, mountainTime, fillDir);
+  drawAnimatedRange(FG_GEO, FG_CONFIG, mountainTime, fillDir);
+  ctx.restore();
+  
+  // foule — précalculée, juste un drawImage chaque frame
+  ctx.save();
+  if (flipped) {
+    ctx.translate(0, H);
+    ctx.scale(1, -1);
+  }
+  ctx.drawImage(crowdCanvas, 0, 0);
+  ctx.restore();
+
+  visibleCtx.drawImage(sceneCanvas, 0, 0);
+
+  // vignettage
+  const vg = visibleCtx.createRadialGradient(W / 2, H / 2, W * 0.35, W / 2, H / 2, W * 0.78);
+  vg.addColorStop(0, 'rgba(0, 0, 0, 0)');
+  vg.addColorStop(0.6, 'rgba(0, 0, 0, 0.25)');
+  vg.addColorStop(1, 'rgba(0, 0, 0, 0.85)');
+  visibleCtx.fillStyle = vg;
+  visibleCtx.fillRect(0, 0, W, H);
+
+  requestAnimationFrame(frame);
+}
+
+frame();
+</script>
+</body>
+</html>

@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body { margin: 0; overflow: hidden; background: #222; display: flex; align-items: center; justify-content: center; height: 100vh; }
+  .wrap { position: relative; }
+  canvas { display: block; box-shadow: 0 10px 40px rgba(0,0,0,0.4); border-radius: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<canvas id="c"></canvas>
+</div>
+<script>
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let W, H;
+let mountains = [];
+
+const bgClouds = Array.from({length: 5}, () => ({
+  x: Math.random() * 1000, y: 50 + Math.random() * 200,
+  s: 0.5 + Math.random() * 0.5, v: 0.2 + Math.random() * 0.3
+}));
+
+const cloud = {
+  x: 0, y: 0, vx: 0, vy: 0,
+  targetX: 0, targetY: 0,
+  t: 0, raining: false, snowing: false,
+  scale: 1, targetScale: 1,
+  darkness: 0, targetDarkness: 0,
+  tornado: 0, targetTornado: 0,
+  cold: 0, targetCold: 0,
+  modeTimer: 0
+};
+
+const cloudCv = document.createElement('canvas');
+const cloudCtx = cloudCv.getContext('2d');
+const CW = 360, CH = 360;
+cloudCv.width = CW; cloudCv.height = CH;
+
+const perm = new Uint8Array(512);
+for (let i = 0; i < 256; i++) perm[i] = i;
+for (let i = 255; i > 0; i--) {
+  const j = (Math.random() * (i + 1)) | 0;
+  [perm[i], perm[j]] = [perm[j], perm[i]];
+}
+for (let i = 0; i < 256; i++) perm[i + 256] = perm[i];
+function fade(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function hash(x, y) { return perm[(perm[x & 255] + (y & 255)) & 255] / 255; }
+function vnoise(x, y) {
+  const xi = Math.floor(x), yi = Math.floor(y);
+  const xf = x - xi, yf = y - yi;
+  const u = fade(xf), v = fade(yf);
+  const a = hash(xi, yi), b = hash(xi + 1, yi);
+  const c = hash(xi, yi + 1), d = hash(xi + 1, yi + 1);
+  return lerp(lerp(a, b, u), lerp(c, d, u), v);
+}
+function fbm(x, y) {
+  let v = 0, amp = 0.5, freq = 1;
+  for (let i = 0; i < 5; i++) {
+    v += vnoise(x * freq, y * freq) * amp;
+    freq *= 2; amp *= 0.5;
+  }
+  return v;
+}
+
+const drops = [];
+const snowflakes = [];
+const bolts = [];
+let lightning = 0;
+let nextBolt = 200;
+
+const birds = Array.from({length: 3}, (_, i) => ({
+  x: -50 - i * 200, y: 100 + Math.random() * 100, ph: Math.random() * 10
+}));
+
+function makeMountains(seed, baseY, amp, lightColor, darkColor) {
+  const pts = [];
+  let x = 0, r = seed;
+  const rand = () => { r = (r * 9301 + 49297) % 233280; return r / 233280; };
+  while (x < 2000) {
+    pts.push({ x, y: baseY - rand() * amp });
+    x += 40 + rand() * 80;
+  }
+  return { pts, lightColor, darkColor, baseY };
+}
+
+function buildMountains() {
+  mountains = [
+    makeMountains(1, H * 0.62, H * 0.2, '#ff5cd2', '#5e2196'),
+    makeMountains(7, H * 0.74, H * 0.22, '#5cfff1', '#1c6fb5'),
+    makeMountains(42, H * 0.88, H * 0.22, '#ffd75c', '#c83a8f')
+  ];
+}
+
+function resize() {
+  const size = Math.min(innerWidth, innerHeight) - 20;
+  W = cv.width = size; H = cv.height = size;
+  buildMountains();
+}
+
+function drawMountains() {
+  mountains.forEach(m => {
+    ctx.beginPath();
+    ctx.moveTo(0, H);
+    ctx.lineTo(m.pts[0].x, m.pts[0].y);
+    for (let i = 1; i < m.pts.length - 1; i++) {
+      const xc = (m.pts[i].x + m.pts[i + 1].x) / 2;
+      const yc = (m.pts[i].y + m.pts[i + 1].y) / 2;
+      ctx.quadraticCurveTo(m.pts[i].x, m.pts[i].y, xc, yc);
+    }
+    ctx.lineTo(W, H);
+    ctx.closePath();
+    const top = m.baseY - H * 0.22;
+    const g = ctx.createLinearGradient(0, top, 0, H);
+    g.addColorStop(0, m.lightColor);
+    g.addColorStop(1, m.darkColor);
+    ctx.fillStyle = g;
+    ctx.fill();
+  });
+}
+
+function drawBgCloud(x, y, scale) {
+  ctx.save();
+  ctx.translate(x, y); ctx.scale(scale, scale);
+  const path = new Path2D();
+  path.moveTo(-72, 0);
+  path.arc(-55, -6, 18, Math.PI, Math.PI * 1.5, false);
+  path.arc(-32, -18, 22, Math.PI * 1.05, Math.PI * 1.7, false);
+  path.arc(-8, -30, 26, Math.PI * 1.05, Math.PI * 1.95, false);
+  path.arc(18, -28, 24, Math.PI * 1.1, Math.PI * 1.95, false);
+  path.arc(40, -20, 20, Math.PI * 1.15, Math.PI * 1.95, false);
+  path.arc(58, -8, 14, Math.PI * 1.4, 0, false);
+  path.lineTo(72, 0);
+  path.lineTo(-72, 0);
+  path.closePath();
+
+  const g = ctx.createLinearGradient(0, -34, 0, 4);
+  g.addColorStop(0, '#ffffff');
+  g.addColorStop(0.55, '#eef3fa');
+  g.addColorStop(1, '#a8bcd2');
+  ctx.fillStyle = g;
+  ctx.fill(path);
+
+  ctx.save();
+  ctx.clip(path);
+  const puffs = [
+    { x: -55, y: -6, r: 18 }, { x: -32, y: -18, r: 22 },
+    { x: -8, y: -30, r: 26 }, { x: 18, y: -28, r: 24 },
+    { x: 40, y: -20, r: 20 }, { x: 58, y: -8, r: 14 }
+  ];
+  puffs.forEach(p => {
+    const rg = ctx.createRadialGradient(p.x - p.r * 0.3, p.y + p.r * 0.4, 0, p.x, p.y, p.r * 1.3);
+    rg.addColorStop(0, 'rgba(120,140,170,0.25)');
+    rg.addColorStop(1, 'rgba(120,140,170,0)');
+    ctx.fillStyle = rg;
+    ctx.fillRect(-80, -50, 160, 60);
+  });
+  puffs.forEach(p => {
+    const hg = ctx.createRadialGradient(p.x + p.r * 0.35, p.y - p.r * 0.5, 0, p.x + p.r * 0.35, p.y - p.r * 0.5, p.r * 0.9);
+    hg.addColorStop(0, 'rgba(255,255,255,0.95)');
+    hg.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = hg;
+    ctx.fillRect(-80, -50, 160, 60);
+  });
+  ctx.restore();
+  ctx.restore();
+}
+
+function drawWaywardCloud(cx, cy, t) {
+  const img = cloudCtx.createImageData(CW, CH);
+  const data = img.data;
+  const ox = t * 2.0, oy = t * 1.2;
+  const ox2 = -t * 1.5, oy2 = t * 1.8;
+  const cxN = CW / 2, cyN = CH / 2;
+  const tor = cloud.tornado;
+  const baseRx = CW * 0.42, baseRy = CH * 0.20;
+  const torRx = CW * 0.32, torRy = CH * 0.30;
+  const rx = baseRx * (1 - tor) + torRx * tor;
+  const ry = baseRy * (1 - tor) + torRy * tor;
+  const dark = cloud.darkness;
+
+  for (let y = 0; y < CH; y++) {
+    for (let x = 0; x < CW; x++) {
+      const dx = (x - cxN) / rx;
+      const dy = (y - cyN) / ry;
+      const d = dx * dx + dy * dy;
+      const mask = Math.max(0, 1 - d);
+      if (mask <= 0) continue;
+
+      let nx = x, ny = y;
+      if (tor > 0) {
+        const rxp = x - cxN, ryp = y - cyN;
+        const dist = Math.sqrt(rxp * rxp + ryp * ryp);
+        const ang = Math.atan2(ryp, rxp) + t * 0.4 * tor + dist * 0.008 * tor;
+        nx = cxN + Math.cos(ang) * dist;
+        ny = cyN + Math.sin(ang) * dist;
+      }
+
+      const n1 = fbm(nx * 0.04 + ox, ny * 0.05 + oy);
+      const n2 = fbm(nx * 0.08 + ox2, ny * 0.1 + oy2);
+      const n = n1 * 0.6 + n2 * 0.4;
+
+      let dens = mask * 1.2 - 0.35 + (n - 0.5) * 1.2;
+      dens = Math.max(0, Math.min(1, dens));
+      if (dens < 0.02) continue;
+
+      // psychedelic hue cycling based on noise + time + position
+      const hue = (n * 360 + t * 80 + (x + y) * 0.5) % 360;
+      const sat = 0.85;
+      const light = 0.55 + n * 0.3 - dark * 0.2;
+      // HSL→RGB
+      const c = (1 - Math.abs(2 * light - 1)) * sat;
+      const hp = hue / 60;
+      const xc = c * (1 - Math.abs(hp % 2 - 1));
+      let rr = 0, gg = 0, bb = 0;
+      if (hp < 1) { rr = c; gg = xc; }
+      else if (hp < 2) { rr = xc; gg = c; }
+      else if (hp < 3) { gg = c; bb = xc; }
+      else if (hp < 4) { gg = xc; bb = c; }
+      else if (hp < 5) { rr = xc; bb = c; }
+      else { rr = c; bb = xc; }
+      const m = light - c / 2;
+
+      const idx = (y * CW + x) * 4;
+      data[idx]     = (rr + m) * 255;
+      data[idx + 1] = (gg + m) * 255;
+      data[idx + 2] = (bb + m) * 255;
+      data[idx + 3] = 255 * Math.pow(dens, 0.9);
+    }
+  }
+  cloudCtx.putImageData(img, 0, 0);
+  const s = cloud.scale;
+  ctx.drawImage(cloudCv, cx - (CW * s) / 2, cy - (CH * s) / 2, CW * s, CH * s);
+}
+
+function drawSun() {
+  const sx = W * 0.78, sy = H * 0.55;
+  const hue = (Date.now() * 0.05) % 360;
+  // psychedelic rings
+  for (let i = 6; i > 0; i--) {
+    const r = 30 + i * 18;
+    const g = ctx.createRadialGradient(sx, sy, r - 10, sx, sy, r);
+    g.addColorStop(0, `hsla(${(hue + i * 40) % 360}, 100%, 60%, 0)`);
+    g.addColorStop(1, `hsla(${(hue + i * 40) % 360}, 100%, 60%, 0.4)`);
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.fillStyle = `hsl(${hue}, 100%, 75%)`;
+  ctx.beginPath(); ctx.arc(sx, sy, 28, 0, Math.PI * 2); ctx.fill();
+}
+
+function drawBird(b) {
+  ctx.strokeStyle = '#444'; ctx.lineWidth = 1.5;
+  const flap = Math.sin(b.ph) * 5;
+  ctx.beginPath();
+  ctx.moveTo(b.x - 8, b.y + flap);
+  ctx.quadraticCurveTo(b.x - 4, b.y - 4, b.x, b.y);
+  ctx.quadraticCurveTo(b.x + 4, b.y - 4, b.x + 8, b.y + flap);
+  ctx.stroke();
+}
+
+function makeBolt(sx, sy, ex, ey) {
+  // recursive jagged bolt with branches
+  function segment(x1, y1, x2, y2, depth, branches) {
+    const dx = x2 - x1, dy = y2 - y1;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (depth <= 0 || len < 12) return [[{x: x1, y: y1}, {x: x2, y: y2}]];
+    // midpoint with perpendicular offset
+    const mx = (x1 + x2) / 2;
+    const my = (y1 + y2) / 2;
+    const perpX = -dy / len, perpY = dx / len;
+    const off = (Math.random() - 0.5) * len * 0.35;
+    const nx = mx + perpX * off;
+    const ny = my + perpY * off;
+    let segs = segment(x1, y1, nx, ny, depth - 1, branches).concat(
+               segment(nx, ny, x2, y2, depth - 1, branches));
+    // occasional branch
+    if (branches && Math.random() < 0.35) {
+      const bAng = Math.atan2(ny - y1, nx - x1) + (Math.random() - 0.5) * 0.9;
+      const bLen = len * (0.3 + Math.random() * 0.3);
+      const bx = nx + Math.cos(bAng) * bLen;
+      const by = ny + Math.sin(bAng) * bLen;
+      segs = segs.concat(segment(nx, ny, bx, by, depth - 2, false));
+    }
+    return segs;
+  }
+  const segs = segment(sx, sy, ex, ey, 5, true);
+  return { segs, life: 12 };
+}
+
+function drawBolts() {
+  for (let i = bolts.length - 1; i >= 0; i--) {
+    const b = bolts[i];
+    const alpha = b.life / 12;
+    ctx.save();
+    // outer glow
+    ctx.strokeStyle = `rgba(160,190,255,${alpha * 0.4})`;
+    ctx.lineWidth = 8;
+    ctx.shadowColor = '#a8c8ff';
+    ctx.shadowBlur = 30;
+    ctx.lineCap = 'round';
+    b.segs.forEach(s => {
+      ctx.beginPath();
+      ctx.moveTo(s[0].x, s[0].y);
+      ctx.lineTo(s[1].x, s[1].y);
+      ctx.stroke();
+    });
+    // bright core
+    ctx.shadowBlur = 12;
+    ctx.strokeStyle = `rgba(255,255,255,${alpha})`;
+    ctx.lineWidth = 1.8;
+    b.segs.forEach(s => {
+      ctx.beginPath();
+      ctx.moveTo(s[0].x, s[0].y);
+      ctx.lineTo(s[1].x, s[1].y);
+      ctx.stroke();
+    });
+    ctx.restore();
+    b.life--;
+    if (b.life <= 0) bolts.splice(i, 1);
+  }
+}
+
+resize();
+addEventListener('resize', resize);
+cloud.x = W * 0.5; cloud.y = H * 0.4;
+cloud.targetX = cloud.x; cloud.targetY = cloud.y;
+
+function loop() {
+  cloud.t += 0.01;
+
+  const sky = ctx.createLinearGradient(0, 0, 0, H);
+  const hueShift = (cloud.t * 30) % 360;
+  sky.addColorStop(0, `hsl(${hueShift}, 70%, 35%)`);
+  sky.addColorStop(0.5, `hsl(${(hueShift + 60) % 360}, 80%, 50%)`);
+  sky.addColorStop(1, `hsl(${(hueShift + 120) % 360}, 75%, 45%)`);
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, W, H);
+
+  drawSun();
+  drawMountains();
+
+  bgClouds.forEach(c => {
+    c.x += c.v;
+    if (c.x > W + 100) c.x = -100;
+    drawBgCloud(c.x, c.y, c.s);
+  });
+
+  birds.forEach(b => {
+    b.x += 0.8; b.ph += 0.2;
+    if (b.x > W + 50) b.x = -50;
+    drawBird(b);
+  });
+
+  if (Math.random() < 0.003) {
+    cloud.targetX = W * 0.5 + (Math.random() - 0.5) * W * 0.15;
+    cloud.targetY = H * 0.35 + (Math.random() - 0.5) * H * 0.1;
+  }
+
+  cloud.modeTimer -= 1;
+  if (cloud.modeTimer <= 0) {
+    const r = Math.random();
+    if (r < 0.2) {
+      // tornado (no precipitation)
+      cloud.targetTornado = 1; cloud.targetDarkness = 0.9;
+      cloud.targetCold = 0;
+      cloud.targetScale = 1.3; cloud.targetY = H * 0.45;
+    } else if (r < 0.4) {
+      // pure blizzard
+      cloud.targetTornado = 0; cloud.targetDarkness = 0.4;
+      cloud.targetCold = 1;
+      cloud.targetScale = 1.3 + Math.random() * 0.3;
+    } else if (r < 0.55) {
+      // pure rain storm
+      cloud.targetTornado = 0;
+      cloud.targetDarkness = 0.7 + Math.random() * 0.2;
+      cloud.targetCold = 0;
+      cloud.targetScale = 1.3 + Math.random() * 0.5;
+    } else if (r < 0.95) {
+      // sleet — rain + snow mixed
+      cloud.targetTornado = 0;
+      cloud.targetDarkness = 0.6 + Math.random() * 0.2;
+      cloud.targetCold = 0.6 + Math.random() * 0.3;
+      cloud.targetScale = 1.3 + Math.random() * 0.4;
+    } else {
+      // calm
+      cloud.targetTornado = 0;
+      cloud.targetDarkness = Math.random() * 0.25;
+      cloud.targetCold = 0;
+      cloud.targetScale = 1.0 + Math.random() * 0.4;
+    }
+    cloud.modeTimer = 240 + Math.random() * 300;
+  }
+  cloud.scale += (cloud.targetScale - cloud.scale) * 0.02;
+  cloud.darkness += (cloud.targetDarkness - cloud.darkness) * 0.02;
+  cloud.tornado += (cloud.targetTornado - cloud.tornado) * 0.015;
+  cloud.cold += (cloud.targetCold - cloud.cold) * 0.04;
+  // allow rain and snow to coexist (sleet)
+  cloud.raining = cloud.darkness > 0.55;
+  cloud.snowing = cloud.cold > 0.15;
+
+  const wiggleX = Math.sin(cloud.t * 1.3) * 0.08;
+  const wiggleY = Math.cos(cloud.t * 0.9) * 0.05;
+  cloud.vx += (cloud.targetX - cloud.x) * 0.0004 + wiggleX * 0.05;
+  cloud.vy += (cloud.targetY - cloud.y) * 0.0004 + wiggleY * 0.05;
+  cloud.vx *= 0.94; cloud.vy *= 0.94;
+  cloud.x += cloud.vx; cloud.y += cloud.vy;
+
+  // canvas darkening
+  if (cloud.darkness > 0.2) {
+    const overlay = Math.min(0.25, (cloud.darkness - 0.2) * 0.4);
+    ctx.fillStyle = `rgba(40,55,75,${overlay})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // rain
+  if (cloud.raining) {
+    const intensity = Math.min(1, (cloud.darkness - 0.4) * 2);
+    const n = Math.floor(4 + intensity * 10);
+    const spread = CW * cloud.scale * 0.55;
+    const dropY = cloud.y + (CH * 0.13) * cloud.scale;
+    for (let k = 0; k < n; k++) {
+      drops.push({
+        x: cloud.x + (Math.random() - 0.5) * spread,
+        y: dropY + Math.random() * 10,
+        vy: 11 + Math.random() * 5,
+        vx: -0.6 - Math.random() * 0.6,
+        len: 8 + Math.random() * 6,
+        op: 0.25 + Math.random() * 0.35
+      });
+    }
+  }
+  for (let i = drops.length - 1; i >= 0; i--) {
+    const d = drops[i];
+    d.y += d.vy; d.x += d.vx;
+    if (d.y > H - 5) { drops.splice(i, 1); continue; }
+    const hue = (cloud.t * 150 + d.y) % 360;
+    ctx.strokeStyle = `hsla(${hue}, 100%, 65%, ${d.op + 0.3})`;
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(d.x, d.y);
+    ctx.lineTo(d.x + d.vx, d.y + d.len);
+    ctx.stroke();
+  }
+
+  // lightning trigger
+  if (cloud.darkness > 0.6) {
+    nextBolt--;
+    if (nextBolt <= 0) {
+      const sx = cloud.x + (Math.random() - 0.5) * CW * cloud.scale * 0.5;
+      const sy = cloud.y + (CH * 0.13) * cloud.scale;
+      const ex = sx + (Math.random() - 0.5) * 80;
+      const ey = H * (0.7 + Math.random() * 0.2);
+      bolts.push(makeBolt(sx, sy, ex, ey));
+      lightning = 1;
+      nextBolt = 80 + Math.random() * 160;
+    }
+  }
+  lightning *= 0.88;
+
+  // snow emission (drawing happens after the cloud)
+  if (cloud.snowing) {
+    const n = Math.floor(2 + cloud.cold * 4);
+    const spreadX = CW * cloud.scale * 0.55;
+    const spreadY = CH * cloud.scale * 0.12;
+    for (let k = 0; k < n; k++) {
+      snowflakes.push({
+        x: cloud.x + (Math.random() - 0.5) * spreadX,
+        y: cloud.y + (Math.random() - 0.5) * spreadY,
+        vy: 0.5 + Math.random() * 1.3,
+        vx: -0.3 + Math.random() * 0.6,
+        sway: Math.random() * Math.PI * 2,
+        swaySpeed: 0.015 + Math.random() * 0.04,
+        swayAmp: 0.4 + Math.random() * 1.0,
+        r: 0.4 + Math.random() * 0.7,
+        age: 0
+      });
+    }
+  }
+  // update snowflakes (no draw yet)
+  for (let i = snowflakes.length - 1; i >= 0; i--) {
+    const f = snowflakes[i];
+    f.sway += f.swaySpeed;
+    f.x += f.vx + Math.sin(f.sway) * f.swayAmp;
+    f.y += f.vy;
+    f.age++;
+    if (f.y > H - 5) snowflakes.splice(i, 1);
+  }
+
+  const bob = Math.sin(cloud.t * 2) * 3;
+  drawWaywardCloud(cloud.x, cloud.y + bob, cloud.t);
+
+  // draw snowflakes after cloud — they emerge with fade-in
+  for (const f of snowflakes) {
+    const op = Math.min(1, f.age / 40) * 0.85;
+    const hue = (cloud.t * 200 + f.x + f.y) % 360;
+    ctx.fillStyle = `hsla(${hue}, 100%, 70%, ${op})`;
+    ctx.beginPath();
+    ctx.arc(f.x, f.y, f.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  drawBolts();
+
+  if (lightning > 0.05) {
+    ctx.fillStyle = `rgba(220,235,255,${lightning * 0.25})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // vignette
+  const vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.75);
+  vg.addColorStop(0, 'rgba(0,0,0,0)');
+  vg.addColorStop(1, 'rgba(0,0,0,0.55)');
+  ctx.fillStyle = vg;
+  ctx.fillRect(0, 0, W, H);
+
+  // CRT scanlines
+  ctx.save();
+  ctx.globalCompositeOperation = 'multiply';
+  for (let y = 0; y < H; y += 3) {
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.fillRect(0, y, W, 1);
+  }
+  ctx.restore();
+
+  // VHS chromatic aberration: capture & re-tint channels with offset
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+  ctx.globalAlpha = 0.15;
+  // shift the whole frame slightly red to the right, blue to the left
+  // (cheap fake by drawing tinted rectangles using the current frame is too costly,
+  //  so use horizontal RGB-tinted lines as scanline texture)
+  for (let y = 0; y < H; y += 2) {
+    const jitter = Math.sin(y * 0.3 + Date.now() * 0.002) * 1.5;
+    ctx.fillStyle = 'rgba(255,0,80,0.4)';
+    ctx.fillRect(jitter, y, W, 1);
+    ctx.fillStyle = 'rgba(0,180,255,0.4)';
+    ctx.fillRect(-jitter, y + 1, W, 1);
+  }
+  ctx.restore();
+
+  // VHS tape noise (random bright/dark pixels)
+  ctx.save();
+  ctx.globalAlpha = 0.08;
+  for (let k = 0; k < 200; k++) {
+    const x = Math.random() * W;
+    const y = Math.random() * H;
+    ctx.fillStyle = Math.random() < 0.5 ? '#fff' : '#000';
+    ctx.fillRect(x, y, 1 + Math.random() * 2, 1);
+  }
+  ctx.restore();
+
+  // VHS tracking glitch bands (occasional)
+  if (Math.random() < 0.05) {
+    const by = Math.random() * H;
+    const bh = 4 + Math.random() * 18;
+    ctx.save();
+    ctx.globalCompositeOperation = 'difference';
+    ctx.fillStyle = `rgba(${(Math.random()*255)|0},${(Math.random()*255)|0},${(Math.random()*255)|0},0.6)`;
+    ctx.fillRect(0, by, W, bh);
+    ctx.restore();
+  }
+
+  // soft bloom / phosphor glow (drawing canvas over itself blurred is heavy,
+  // so a subtle warm overlay simulates the CRT phosphor warmth)
+  ctx.fillStyle = 'rgba(255,200,150,0.04)';
+  ctx.fillRect(0, 0, W, H);
+
+  // CRT curvature simulated by darkening the very corners more
+  const cvg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.45, W / 2, H / 2, Math.max(W, H) * 0.6);
+  cvg.addColorStop(0, 'rgba(0,0,0,0)');
+  cvg.addColorStop(1, 'rgba(0,0,0,0.5)');
+  ctx.fillStyle = cvg;
+  ctx.fillRect(0, 0, W, H);
+
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>

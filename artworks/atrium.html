@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body { margin: 0; overflow: hidden; background: #000; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  canvas { display: block; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+</head>
+<body>
+<script>
+const TEX_SIZE = 2048;
+
+let bgLayer;       // canvas 2D où on dessine les escaliers
+let texImg;        // p5.Image figée (upload GPU une seule fois)
+let sphereFBO;     // framebuffer recevant la sphère
+let warpShader;    // shader post-process
+
+const VERT = `
+precision highp float;
+attribute vec3 aPosition;
+attribute vec2 aTexCoord;
+uniform mat4 uModelViewMatrix;
+uniform mat4 uProjectionMatrix;
+varying vec2 vTexCoord;
+void main() {
+  vTexCoord = aTexCoord;
+  gl_Position = uProjectionMatrix * uModelViewMatrix * vec4(aPosition, 1.0);
+}
+`;
+
+const FRAG_WARP = `
+precision highp float;
+varying vec2 vTexCoord;
+uniform sampler2D tex;
+uniform float uTime;
+uniform float uAmp;
+uniform float uFreq;
+uniform float uRot;
+uniform float uScale;
+uniform float uResY;
+
+// hash pseudo-aléatoire
+float hash(float x) { return fract(sin(x * 12.9898) * 43758.5453); }
+float hash2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+
+void main() {
+  // coord écran fixe (ne tourne pas), pour les effets VHS
+  vec2 screenUV = vTexCoord;
+
+  // coord tournée + zoomée, pour échantillonner la texture sphère
+  vec2 uv = vTexCoord;
+  vec2 c = uv - 0.5;
+  c /= uScale;
+  float ca = cos(uRot), sa = sin(uRot);
+  c = vec2(ca * c.x - sa * c.y, sa * c.x + ca * c.y);
+  uv = c + 0.5;
+
+  // déformation sin-wave de base (sur uv tournée)
+  float offset = sin(uv.y * uFreq + uTime) * uAmp
+               + sin(uv.y * uFreq * 2.3 + uTime * 1.7) * (uAmp * 0.5);
+  uv.x += offset;
+
+  // --- VHS GLITCHES (en coord écran fixe) ---
+  // jitter horizontal par ligne
+  float lineNoise = hash(floor(screenUV.y * 300.0) + floor(uTime * 4.0));
+  float jitter = (lineNoise - 0.5) * 0.008;
+
+  // tearing épisodique
+  float band = step(0.97, hash(floor(uTime * 2.0)));
+  float bandY = hash(floor(uTime * 2.0) + 1.0);
+  float bandThick = 0.04;
+  float tear = 0.0;
+  if (band > 0.5 && abs(screenUV.y - bandY) < bandThick) {
+    tear = (hash(floor(uTime * 8.0)) - 0.5) * 0.15;
+  }
+
+  // head switching bas d'image
+  float bottomBand = smoothstep(0.0, 0.08, screenUV.y);
+  float head = (1.0 - bottomBand) * sin(uTime * 3.0) * 0.02;
+
+  // on applique les décalages à uv mais dans l'axe écran
+  // -> rotation inverse du décalage horizontal
+  float dx = jitter + tear + head;
+  uv += vec2(ca * dx, -sa * dx); // R^-1 * (dx, 0)
+
+  vec4 col;
+  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+    col = vec4(0.0, 0.0, 0.0, 1.0);
+  } else {
+    // chromatic aberration (en axe écran : on échantillonne avec décalage uv-screen aligné)
+    float ab = 0.003;
+    vec2 abVec = vec2(ca * ab, -sa * ab);
+    float r = texture2D(tex, uv + abVec).r;
+    float g = texture2D(tex, uv).g;
+    float b = texture2D(tex, uv - abVec).b;
+    col = vec4(r, g, b, 1.0);
+  }
+
+  // grain (déjà en coord pixel écran)
+  float grain = (hash2(gl_FragCoord.xy + uTime) - 0.5) * 0.12;
+  col.rgb += grain;
+
+  // scanlines (déjà en coord pixel écran)
+  float scan = 0.6 + 0.4 * step(0.5, fract(gl_FragCoord.y / 3.0));
+  col.rgb *= scan;
+
+  // vignettage en coord écran (ne tourne pas)
+  float vign = 1.0 - length(screenUV - 0.5) * 0.6;
+  col.rgb *= vign;
+
+  gl_FragColor = col;
+}
+`;
+
+function iso(x, y, z) {
+  const sx = (x - y) * cos(PI / 6);
+  const sy = (x + y) * sin(PI / 6) - z;
+  return [sx, sy];
+}
+
+function isoQuad(p1, p2, p3, p4, hue, br, strokeHue) {
+  bgLayer.fill(hue, 90, br + 25, 95);
+  bgLayer.stroke(strokeHue, 100, 60, 100);
+  bgLayer.strokeWeight(0.6);
+  bgLayer.beginShape();
+  bgLayer.vertex(p1[0], p1[1]);
+  bgLayer.vertex(p2[0], p2[1]);
+  bgLayer.vertex(p3[0], p3[1]);
+  bgLayer.vertex(p4[0], p4[1]);
+  bgLayer.endShape(CLOSE);
+}
+
+function drawIsoStairs(ox, oy, unit, nSteps, depth, dir, hue, strokeHue) {
+  if (depth === 0 || unit < 2 || nSteps < 1) return;
+  for (let i = 0; i < nSteps; i++) {
+    const x = i * unit;
+    const z = (dir > 0 ? i : (nSteps - 1 - i)) * unit;
+    const t1 = iso(x, 0, z + unit), t2 = iso(x + unit, 0, z + unit),
+          t3 = iso(x + unit, unit, z + unit), t4 = iso(x, unit, z + unit);
+    const r1 = iso(x, 0, z), r2 = iso(x + unit, 0, z),
+          r3 = iso(x + unit, 0, z + unit), r4 = iso(x, 0, z + unit);
+    const s1 = iso(x + unit, 0, z), s2 = iso(x + unit, unit, z),
+          s3 = iso(x + unit, unit, z + unit), s4 = iso(x + unit, 0, z + unit);
+    bgLayer.push();
+    bgLayer.translate(ox, oy);
+    isoQuad(r1, r2, r3, r4, hue, 30, strokeHue);
+    isoQuad(s1, s2, s3, s4, hue, 50, strokeHue);
+    isoQuad(t1, t2, t3, t4, hue, 62, strokeHue);
+    bgLayer.pop();
+    if (depth > 1) {
+      const [mx, my] = iso(x, 0, z + unit);
+      drawIsoStairs(ox + mx, oy + my, unit / nSteps, nSteps, depth - 1, dir, hue, strokeHue);
+    }
+  }
+}
+
+function buildTexture() {
+  bgLayer.clear();
+  bgLayer.colorMode(HSB, 360, 100, 100, 100);
+  bgLayer.background(0);
+  const W = TEX_SIZE, H = TEX_SIZE;
+  const tile = 28;
+  const tw = tile * cos(PI / 6) * 2;
+  const th = tile * sin(PI / 6) * 2;
+  const cols2 = ceil(W / tw) + 2;
+  const rows2 = ceil(H / (th / 2)) + 2;
+  const cxC = W / 2, cyC = H / 2;
+  const maxD = dist(0, 0, cxC, cyC);
+  for (let j = -1; j < rows2; j++) {
+    const hue       = (j * 23) % 360;
+    const strokeHue = (j * 47 + 120) % 360;
+    for (let i = -1; i < cols2; i++) {
+      const cx = i * tw + (j % 2 ? tw / 2 : 0);
+      const cy = j * (th / 2);
+      const d = dist(cx, cy, cxC, cyC);
+      const t = 1 - d / maxD;
+      const depth  = floor(lerp(1, 4, t));
+      const nSteps = floor(lerp(3, 7, t));
+      const unit   = tile / nSteps;
+      const dir    = ((i + j) % 2 === 0) ? 1 : -1;
+      drawIsoStairs(cx - tw / 2, cy, unit, nSteps, depth, dir, hue, strokeHue);
+    }
+  }
+}
+
+function setup() {
+  const s = min(windowWidth, windowHeight);
+  createCanvas(s, s, WEBGL);
+  pixelDensity(1);
+
+  bgLayer = createGraphics(TEX_SIZE, TEX_SIZE);
+  buildTexture();
+  // figer en p5.Image : upload GPU une seule fois
+  texImg = createImage(TEX_SIZE, TEX_SIZE);
+  texImg.copy(bgLayer, 0, 0, TEX_SIZE, TEX_SIZE, 0, 0, TEX_SIZE, TEX_SIZE);
+
+  sphereFBO = createFramebuffer({ width, height, density: 1 });
+  warpShader = createShader(VERT, FRAG_WARP);
+  noStroke();
+}
+
+function draw() {
+  const R = min(width, height) * 0.48;
+  const t = frameCount * 0.003;
+
+  // caméra drone
+  const altitude = R * 0.25;
+  const lat  = sin(t * 0.2) * (PI / 3);
+  const lon  = t * 1.2 / sqrt(cos(lat));
+  const rCam = R + altitude;
+  const cx = rCam * cos(lat) * sin(lon);
+  const cy = rCam * sin(lat);
+  const cz = rCam * cos(lat) * cos(lon);
+  const tx = R * cos(lat) * sin(lon);
+  const ty = R * sin(lat);
+  const tz = R * cos(lat) * cos(lon);
+  const dt = 0.05;
+  const lat2 = sin((t + dt) * 0.2) * (PI / 3);
+  const lon2 = (t + dt) * 1.2 / sqrt(cos(lat2));
+  const ax = R * cos(lat2) * sin(lon2) - tx;
+  const ay = R * sin(lat2) - ty;
+  const az = R * cos(lat2) * cos(lon2) - tz;
+
+  // Pass 1 : sphère dans le FBO
+  sphereFBO.begin();
+  clear();
+  camera(cx, cy, cz, tx, ty, tz, ax, ay, az);
+  perspective(PI / 3, 1, 0.5, R * 10);
+  noStroke();
+  texture(texImg);
+  sphere(R, 48, 32);
+  sphereFBO.end();
+
+  // après le FBO, on doit restaurer la caméra par défaut pour le quad plein écran
+  resetMatrix();
+  perspective(); // valeurs par défaut p5
+
+  // Pass 2 : warp shader plein écran
+  // on n'utilise pas plane() qui passe par les matrices monde (avec un facteur 2 caché)
+  // on dessine notre quad explicite avec une projection identité
+  drawingContext.disable(drawingContext.DEPTH_TEST);
+  shader(warpShader);
+  warpShader.setUniform('tex', sphereFBO.color);
+  warpShader.setUniform('uTime', frameCount * 0.05);
+  warpShader.setUniform('uAmp', 0.025);
+  warpShader.setUniform('uFreq', 18.0);
+  warpShader.setUniform('uRot', frameCount * 0.004);
+  warpShader.setUniform('uScale', Math.sqrt(2));
+  warpShader.setUniform('uResY', height);
+
+  // dans p5 WEBGL, le canvas a un repère centré : x,y vont de -w/2 à w/2
+  // avec la projection par défaut. plane(width, height) couvre tout l'écran.
+  resetMatrix();
+  plane(width, height);
+
+  resetShader();
+  drawingContext.enable(drawingContext.DEPTH_TEST);
+}
+
+function windowResized() {
+  const s = min(windowWidth, windowHeight);
+  resizeCanvas(s, s);
+  pixelDensity(1);
+  sphereFBO = createFramebuffer({ width, height, density: 1 });
+}
+</script>
+</body>
+</html>
