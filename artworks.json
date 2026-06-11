@@ -1,5 +1,53 @@
 [
   {
+    "id": "unknown_origin",
+    "title": "Unknown Origin"
+  },
+  {
+    "id": "unda",
+    "title": "Unda"
+  },
+  {
+    "id": "triad",
+    "title": "Triad"
+  },
+  {
+    "id": "sun_burst",
+    "title": "Sun Burst"
+  },
+  {
+    "id": "serene_shell",
+    "title": "Serene Shell"
+  },
+  {
+    "id": "serendipity",
+    "title": "Serendipity"
+  },
+  {
+    "id": "pythia",
+    "title": "Pythia"
+  },
+  {
+    "id": "iridescent_liquid_kaleidoscope",
+    "title": "Iridescent Liquid Kaleidoscope"
+  },
+  {
+    "id": "from_cupertino_to_west_chester",
+    "title": "From Cupertino To West Chester"
+  },
+  {
+    "id": "doorway",
+    "title": "Doorway"
+  },
+  {
+    "id": "aurora_shell",
+    "title": "Aurora Shell"
+  },
+  {
+    "id": "aevum",
+    "title": "Aevum"
+  },
+  {
     "id": "the_angry_cloud",
     "title": "The Angry Cloud"
   },

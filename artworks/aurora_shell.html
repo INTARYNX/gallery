@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const off  = document.createElement('canvas');
+const octx = off.getContext('2d');
+
+const SHELL = {
+  maxRatio:   0.36,
+  innerRatio: 0.55,
+  turns:      4.2,
+  growthRate: 0.12,
+  rotSpeed:   0.08,
+};
+
+const waves = [
+  { amp:14, freq:0.025, speed:0.6, phase:0 },
+  { amp:10, freq:0.04,  speed:1.0, phase:2 },
+  { amp:8,  freq:0.06,  speed:0.8, phase:5 },
+  { amp:6,  freq:0.09,  speed:1.4, phase:1 },
+];
+
+const caustics = Array.from({ length: 28 }, () => ({
+  x: Math.random(), y: Math.random(),
+  r: 0.04 + Math.random()*0.10,
+  speed: 0.3 + Math.random()*0.7,
+  phase: Math.random()*Math.PI*2,
+  alpha: 0.08 + Math.random()*0.14,
+  hue: Math.random()*360,
+}));
+
+let t = 0;
+let srcData = null, dstData = null;
+
+function resize() {
+  const s = Math.min(window.innerWidth, window.innerHeight);
+  canvas.width = s; canvas.height = s;
+  off.width = s; off.height = s;
+  srcData = null; dstData = null;
+}
+resize();
+window.addEventListener('resize', resize);
+
+function hsl(h,s,l,a=1){ return `hsla(${h%360},${s}%,${l}%,${a})`; }
+
+// ── Nautilus ──────────────────────────────────────────────
+function drawNautilus(c, w, h, time) {
+  const cx = w/2, cy = h/2;
+  const { maxRatio, innerRatio, turns, growthRate, rotSpeed } = SHELL;
+  const maxR = Math.min(w,h) * maxRatio;
+  const b    = growthRate;
+  const tMax = turns * Math.PI * 2;
+  const a    = maxR / Math.exp(b * tMax);
+  const rot  = -Math.PI*0.5 + time * rotSpeed;
+  const steps = 500;
+
+  const R  = th => a * Math.exp(b * th);
+  const px = (th, r) => cx + Math.cos(th + rot) * r;
+  const py = (th, r) => cy + Math.sin(th + rot) * r;
+
+  const outer = [];
+  for (let i = 0; i <= steps; i++) {
+    const th = (i/steps)*tMax;
+    outer.push([px(th,R(th)), py(th,R(th))]);
+  }
+
+  const tInMin = Math.PI*2*0.9;
+  const inner = [];
+  for (let i = 0; i <= steps; i++) {
+    const th = tInMin + (i/steps)*(tMax-tInMin);
+    inner.push([px(th,R(th)*innerRatio), py(th,R(th)*innerRatio)]);
+  }
+
+  // Clip
+  c.save();
+  c.beginPath();
+  outer.forEach(([x,y],i) => i===0 ? c.moveTo(x,y) : c.lineTo(x,y));
+  c.lineTo(cx,cy);
+  c.closePath();
+  c.clip();
+
+  const hBase = (time * 40) % 360;
+  const shift = time * 50;
+
+  // Dark oily base
+  const bg = c.createRadialGradient(cx-maxR*0.2, cy-maxR*0.2, 0, cx, cy, maxR*1.2);
+  bg.addColorStop(0,   'rgba(8,6,14,1)');
+  bg.addColorStop(0.6, 'rgba(12,8,20,1)');
+  bg.addColorStop(1,   'rgba(20,10,25,1)');
+  c.fillStyle = bg;
+  c.fillRect(0,0,w,h);
+
+  // Oil slick bands — multiple screen-blended radial gradients
+  const oilBands = [
+    { ox:-0.25, oy:-0.20, hOff:0,   a:0.60 },
+    { ox:+0.20, oy:-0.15, hOff:55,  a:0.52 },
+    { ox:-0.10, oy:+0.28, hOff:120, a:0.48 },
+    { ox:+0.25, oy:+0.10, hOff:190, a:0.45 },
+    { ox:-0.05, oy:-0.32, hOff:265, a:0.42 },
+    { ox:+0.05, oy:+0.35, hOff:330, a:0.38 },
+  ];
+  c.save();
+  oilBands.forEach(b => {
+    const bx = cx + b.ox*maxR, by = cy + b.oy*maxR;
+    const gr = c.createRadialGradient(bx, by, 0, bx, by, maxR*1.3);
+    const h0 = (hBase + b.hOff + shift) % 360;
+    gr.addColorStop(0,    hsl(h0,      100, 55, b.a));
+    gr.addColorStop(0.3,  hsl(h0+45,   100, 40, b.a*0.8));
+    gr.addColorStop(0.6,  hsl(h0+100,  100, 55, b.a*0.6));
+    gr.addColorStop(0.85, hsl(h0+180,  100, 40, b.a*0.3));
+    gr.addColorStop(1,    hsl(h0+240,  100, 30, 0));
+    c.globalCompositeOperation = 'screen';
+    c.fillStyle = gr;
+    c.fillRect(0,0,w,h);
+  });
+  c.globalCompositeOperation = 'source-over';
+  c.restore();
+
+  // Septa
+  let spacing = 0.20;
+  let th = tInMin + 0.2;
+  const septa = [];
+  while (th < tMax) {
+    septa.push(th);
+    spacing = Math.min(spacing*1.08, 0.9);
+    th += spacing;
+  }
+
+  // Chambers — dark oily tint
+  for (let s = 0; s < septa.length-1; s++) {
+    const t0=septa[s], t1=septa[s+1], sub=20;
+    c.beginPath();
+    for (let i=0; i<=sub; i++) {
+      const tt=t0+(i/sub)*(t1-t0);
+      i===0 ? c.moveTo(px(tt,R(tt)),py(tt,R(tt))) : c.lineTo(px(tt,R(tt)),py(tt,R(tt)));
+    }
+    for (let i=sub; i>=0; i--) {
+      const tt=t0+(i/sub)*(t1-t0);
+      c.lineTo(px(tt,R(tt)*innerRatio), py(tt,R(tt)*innerRatio));
+    }
+    c.closePath();
+    c.fillStyle = s%2===0 ? 'rgba(0,0,0,0.18)' : 'rgba(0,0,0,0.10)';
+    c.fill();
+  }
+
+  // Curved septa — iridescent glow
+  septa.forEach((tt, si) => {
+    const rOut  = R(tt), rIn = R(tt)*innerRatio;
+    const prevTh = Math.max(0, tt-Math.PI*2*0.3);
+    const rCtrl  = R(prevTh)*0.75;
+    const sh = (hBase + si*53 + shift) % 360;
+    c.beginPath();
+    c.moveTo(px(tt,rIn), py(tt,rIn));
+    c.quadraticCurveTo(px(tt-0.25,rCtrl), py(tt-0.25,rCtrl), px(tt,rOut), py(tt,rOut));
+    c.shadowBlur = 10;
+    c.shadowColor = hsl(sh, 100, 65);
+    c.strokeStyle = hsl(sh, 100, 75, 0.75);
+    c.lineWidth = 1.2;
+    c.stroke();
+    c.shadowBlur = 0;
+  });
+
+  // Growth stria
+  for (let i=0; i<=steps; i+=4) {
+    const tt=(i/steps)*tMax, rOut=R(tt), rIn=R(tt)*innerRatio;
+    if (rIn<2) continue;
+    const gh = (hBase + tt*20 + shift) % 360;
+    c.beginPath();
+    c.moveTo(px(tt,rOut),py(tt,rOut));
+    c.lineTo(px(tt,rIn), py(tt,rIn));
+    c.strokeStyle=hsl(gh,100,65,0.18);
+    c.lineWidth=0.5;
+    c.stroke();
+  }
+
+  // Siphuncle
+  c.beginPath();
+  for (let i=0; i<=steps; i++) {
+    const tt=tInMin+(i/steps)*(tMax-tInMin), r=R(tt)*(innerRatio+0.03);
+    i===0 ? c.moveTo(px(tt,r),py(tt,r)) : c.lineTo(px(tt,r),py(tt,r));
+  }
+  const sp2 = (Math.sin(time*2)*0.5+0.5);
+  const sph = (hBase + shift + 180) % 360;
+  c.shadowBlur = 18; c.shadowColor = hsl(sph,100,70);
+  c.strokeStyle=hsl(sph,100,70+sp2*20,0.85); c.lineWidth=2+sp2*2; c.stroke();
+  c.shadowBlur=0;
+
+  // Specular highlight
+  const gSpec = c.createRadialGradient(cx-maxR*0.3, cy-maxR*0.35, 0, cx-maxR*0.3, cy-maxR*0.35, maxR*0.5);
+  gSpec.addColorStop(0,   'rgba(255,255,255,0.30)');
+  gSpec.addColorStop(0.5, 'rgba(255,255,255,0.08)');
+  gSpec.addColorStop(1,   'rgba(255,255,255,0)');
+  c.fillStyle=gSpec; c.fillRect(0,0,w,h);
+
+  c.restore();
+
+  // Outer glow stroke — cycling hue
+  c.save();
+  c.shadowBlur=30; c.shadowColor=hsl(hBase+180,100,70,0.8);
+  c.beginPath();
+  outer.forEach(([x,y],i) => i===0 ? c.moveTo(x,y) : c.lineTo(x,y));
+  c.strokeStyle=hsl(hBase+180,100,85,0.9); c.lineWidth=2.5; c.stroke();
+  c.restore();
+
+  // 3D shading — subtle iridescent
+  c.save();
+  c.beginPath();
+  outer.forEach(([x,y],i) => i===0 ? c.moveTo(x,y) : c.lineTo(x,y));
+  c.lineTo(cx,cy); c.closePath();
+  const shade=c.createLinearGradient(cx-maxR,cy-maxR,cx+maxR,cy+maxR);
+  shade.addColorStop(0,   'rgba(255,255,255,0.20)');
+  shade.addColorStop(0.5, 'rgba(255,255,255,0)');
+  shade.addColorStop(1,   'rgba(0,0,0,0.15)');
+  c.fillStyle=shade; c.fill();
+  c.restore();
+}
+
+// ── Background ────────────────────────────────────────────
+function drawShapes(c, w, h) {
+  c.clearRect(0,0,w,h);
+  const hBase = (t * 25) % 360;
+  const bg=c.createLinearGradient(0,0,w,h);
+  bg.addColorStop(0,   hsl(hBase,       80, 8));
+  bg.addColorStop(0.5, hsl(hBase+60,    80, 5));
+  bg.addColorStop(1,   hsl(hBase+130,   80, 10));
+  c.fillStyle=bg; c.fillRect(0,0,w,h);
+
+  drawNautilus(c,w,h,t);
+
+  const cx=w/2, cy=h/2;
+  const circles=[
+    {bx:cx-w*0.32,by:cy-h*0.28,r:0.07, sp:0.3, ph:0.0},
+    {bx:cx+w*0.30,by:cy-h*0.30,r:0.055,sp:0.2, ph:1.2},
+    {bx:cx-w*0.38,by:cy+h*0.10,r:0.05, sp:0.4, ph:2.5},
+    {bx:cx+w*0.35,by:cy+h*0.15,r:0.045,sp:0.25,ph:0.8},
+    {bx:cx-w*0.15,by:cy+h*0.38,r:0.06, sp:0.35,ph:3.1},
+    {bx:cx+w*0.10,by:cy+h*0.35,r:0.05, sp:0.18,ph:4.2},
+    {bx:cx-w*0.05,by:cy-h*0.42,r:0.04, sp:0.28,ph:5.0},
+    {bx:cx+w*0.38,by:cy-h*0.10,r:0.04, sp:0.22,ph:1.7},
+  ];
+  circles.forEach(({bx,by,r,sp,ph}, i) => {
+    const x=bx+Math.sin(t*sp+ph)*w*0.04;
+    const y=by+Math.cos(t*sp*0.7+ph)*h*0.04;
+    const rr=Math.min(w,h)*r;
+    const ch = (hBase + i*45 + t*30) % 360;
+    // Oil slick: dark base + many thin iridescent bands
+    const shift = t*50 + i*73;
+    // dark oily base
+    const gBase = c.createRadialGradient(x,y,0,x,y,rr);
+    gBase.addColorStop(0,   'rgba(5,5,10,0.92)');
+    gBase.addColorStop(0.7, 'rgba(10,8,18,0.88)');
+    gBase.addColorStop(1,   'rgba(20,10,25,0.70)');
+    c.beginPath(); c.arc(x,y,rr,0,Math.PI*2);
+    c.fillStyle=gBase; c.fill();
+    // iridescent bands — layered thin gradients at different offsets
+    const bands = [
+      { cx:x-rr*0.25, cy:y-rr*0.20, hOff:0,   sat:100, l1:55, l2:35, a:0.55 },
+      { cx:x+rr*0.15, cy:y-rr*0.10, hOff:55,  sat:100, l1:60, l2:30, a:0.45 },
+      { cx:x-rr*0.10, cy:y+rr*0.25, hOff:120, sat:100, l1:55, l2:35, a:0.40 },
+      { cx:x+rr*0.20, cy:y+rr*0.10, hOff:190, sat:95,  l1:60, l2:30, a:0.38 },
+      { cx:x-rr*0.05, cy:y-rr*0.30, hOff:265, sat:100, l1:65, l2:40, a:0.35 },
+    ];
+    c.save();
+    c.beginPath(); c.arc(x,y,rr,0,Math.PI*2); c.clip();
+    bands.forEach(b => {
+      const gr = c.createRadialGradient(b.cx, b.cy, 0, b.cx, b.cy, rr*1.1);
+      const h0 = (ch + b.hOff + shift) % 360;
+      const h1 = (h0 + 40) % 360;
+      const h2 = (h0 + 90) % 360;
+      gr.addColorStop(0,    hsl(h0, b.sat, b.l1, b.a));
+      gr.addColorStop(0.35, hsl(h1, b.sat, b.l2, b.a*0.7));
+      gr.addColorStop(0.65, hsl(h2, b.sat, b.l1, b.a*0.5));
+      gr.addColorStop(1,    hsl(h0, b.sat, b.l2, 0));
+      c.globalCompositeOperation = 'screen';
+      c.fillStyle = gr;
+      c.fillRect(x-rr, y-rr, rr*2, rr*2);
+    });
+    c.restore();
+    // specular highlight — small bright flare
+    const gSpec = c.createRadialGradient(x-rr*0.3, y-rr*0.35, 0, x-rr*0.3, y-rr*0.35, rr*0.38);
+    gSpec.addColorStop(0,   'rgba(255,255,255,0.45)');
+    gSpec.addColorStop(0.4, 'rgba(255,255,255,0.12)');
+    gSpec.addColorStop(1,   'rgba(255,255,255,0)');
+    c.beginPath(); c.arc(x,y,rr,0,Math.PI*2);
+    c.fillStyle=gSpec; c.fill();
+    // dark rim
+    c.beginPath(); c.arc(x,y,rr,0,Math.PI*2);
+    c.strokeStyle='rgba(0,0,0,0.55)'; c.lineWidth=2; c.stroke();
+    c.shadowBlur=0;
+  });
+}
+
+// ── Caustics — neon ───────────────────────────────────────
+function drawCaustics(W,H) {
+  caustics.forEach(ca => {
+    const x=(ca.x+Math.sin(t*ca.speed*0.3+ca.phase)*0.05)*W;
+    const y=(ca.y+Math.cos(t*ca.speed*0.2+ca.phase)*0.04)*H;
+    const r=ca.r*Math.min(W,H)*(0.8+0.2*Math.sin(t*ca.speed+ca.phase));
+    const ch = (ca.hue + t*40) % 360;
+    const g=ctx.createRadialGradient(x,y,0,x,y,r);
+    g.addColorStop(0, hsl(ch,100,80,ca.alpha*1.5));
+    g.addColorStop(1, hsl(ch,100,60,0));
+    ctx.fillStyle=g;
+    ctx.beginPath();
+    ctx.ellipse(x,y,r,r*0.5,t*ca.speed*0.1,0,Math.PI*2);
+    ctx.fill();
+  });
+}
+
+// ── Wave reflections — two grids at 90° ──────────────────
+function drawWaveReflections(W,H) {
+  ctx.save();
+  ctx.globalCompositeOperation='screen';
+  const hBase = (t * 60) % 360;
+
+  function drawGrid(angle) {
+    ctx.save();
+    ctx.translate(W/2,H/2);
+    ctx.rotate(angle);
+    const D = Math.sqrt(W*W+H*H);
+    const cols=10, rows=16, cw=D/cols, ch=D/rows;
+    const ox=-D/2, oy=-D/2;
+    const pts=[];
+    for (let r=0;r<=rows;r++) {
+      pts[r]=[];
+      for (let c=0;c<=cols;c++) {
+        const bx=ox+c*cw, by=oy+r*ch;
+        const dx=10*Math.sin(by*0.04+t*0.8+c*0.9)+6*Math.sin(by*0.07+t*0.5+c*1.7);
+        const dy= 8*Math.sin(bx*0.035+t*0.6+r*1.1)+4*Math.sin(bx*0.065+t*0.9+r*0.7);
+        pts[r][c]={x:bx+dx, y:by+dy};
+      }
+    }
+    const hShift = angle > 0 ? 180 : 0;
+    for (let r=0;r<rows;r++) {
+      for (let c=0;c<cols;c++) {
+        const tl=pts[r][c],tr=pts[r][c+1],bl=pts[r+1][c],br=pts[r+1][c+1];
+        const flicker=0.4+0.6*Math.abs(Math.sin(t*0.6+r*1.3+c*0.8));
+        const ccx=(tl.x+tr.x+bl.x+br.x)/4, ccy=(tl.y+tr.y+bl.y+br.y)/4;
+        const cellH = (hBase + hShift + r*22 + c*17) % 360;
+        ctx.beginPath();
+        ctx.moveTo((tl.x+tr.x)/2,(tl.y+tr.y)/2);
+        ctx.quadraticCurveTo(tr.x,tr.y,(tr.x+br.x)/2,(tr.y+br.y)/2);
+        ctx.quadraticCurveTo(br.x,br.y,(br.x+bl.x)/2,(br.y+bl.y)/2);
+        ctx.quadraticCurveTo(bl.x,bl.y,(bl.x+tl.x)/2,(bl.y+tl.y)/2);
+        ctx.quadraticCurveTo(tl.x,tl.y,(tl.x+tr.x)/2,(tl.y+tr.y)/2);
+        ctx.closePath();
+        const rMax=Math.max(cw,ch)*0.72;
+        const g=ctx.createRadialGradient(ccx,ccy,rMax*0.18,ccx,ccy,rMax);
+        g.addColorStop(0,    'rgba(0,0,0,0)');
+        g.addColorStop(0.55, 'rgba(0,0,0,0)');
+        g.addColorStop(0.75, hsl(cellH,    100,65,0.16+0.18*flicker));
+        g.addColorStop(0.9,  hsl(cellH+40, 100,75,0.25+0.22*flicker));
+        g.addColorStop(1,    hsl(cellH+80, 100,90,0.10+0.10*flicker));
+        ctx.fillStyle=g; ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+
+  drawGrid(0);
+  drawGrid(Math.PI/2);
+  ctx.restore();
+}
+
+// ── Extra: radial psychedelic rings behind everything ─────
+function drawRings(W,H) {
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+  const cx=W/2, cy=H/2;
+  const maxR = Math.min(W,H)*0.5;
+  const hBase = (t*30)%360;
+  const count = 12;
+  for (let i=0; i<count; i++) {
+    const frac = (i/count + t*0.04) % 1;
+    const r = frac * maxR;
+    const alpha = (1-frac)*0.15;
+    const h = (hBase + frac*360) % 360;
+    ctx.beginPath();
+    ctx.arc(cx,cy,r,0,Math.PI*2);
+    ctx.strokeStyle = hsl(h,100,70,alpha);
+    ctx.lineWidth = 3 + (1-frac)*6;
+    ctx.shadowBlur = 20;
+    ctx.shadowColor = hsl(h,100,70,0.5);
+    ctx.stroke();
+  }
+  ctx.shadowBlur=0;
+  ctx.restore();
+}
+
+// ── Render loop ───────────────────────────────────────────
+function render() {
+  const W=canvas.width, H=canvas.height;
+
+  if (!srcData || srcData.width!==W) {
+    srcData = octx.createImageData(W,H);
+    dstData = ctx.createImageData(W,H);
+  }
+
+  drawShapes(octx,W,H);
+  srcData = octx.getImageData(0,0,W,H);
+  const sd=srcData.data, dd=dstData.data;
+
+  for (let y=0;y<H;y++) {
+    for (let x=0;x<W;x++) {
+      let dx=0,dy=0;
+      waves.forEach(w=>{
+        dx+=w.amp*Math.sin(y*w.freq+t*w.speed+w.phase);
+        dy+=w.amp*Math.cos(x*w.freq*0.8+t*w.speed*0.9+w.phase+1);
+      });
+      const sx=Math.min(W-1,Math.max(0,Math.round(x+dx)));
+      const sy=Math.min(H-1,Math.max(0,Math.round(y+dy)));
+      const di=(y*W+x)*4, si=(sy*W+sx)*4;
+      dd[di]=sd[si]; dd[di+1]=sd[si+1]; dd[di+2]=sd[si+2]; dd[di+3]=sd[si+3];
+    }
+  }
+  ctx.putImageData(dstData,0,0);
+  drawRings(W,H);
+  drawCaustics(W,H);
+  drawWaveReflections(W,H);
+  t+=0.03;
+  requestAnimationFrame(render);
+}
+render();
+</script>
+</body>
+</html>

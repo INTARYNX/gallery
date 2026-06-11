@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { display: flex; justify-content: center; align-items: center; height: 100vh; background: #000; }
+  .wrap { position: relative; width: min(100vw, 100vh); height: min(100vw, 100vh); }
+  #display { width: 100%; height: 100%; display: block; }
+  .corners { position: absolute; inset: 0; pointer-events: none; border-radius: 5%; box-shadow: 0 0 0 50px #000, inset 0 0 0 2px #333; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <canvas id="display"></canvas>
+  <div class="corners"></div>
+</div>
+<script>
+  const HI = 500, LO = 250, segments = 8;
+  let t = 0, flashAlpha = 0, startTime = null, lastFrame = 0, lastIdx = -1;
+  const FPS = 30, INTERVAL = 1000 / FPS;
+
+  const display = document.getElementById('display');
+  const dctx = display.getContext('2d');
+  display.width = display.height = HI;
+
+  function mkC(sz) { const c = document.createElement('canvas'); c.width = c.height = sz; return c; }
+
+  const macBuf   = mkC(HI); const mctx = macBuf.getContext('2d');
+  const amigaBuf = mkC(LO); const actx = amigaBuf.getContext('2d');
+
+  // ── LUT ───────────────────────────────────────────────────────
+  const LUT_H = 360, LUT_L = 100;
+  const lutR = new Uint8Array(LUT_H * LUT_L);
+  const lutG = new Uint8Array(LUT_H * LUT_L);
+  const lutB = new Uint8Array(LUT_H * LUT_L);
+  (function() {
+    const q = v => Math.round(v * 15) * 17;
+    for (let h = 0; h < LUT_H; h++) for (let l = 0; l < LUT_L; l++) {
+      const hh=h/60, lf=l/99, C=1-Math.abs(2*lf-1), X=C*(1-Math.abs(hh%2-1));
+      let r=0,g=0,b=0;
+      if(hh<1){r=C;g=X;}else if(hh<2){r=X;g=C;}else if(hh<3){g=C;b=X;}
+      else if(hh<4){g=X;b=C;}else if(hh<5){r=X;b=C;}else{r=C;b=X;}
+      const m=lf-C/2, i=h*LUT_L+l;
+      lutR[i]=q(r+m); lutG[i]=q(g+m); lutB[i]=q(b+m);
+    }
+  })();
+
+  // ── Mac patterns ──────────────────────────────────────────────
+  const patDefs = [
+    [[1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1]],
+    [[1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1],[0,1,0,1,0,1,0,1],[1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1],[0,1,0,1,0,1,0,1]],
+    [[1,0,1,0,1,0,1,0],[1,1,1,1,1,1,1,1],[1,0,1,0,1,0,1,0],[1,1,1,1,1,1,1,1],[1,0,1,0,1,0,1,0],[1,1,1,1,1,1,1,1],[1,0,1,0,1,0,1,0],[1,1,1,1,1,1,1,1]],
+    [[1,0,1,0,1,0,1,0],[0,1,0,1,0,1,0,1],[1,0,1,0,1,0,1,0],[0,1,0,1,0,1,0,1],[1,0,1,0,1,0,1,0],[0,1,0,1,0,1,0,1],[1,0,1,0,1,0,1,0],[0,1,0,1,0,1,0,1]],
+    [[0,1,0,1,0,1,0,1],[1,1,1,1,1,1,1,1],[0,1,0,1,0,1,0,1],[0,0,0,0,0,0,0,0],[0,1,0,1,0,1,0,1],[1,1,1,1,1,1,1,1],[0,1,0,1,0,1,0,1],[0,0,0,0,0,0,0,0]],
+    [[1,0,0,0,1,0,0,0],[0,0,0,0,0,0,0,0],[0,0,1,0,0,0,1,0],[0,0,0,0,0,0,0,0],[1,0,0,0,1,0,0,0],[0,0,0,0,0,0,0,0],[0,0,1,0,0,0,1,0],[0,0,0,0,0,0,0,0]],
+    [[1,1,0,0,1,1,0,0],[1,1,0,0,1,1,0,0],[0,0,1,1,0,0,1,1],[0,0,1,1,0,0,1,1],[1,1,0,0,1,1,0,0],[1,1,0,0,1,1,0,0],[0,0,1,1,0,0,1,1],[0,0,1,1,0,0,1,1]],
+    [[1,1,1,0,1,1,1,0],[1,1,0,0,1,1,0,0],[1,0,0,0,1,0,0,0],[0,0,0,0,0,0,0,0],[1,1,1,0,1,1,1,0],[1,1,0,0,1,1,0,0],[1,0,0,0,1,0,0,0],[0,0,0,0,0,0,0,0]],
+    [[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0]],
+  ];
+  function makePatterns(c, inv) {
+    return patDefs.map(p => {
+      const pc = mkC(8); const pctx = pc.getContext('2d');
+      for (let py=0;py<8;py++) for (let px=0;px<8;px++) {
+        pctx.fillStyle = (p[py][px]^inv) ? '#fff' : '#000'; pctx.fillRect(px,py,1,1);
+      }
+      return c.createPattern(pc, 'repeat');
+    });
+  }
+  const macPat = makePatterns(mctx,0), macPatInv = makePatterns(mctx,1);
+
+  // ── Lines & caches ────────────────────────────────────────────
+  function makeLines(size, gap) {
+    const count = Math.floor((size+gap*3)/gap)+1, arr = [];
+    for (let i=0;i<count;i++)
+      arr.push({x:-gap+i*gap, amp:(1.5+i*0.4)*(size/LO), freq:(0.04+i*0.004)*(LO/size), phase:i*0.4});
+    return arr;
+  }
+  const macLines = makeLines(HI,20), amigaLines = makeLines(LO,10);
+  const macPts   = macLines.map(()=>Array.from({length:201},()=>[0,0]));
+  const amigaPts = amigaLines.map(()=>Array.from({length:101},()=>[0,0]));
+
+  function updatePoints(lines, cache, size, steps) {
+    for (let i=0;i<lines.length;i++) {
+      const l=lines[i], pts=cache[i];
+      for (let s=0;s<=steps;s++) {
+        const y=(size/steps)*s;
+        pts[s][0]=l.x+Math.sin(y*l.freq+l.phase+t)*l.amp; pts[s][1]=y;
+      }
+    }
+  }
+
+  function fillBandPath(c, left, right) {
+    c.beginPath(); c.moveTo(left[0][0],left[0][1]);
+    for (const [x,y] of left) c.lineTo(x,y);
+    for (let j=right.length-1;j>=0;j--) c.lineTo(right[j][0],right[j][1]);
+    c.closePath();
+  }
+
+  // ── Mac ───────────────────────────────────────────────────────
+  const macOff = mkC(HI); const moff = macOff.getContext('2d');
+
+  function drawMacBands(c, invert) {
+    c.fillStyle=invert?'#fff':'#000'; c.fillRect(0,0,HI,HI);
+    const p=invert?macPatInv:macPat, pi=invert?macPat:macPatInv;
+    for (let i=0;i<macPts.length-1;i++) {
+      fillBandPath(c,macPts[i],macPts[i+1]);
+      c.fillStyle=i%2===0?p[Math.floor(i/2)%(p.length-1)]:pi[Math.floor(i/2)%(pi.length-1)];
+      c.fill();
+    }
+  }
+
+  // ── Amiga ─────────────────────────────────────────────────────
+  const maskOpen   = mkC(LO); const moCtx = maskOpen.getContext('2d');
+  const maskClosed = mkC(LO); const mcCtx = maskClosed.getContext('2d');
+  const kalOpen    = mkC(LO); const koCtx = kalOpen.getContext('2d');
+  const kalClosed  = mkC(LO); const kcCtx = kalClosed.getContext('2d');
+  const copBright  = mkC(LO); const cbCtx = copBright.getContext('2d');
+  const copDark    = mkC(LO); const cdCtx = copDark.getContext('2d');
+  const tmpA       = mkC(LO); const taCtx = tmpA.getContext('2d');
+  const tmpB       = mkC(LO); const tbCtx = tmpB.getContext('2d');
+  const imgBright  = cbCtx.createImageData(LO,LO);
+  const imgDark    = cdCtx.createImageData(LO,LO);
+
+  // Pre-rendered scanlines
+  const scanlines  = mkC(LO); const slCtx = scanlines.getContext('2d');
+  for (let y=0;y<LO;y+=2) { slCtx.fillStyle='rgba(0,0,0,0.25)'; slCtx.fillRect(0,y,LO,1); }
+
+  function drawCopper(img, ctx, time, litBase, litAmp, hueShift) {
+    const d = img.data;
+    for (let y=0;y<LO;y++) {
+      const hue = ((y/LO*360+time*50+hueShift)%360+360)%360|0;
+      const lit = Math.min(99,Math.max(0,(litBase+Math.sin(y*0.04+time*3)*litAmp)|0));
+      const li = hue*LUT_L+lit;
+      const r=lutR[li],g=lutG[li],b=lutB[li],base=y*LO*4;
+      for (let x=0;x<LO;x++) { const i=base+x*4; d[i]=r;d[i+1]=g;d[i+2]=b;d[i+3]=255; }
+    }
+    ctx.putImageData(img,0,0);
+  }
+
+  function drawAmigaMasks() {
+    moCtx.fillStyle='#000'; moCtx.fillRect(0,0,LO,LO);
+    mcCtx.fillStyle='#000'; mcCtx.fillRect(0,0,LO,LO);
+    for (let i=0;i<amigaPts.length-1;i++) {
+      const open=i%2===0;
+      fillBandPath(moCtx,amigaPts[i],amigaPts[i+1]); moCtx.fillStyle=open?'#fff':'#000'; moCtx.fill();
+      fillBandPath(mcCtx,amigaPts[i],amigaPts[i+1]); mcCtx.fillStyle=open?'#000':'#fff'; mcCtx.fill();
+    }
+  }
+
+  function drawKaleido(dst, src, sz) {
+    dst.fillStyle='#000'; dst.fillRect(0,0,sz,sz);
+    const sa=(Math.PI*2)/segments;
+    for (let s=0;s<segments;s++) {
+      dst.save(); dst.translate(sz/2,sz/2); dst.rotate(s*sa);
+      dst.beginPath(); dst.moveTo(0,0); dst.arc(0,0,sz,0,sa); dst.closePath(); dst.clip();
+      if(s%2===1){dst.rotate(sa);dst.scale(-1,1);}
+      dst.translate(-sz/2,-sz/2); dst.drawImage(src,0,0); dst.restore();
+    }
+  }
+
+  // ── Camera ────────────────────────────────────────────────────
+  const STEP_DUR = 3.0;
+  function makeSeq(sz) {
+    const c=[{x:sz*.25,y:sz*.25},{x:sz*.75,y:sz*.25},{x:sz*.75,y:sz*.75},{x:sz*.25,y:sz*.75}];
+    return [
+      {zoom:1,  cx:sz/2,  cy:sz/2,  invert:false},
+      {zoom:2.5,cx:c[0].x,cy:c[0].y,invert:false},
+      {zoom:2.5,cx:c[1].x,cy:c[1].y,invert:false},
+      {zoom:2.5,cx:c[2].x,cy:c[2].y,invert:false},
+      {zoom:2.5,cx:c[3].x,cy:c[3].y,invert:false},
+      {zoom:1,  cx:sz/2,  cy:sz/2,  invert:true},
+      {zoom:2.5,cx:c[3].x,cy:c[3].y,invert:true},
+      {zoom:2.5,cx:c[2].x,cy:c[2].y,invert:true},
+      {zoom:2.5,cx:c[1].x,cy:c[1].y,invert:true},
+      {zoom:2.5,cx:c[0].x,cy:c[0].y,invert:true},
+    ];
+  }
+  const macSeq=makeSeq(HI), amigaSeq=makeSeq(LO);
+  function eio(x){return x<0.5?2*x*x:1-Math.pow(-2*x+2,2)/2;}
+  function lerp(a,b,x){return a+(b-a)*x;}
+
+  function getCamera(seq, elapsed) {
+    const looped=elapsed%(seq.length*STEP_DUR);
+    const idx=Math.floor(looped/STEP_DUR);
+    const frac=eio((looped%STEP_DUR)/STEP_DUR);
+    if(idx!==lastIdx){flashAlpha=1;lastIdx=idx;}
+    const cur=seq[idx],nxt=seq[(idx+1)%seq.length];
+    return{zoom:lerp(cur.zoom,nxt.zoom,frac),cx:lerp(cur.cx,nxt.cx,frac),cy:lerp(cur.cy,nxt.cy,frac),invert:cur.invert};
+  }
+
+  function vignette(c, sz) {
+    const vg=c.createRadialGradient(sz/2,sz/2,sz*.3,sz/2,sz/2,sz*.85);
+    vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(0,0,0,0.8)');
+    c.fillStyle=vg; c.fillRect(0,0,sz,sz);
+  }
+
+  const MODE_DUR=6.0, FADE_DUR=2.0;
+  function getMix(elapsed) {
+    const cycle=elapsed%(MODE_DUR*2);
+    if(cycle<MODE_DUR){
+      const f=cycle<FADE_DUR?cycle/FADE_DUR:cycle>MODE_DUR-FADE_DUR?(MODE_DUR-cycle)/FADE_DUR:1;
+      return f;
+    } else {
+      const c2=cycle-MODE_DUR;
+      const f=c2<FADE_DUR?c2/FADE_DUR:c2>MODE_DUR-FADE_DUR?(MODE_DUR-c2)/FADE_DUR:1;
+      return 1-f;
+    }
+  }
+
+  // ── Main loop ─────────────────────────────────────────────────
+  function draw(ts) {
+    if(!startTime) startTime=ts;
+    if(ts-lastFrame < INTERVAL){ requestAnimationFrame(draw); return; }
+    lastFrame=ts;
+
+    const elapsed=(ts-startTime)/1000;
+    const mix=getMix(elapsed);
+    const macCam=getCamera(macSeq,elapsed);
+    const amigaCam=getCamera(amigaSeq,elapsed);
+
+    updatePoints(macLines,  macPts,   HI,200);
+    updatePoints(amigaLines,amigaPts, LO,100);
+
+    // — Mac —
+    drawMacBands(moff,macCam.invert);
+    mctx.fillStyle='#000'; mctx.fillRect(0,0,HI,HI);
+    mctx.save();
+    mctx.translate(HI/2,HI/2); mctx.scale(macCam.zoom,macCam.zoom); mctx.translate(-macCam.cx,-macCam.cy);
+    drawKaleido(mctx,macOff,HI);
+    mctx.restore();
+    vignette(mctx,HI);
+
+    // — Amiga —
+    drawCopper(imgBright,cbCtx,elapsed,38,20,  0);
+    drawCopper(imgDark,  cdCtx,elapsed, 8, 4,180);
+    drawAmigaMasks();
+    drawKaleido(koCtx,maskOpen,  LO);
+    drawKaleido(kcCtx,maskClosed,LO);
+
+    taCtx.clearRect(0,0,LO,LO);
+    taCtx.drawImage(copBright,0,0);
+    taCtx.globalCompositeOperation='multiply';
+    taCtx.drawImage(kalOpen,0,0);
+    taCtx.globalCompositeOperation='source-over';
+
+    tbCtx.clearRect(0,0,LO,LO);
+    tbCtx.drawImage(copDark,0,0);
+    tbCtx.globalCompositeOperation='multiply';
+    tbCtx.drawImage(kalClosed,0,0);
+    tbCtx.globalCompositeOperation='source-over';
+
+    taCtx.globalCompositeOperation='screen';
+    taCtx.drawImage(tmpB,0,0);
+    taCtx.globalCompositeOperation='source-over';
+
+    actx.fillStyle='#000'; actx.fillRect(0,0,LO,LO);
+    actx.save();
+    actx.translate(LO/2,LO/2); actx.scale(amigaCam.zoom,amigaCam.zoom); actx.translate(-amigaCam.cx,-amigaCam.cy);
+    actx.drawImage(tmpA,0,0);
+    actx.restore();
+    actx.drawImage(scanlines,0,0);
+    vignette(actx,LO);
+
+    // — Composite —
+    dctx.fillStyle='#000'; dctx.fillRect(0,0,HI,HI);
+    dctx.globalAlpha=1-mix;
+    dctx.imageSmoothingEnabled=false;
+    dctx.drawImage(amigaBuf,0,0,HI,HI);
+    dctx.globalAlpha=mix;
+    dctx.imageSmoothingEnabled=true;
+    dctx.drawImage(macBuf,0,0);
+    dctx.globalAlpha=1;
+
+    if(flashAlpha>0){
+      dctx.fillStyle=`rgba(255,255,255,${flashAlpha})`; dctx.fillRect(0,0,HI,HI);
+      flashAlpha=Math.max(0,flashAlpha-.07);
+    }
+    dctx.fillStyle=`rgba(0,0,0,${Math.random()*.03})`; dctx.fillRect(0,0,HI,HI);
+
+    t+=0.03;
+    requestAnimationFrame(draw);
+  }
+
+  requestAnimationFrame(draw);
+</script>
+</body>
+</html>

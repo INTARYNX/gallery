@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TRIAD</title>
+<style>
+  html,body{margin:0;padding:0;background:#0e0e0f;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden}
+  #wrap{position:relative;width:min(100vw,100vh);height:min(100vw,100vh)}
+  canvas{position:absolute;inset:0;width:100%;height:100%;display:block;background:#000}
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c"></canvas></div>
+<script>
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d', { alpha:false });
+const DPR = (window.devicePixelRatio || 1) >= 1.5 ? 2 : 1;
+const S = 720*DPR;
+cv.width = cv.height = S;
+
+function mkCanvas(w,h){ const c=document.createElement('canvas'); c.width=w; c.height=h||w; return c; }
+
+const triad = mkCanvas(S);
+const tctx = triad.getContext('2d');
+const triadImg = tctx.createImageData(S,S);
+const ghost = mkCanvas(S);
+const gctx = ghost.getContext('2d');
+const glowC = mkCanvas(S>>3);
+const glctx = glowC.getContext('2d');
+
+// ---------- Sine LUT + atan2 rapide ----------
+const SLEN = 4096, S2PI = SLEN/(Math.PI*2);
+const SIN = new Float32Array(SLEN);
+for(let i=0;i<SLEN;i++) SIN[i] = Math.sin(i/S2PI);
+function sinL(x){ return SIN[((x*S2PI)|0) & (SLEN-1)]; }
+function fatan2(y, x){
+  const ax = Math.abs(x), ay = Math.abs(y);
+  const a = (ax > ay ? ay/ax : ax/ay) || 0;
+  const s = a*a;
+  let r = ((-0.0464964749*s + 0.15931422)*s - 0.327622764)*s*a + a;
+  if(ay > ax) r = 1.57079637 - r;
+  if(x < 0) r = 3.14159274 - r;
+  return y < 0 ? -r : r;
+}
+
+// ---------- Thèmes Amiga ----------
+function hex2rgb(c){ return [parseInt(c.slice(1,3),16), parseInt(c.slice(3,5),16), parseInt(c.slice(5,7),16)]; }
+const THEMES = [
+  ['#ff0055','#ff7700','#ffee00','#00ff66','#00ccff','#7733ff','#ff00cc'],
+  ['#ff2200','#ff6600','#ffaa00','#ffee00','#fff8cc','#cc3300','#881100'],
+  ['#0033ff','#0099ff','#00eeff','#aaffff','#ffffff','#0055cc','#002288'],
+  ['#00ff00','#88ff00','#ccff00','#005500','#aaffaa','#33cc00','#114400'],
+  ['#ff00ff','#cc00ff','#8800ff','#ff66ff','#440088','#ff00aa','#aa00cc'],
+  ['#ffffff','#aaaaaa','#666666','#ffee00','#333333','#dddddd','#888888']
+].map(p => p.map(hex2rgb));
+let theme = THEMES[0];
+
+let t = 0;
+
+// ---------- ÉTAPE 1 : pixelisation ----------
+const SIZES = [6, 9, 12, 18, 24].map(s => s*DPR);
+
+function makeLayer(ps){
+  const RES = S/ps;
+  const N = RES*RES;
+  const xArr = new Float32Array(N);
+  const yArr = new Float32Array(N);
+  const rArr = new Float32Array(N);
+  const mask = new Uint8Array(N);
+  for(let py=0; py<RES; py++){
+    for(let px=0; px<RES; px++){
+      const i = py*RES+px;
+      const x = (px/RES - 0.5)*2;
+      const y = (py/RES - 0.5)*2;
+      const r = Math.sqrt(x*x + y*y);
+      xArr[i] = x; yArr[i] = y; rArr[i] = r;
+      if(r <= 1.25) mask[i] = 1;
+    }
+  }
+  return { ps, RES, xArr, yArr, rArr, mask, rgb: new Uint8Array(N*3) };
+}
+const LAYERS = {};
+for(const ps of SIZES) LAYERS[ps] = makeLayer(ps);
+
+function renderSpiral(L){
+  const {RES, xArr, yArr, rArr, mask, rgb} = L;
+  const tw = t*0.04, t3 = t*0.03, ci0 = t*0.01, tc = t*0.03;
+  const p1 = t*0.013, p2 = t*0.009, p3 = t*0.017;
+  const rot = t*0.006 + sinL(t*0.002)*0.8;
+  const cr = Math.cos(rot), sr = Math.sin(rot);
+  const INV_PI12 = 1.2/Math.PI;
+  for(let i=0, n=RES*RES; i<n; i++){
+    const o = i*3;
+    const x0 = xArr[i], y0 = yArr[i];
+
+    // fond plasma posterisé aux couleurs du thème
+    let pv = sinL(x0*3.1 + p1) + sinL(y0*2.7 - p2) + sinL((x0+y0)*2.2 + p3)
+           + sinL(rArr[i]*4.5 - p1);
+    pv = pv*0.125 + 0.5;
+    const pc = theme[(pv*6.99)|0];
+    let plum = 0.10 + 0.10*(((pv*3)|0)/3);
+
+    let spiral = false;
+    if(mask[i]){
+      const rx = x0*cr - y0*sr;
+      const ry = x0*sr + y0*cr;
+      const dx = rx - sinL(tc + rArr[i]*4)*0.2;
+      const r = Math.sqrt(dx*dx + ry*ry);
+      if(r <= 1){
+        const sw = fatan2(ry, dx) + 6/(r+0.18) + tw;
+        const band = sinL(sw*3)*0.5 + 0.5;
+        let lum = band * (1 - r*r) * (0.6 + 0.4*sinL(t3 + r*8));
+        lum = ((lum*5+0.5)|0)/5;
+        if(lum > 0){
+          const ci = Math.floor(sw*INV_PI12 + ci0);
+          const c = theme[((ci % 7) + 7) % 7];
+          rgb[o]   = c[0]*lum;
+          rgb[o+1] = c[1]*lum;
+          rgb[o+2] = c[2]*lum;
+          spiral = true;
+        }
+      }
+    }
+    if(!spiral){
+      rgb[o]   = pc[0]*plum;
+      rgb[o+1] = pc[1]*plum;
+      rgb[o+2] = pc[2]*plum;
+    }
+    if(textMask && textMask.RES === RES && textMask.data[i]){
+      rgb[o] = rgb[o+1] = rgb[o+2] = 235;
+    }
+  }
+}
+
+// ---------- ÉTAPE 2 : tuiles de triade (3 géométries historiques) ----------
+function makeTile(ps, kind, styleRef){
+  styleRef = styleRef || ps;
+  const chan = new Int8Array(ps*ps).fill(-1);
+  const sw = new Float32Array(ps*ps);
+  const amb = new Float32Array(ps*ps);
+  const third = ps/3;
+
+  if(kind === 1){
+    // shadow mask : pastilles PLEINES à bord net (cœur plat, chute rapide
+    // sur le bord) — comme les pastilles franches de la référence
+    const dots = [[0.25,0.27,0],[0.75,0.27,1],[0.5,0.77,2]];
+    const rad = ps*0.27;
+    const rim = 0.82; // au-delà : transition de bord
+    for(let y=0; y<ps; y++){
+      for(let x=0; x<ps; x++){
+        const i = y*ps+x;
+        let best = 0, bc = -1;
+        for(const [dx,dy,c] of dots){
+          const ddx = (x+0.5) - dx*ps, ddy = (y+0.5) - dy*ps;
+          const d = Math.sqrt(ddx*ddx + ddy*ddy)/rad;
+          if(d < 1){
+            const w = d < rim ? 1 : (1-d)/(1-rim);
+            if(w > best){ best = w; bc = c; }
+          }
+        }
+        chan[i] = bc;
+        sw[i] = best;
+      }
+    }
+    return { ps, chan, sw, amb, stagX: true, stagY: false };
+  }
+
+  if(kind === 0){
+    // aperture grille : bandes CONTINUES pleine hauteur, gaps noirs francs
+    const g = 0.13, e = 0.07;
+    for(let y=0; y<ps; y++){
+      for(let x=0; x<ps; x++){
+        const i = y*ps+x;
+        const s = Math.min(2, (x/third)|0);
+        const u = (x+0.5)/third - s;
+        if(u < g || u > 1-g) continue;
+        let w = 1;
+        if(u < g+e) w = (u-g)/e;
+        else if(u > 1-g-e) w = (1-g-u)/e;
+        chan[i] = s;
+        sw[i] = w;
+        amb[i] = 0.22;
+      }
+    }
+    return { ps, chan, sw, amb, stagX: false, stagY: false };
+  }
+
+  // slot mask : pilules verticales, colonnes décalées d'un demi-slot
+  {
+    const g = 0.10, e = 0.06;
+    const vg = 0.07, vEdge = 0.18;
+    for(let y=0; y<ps; y++){
+      const yn = (y+0.5)/ps;
+      if(yn < vg || yn > 1-vg) continue;
+      const ya = (yn - vg)/(1 - 2*vg);
+      let vy = 1;
+      if(ya < vEdge) vy = Math.sin(ya/vEdge*Math.PI/2);
+      else if(ya > 1-vEdge) vy = Math.sin((1-ya)/vEdge*Math.PI/2);
+      for(let x=0; x<ps; x++){
+        const i = y*ps+x;
+        const s = Math.min(2, (x/third)|0);
+        const u = (x+0.5)/third - s;
+        if(u < g || u > 1-g) continue;
+        let hx = 1;
+        if(u < g+e) hx = (u-g)/e;
+        else if(u > 1-g-e) hx = (1-g-u)/e;
+        chan[i] = s;
+        sw[i] = hx*vy;
+        amb[i] = 0.18*vy;
+      }
+    }
+    return { ps, chan, sw, amb, stagX: false, stagY: true };
+  }
+}
+
+const KINDS = [0,1,2];
+const ZOOM = 6;
+const TILES = {};
+const LTILES = {};
+for(const kd of KINDS){
+  TILES[kd] = {};
+  LTILES[kd] = {};
+  for(const ps of SIZES){
+    TILES[kd][ps] = makeTile(ps, kd);
+    LTILES[kd][ps] = makeTile(ps*ZOOM, kd, ps);
+  }
+}
+
+// ---------- texte du type de masque ----------
+const KIND_NAMES = ['APERTURE GRILLE', 'DELTA SHADOW MASK', 'SLOT MASK'];
+const textC = mkCanvas(8,8);
+const txctx = textC.getContext('2d');
+let textMask = null;
+
+function buildTextMask(RES, kind){
+  if(RES < 80){ textMask = null; return; }
+  textC.width = textC.height = RES;
+  txctx.clearRect(0,0,RES,RES);
+  const label = KIND_NAMES[kind];
+  const fs = Math.round(RES*0.115);
+  txctx.font = `800 ${fs}px "Futura", "Avenir Next", "Trebuchet MS", "Helvetica Neue", sans-serif`;
+  txctx.letterSpacing = `${(fs*0.14)|0}px`;
+  txctx.textBaseline = 'middle';
+  txctx.textAlign = 'center';
+  txctx.fillStyle = '#fff';
+  const words = label.split(' ');
+  const lines = [];
+  let cur = '';
+  for(const w of words){
+    const test = cur ? cur + ' ' + w : w;
+    if(txctx.measureText(test).width <= RES*0.94 || !cur) cur = test;
+    else { lines.push(cur); cur = w; }
+  }
+  lines.push(cur);
+  const lh = fs*1.18;
+  const y0 = RES/2 - (lines.length-1)*lh/2;
+  for(let li=0; li<lines.length; li++){
+    txctx.fillText(lines[li], Math.round(RES/2), Math.round(y0 + li*lh));
+  }
+  const a = txctx.getImageData(0,0,RES,RES).data;
+  const m = new Uint8Array(RES*RES);
+  for(let i=0;i<RES*RES;i++) m[i] = a[i*4+3] > 100 ? 1 : 0;
+  textMask = { data: m, RES };
+}
+
+// ---------- État CRT ----------
+const CRT = { brightness:1.5, jx:0, jy:0, tearY:-1, tearShift:0, invert:0, ghostAlpha:0, roll:0, glow:0.4 };
+let sizeIdx = 0;
+let kindIdx = 0;
+let beatStep = 1; // le chapitre GRILLE est déjà entamé au lancement (titre affiché)
+
+function updateCRT(){
+  const beatPhase = (t % 180) / 180;
+
+  // séquence structurée par masque : titre en HD, puis descente de
+  // résolution complète (moyen -> gros -> très gros), puis masque suivant
+  if(t % 180 === 0){
+    const phase = beatStep % 4;
+    if(phase === 0){
+      kindIdx = (kindIdx + 1) % KINDS.length;  // masque suivant
+      sizeIdx = 0;                              // HD : le titre s'affiche
+      let nt; do { nt = THEMES[(Math.random()*THEMES.length)|0]; } while(nt === theme);
+      theme = nt;
+    }else{
+      sizeIdx = 1 + phase;                      // 2, 3, 4 : descente low res
+    }
+    beatStep++;
+    buildTextMask(S/SIZES[sizeIdx], KINDS[kindIdx]);
+  }
+
+  CRT.roll = (t*0.6) % S;
+  CRT.brightness = 1.4 + Math.sin(t*0.05)*0.2 + (Math.random()<0.02 ? 0.5 : 0);
+  CRT.ghostAlpha = beatPhase < 0.12 ? 0.3 : 0;
+
+  CRT.jx = 0; CRT.jy = 0; CRT.tearY = -1; CRT.invert = 0;
+  if(Math.random() < 0.04){ CRT.jx = (Math.random()-0.5)*12*DPR; CRT.jy = (Math.random()-0.5)*4*DPR; }
+  if(Math.random() < 0.025){ CRT.tearY = Math.random()*S; CRT.tearShift = (Math.random()-0.5)*30*DPR; }
+  if(Math.random() < 0.008) CRT.invert = 1;
+
+  // démagnétisation : wobble amorti juste après chaque changement de masque
+  const degauss = Math.exp(-beatPhase*9) * Math.sin(beatPhase*90);
+  CRT.jx += degauss*22*DPR;
+  CRT.jy += degauss*7*DPR;
+}
+
+const BLANK = new Uint8ClampedArray(S*S*4);
+for(let i=3, n=S*S*4; i<n; i+=4) BLANK[i] = 255;
+
+// persistance phosphore : chaque canal s'éteint à sa propre vitesse
+// (P22 réel : le bleu meurt plus vite que le vert, le vert que le rouge)
+const persist = new Uint8ClampedArray(S*S*4);
+const KR = 239, KG = 230, KB = 222; // ×/256 : 0.933, 0.898, 0.867
+
+function applyPersistence(D){
+  for(let i=0, n=S*S*4; i<n; i+=4){
+    const pr = (persist[i]  *KR)>>8;
+    const pg = (persist[i+1]*KG)>>8;
+    const pb = (persist[i+2]*KB)>>8;
+    const r = D[i]   > pr ? D[i]   : pr;
+    const g = D[i+1] > pg ? D[i+1] : pg;
+    const b = D[i+2] > pb ? D[i+2] : pb;
+    D[i] = persist[i] = r;
+    D[i+1] = persist[i+1] = g;
+    D[i+2] = persist[i+2] = b;
+  }
+}
+
+function drawTriads(L, T){
+  const {RES, rgb} = L;
+  const {ps, chan, sw, amb, stagX, stagY} = T;
+  const D = triadImg.data;
+  D.set(BLANK);
+
+  const bright = CRT.brightness;
+  const inv = CRT.invert > 0.5;
+  const jx = CRT.jx|0, jy = CRT.jy|0;
+  const tearY = CRT.tearY, tearShift = CRT.tearShift|0;
+  const half = ps>>1;
+
+  for(let cy=0; cy<RES; cy++){
+    const py0r = cy*ps + jy;
+    if(py0r >= S || py0r + ps + half < 0) continue;
+    const inTear = tearY >= 0 && py0r > tearY && py0r < tearY + 30*DPR;
+    const rowOff = (stagX && (cy & 1)) ? half : 0;
+    for(let cx=0; cx<RES; cx++){
+      const ci = (cy*RES+cx)*3;
+      let r = rgb[ci], g = rgb[ci+1], b = rgb[ci+2];
+      if(r===0 && g===0 && b===0 && !inv) continue;
+      if(inv){ r=255-r; g=255-g; b=255-b; }
+      r = Math.min(255, r*bright);
+      g = Math.min(255, g*bright);
+      b = Math.min(255, b*bright);
+
+      let px0 = cx*ps + jx + rowOff;
+      const py0 = py0r + ((stagY && (cx & 1)) ? half : 0);
+      if(py0 >= S) continue;
+      if(inTear) px0 += tearShift;
+      if(px0 >= S || px0 + ps < 0) continue;
+
+      for(let ty=0; ty<ps; ty++){
+        const row = py0 + ty;
+        if(row < 0 || row >= S) continue;
+        const tBase = ty*ps;
+        const rowBase = row*S;
+        for(let tx=0; tx<ps; tx++){
+          const x = px0 + tx;
+          if(x < 0 || x >= S) continue;
+          const ti = tBase + tx;
+          const a = amb[ti], w = sw[ti];
+          if(a === 0 && w === 0) continue;
+          const o = (rowBase + x)*4;
+          const c = chan[ti];
+          D[o]   = (c===0 ? r*(a+w) : r*a);
+          D[o+1] = (c===1 ? g*(a+w) : g*a);
+          D[o+2] = (c===2 ? b*(a+w) : b*a);
+        }
+      }
+    }
+  }
+  applyPersistence(D);
+  tctx.putImageData(triadImg, 0, 0);
+}
+
+// ---------- lens : re-rendu hi-res ----------
+const LTW = 264, LTH = 204;
+const lensC = mkCanvas(LTW*DPR, LTH*DPR);
+const lctx = lensC.getContext('2d');
+const lensImg = lctx.createImageData(LTW*DPR, LTH*DPR);
+
+function renderLens(L, T, srcL, srcT){
+  const {RES, rgb} = L;
+  const {ps, chan, sw, amb, stagX, stagY} = T;
+  const screenPs = ps/ZOOM;
+  const W = lensC.width, H = lensC.height;
+  const D = lensImg.data;
+  for(let i=0, n=W*H*4; i<n; i+=4){ D[i]=D[i+1]=D[i+2]=0; D[i+3]=255; }
+
+  const bright = CRT.brightness;
+  const cy0 = Math.floor(srcT/screenPs) - 1;
+  const cy1 = Math.ceil((srcT + H/ZOOM)/screenPs) + 1;
+  const cx0 = Math.floor(srcL/screenPs) - 2;
+  const cx1 = Math.ceil((srcL + W/ZOOM)/screenPs) + 1;
+
+  for(let cy=cy0; cy<=cy1; cy++){
+    if(cy < 0 || cy >= RES) continue;
+    const rowOff = (stagX && (cy & 1)) ? screenPs/2 : 0;
+    const oyr = Math.round((cy*screenPs - srcT)*ZOOM);
+    for(let cx=cx0; cx<=cx1; cx++){
+      if(cx < 0 || cx >= RES) continue;
+      const oy = oyr + ((stagY && (cx & 1)) ? (ps>>1) : 0);
+      const ci = (cy*RES+cx)*3;
+      let r = rgb[ci], g = rgb[ci+1], b = rgb[ci+2];
+      if(r===0 && g===0 && b===0) continue;
+      r = Math.min(255, r*bright);
+      g = Math.min(255, g*bright);
+      b = Math.min(255, b*bright);
+      const ox = Math.round((cx*screenPs + rowOff - srcL)*ZOOM);
+      if(ox >= W || ox + ps < 0 || oy >= H || oy + ps < 0) continue;
+
+      for(let ty=0; ty<ps; ty++){
+        const row = oy + ty;
+        if(row < 0 || row >= H) continue;
+        const tBase = ty*ps;
+        const rowBase = row*W;
+        for(let tx=0; tx<ps; tx++){
+          const x = ox + tx;
+          if(x < 0 || x >= W) continue;
+          const ti = tBase + tx;
+          const a = amb[ti], w = sw[ti];
+          if(a === 0 && w === 0) continue;
+          const o = (rowBase + x)*4;
+          const c = chan[ti];
+          D[o]   = (c===0 ? r*(a+w) : r*a);
+          D[o+1] = (c===1 ? g*(a+w) : g*a);
+          D[o+2] = (c===2 ? b*(a+w) : b*a);
+        }
+      }
+    }
+  }
+  lctx.putImageData(lensImg, 0, 0);
+}
+
+// superellipse
+function tubePath(g, cx, cy, w, h, n){
+  const hw = w/2, hh = h/2, e = 2/n;
+  g.beginPath();
+  for(let i=0; i<=64; i++){
+    const a = i/64*Math.PI*2;
+    const c = Math.cos(a), s = Math.sin(a);
+    const x = cx + hw * Math.sign(c) * Math.pow(Math.abs(c), e);
+    const y = cy + hh * Math.sign(s) * Math.pow(Math.abs(s), e);
+    i===0 ? g.moveTo(x,y) : g.lineTo(x,y);
+  }
+  g.closePath();
+}
+
+function compose(){
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0,0,S,S);
+  if(CRT.ghostAlpha > 0){
+    ctx.globalAlpha = CRT.ghostAlpha;
+    ctx.drawImage(ghost, 0, 0);
+    ctx.globalAlpha = 1;
+  }
+
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.drawImage(triad, 0, 0);
+
+  glctx.clearRect(0,0,glowC.width,glowC.height);
+  glctx.drawImage(triad, 0, 0, glowC.width, glowC.height);
+
+  const rollY = CRT.roll;
+  const barH = S*0.18;
+  const rg = ctx.createLinearGradient(0, rollY-barH, 0, rollY+barH);
+  rg.addColorStop(0,'rgba(255,255,255,0)');
+  rg.addColorStop(0.5,'rgba(255,255,255,0.07)');
+  rg.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.fillStyle = rg;
+  ctx.fillRect(0, rollY-barH, S, barH*2);
+
+  ctx.globalCompositeOperation = 'source-over';
+
+  // ---------- lens "écran tube" ----------
+  {
+    const TW = LTW*DPR, TH = LTH*DPR;
+    const sw2 = TW/ZOOM, sh2 = TH/ZOOM;
+    const mx = S*0.36 + Math.sin(t*0.004)*S*0.17;
+    const my = S*0.36 + Math.cos(t*0.003)*S*0.17;
+    const lx = S - TW/2 - 30*DPR, ly = S - TH/2 - 30*DPR;
+
+    const ps = SIZES[sizeIdx];
+    renderLens(LAYERS[ps], LTILES[KINDS[kindIdx]][ps], mx-sw2/2, my-sh2/2);
+
+    ctx.save();
+    tubePath(ctx, lx, ly, TW, TH, 3.2);
+    ctx.clip();
+    ctx.fillStyle = '#000';
+    ctx.fill();
+
+    ctx.imageSmoothingEnabled = true;
+    const slices = 24, k = 0.18;
+    for(let j=0; j<slices; j++){
+      const yn = (j+0.5)/slices*2 - 1;
+      const squeeze = 1 - k*yn*yn;
+      const dh = TH/slices;
+      const dy = ly - TH/2 + j*dh;
+      const dw = TW*squeeze;
+      ctx.drawImage(lensC, 0, j*lensC.height/slices, lensC.width, lensC.height/slices, lx-dw/2, dy, dw, dh+1);
+    }
+
+    const eg = ctx.createRadialGradient(lx, ly, TH*0.3, lx, ly, TW*0.62);
+    eg.addColorStop(0, 'rgba(0,0,0,0)');
+    eg.addColorStop(0.75, 'rgba(0,0,0,0.25)');
+    eg.addColorStop(1, 'rgba(0,0,0,0.8)');
+    ctx.fillStyle = eg;
+    ctx.fillRect(lx-TW, ly-TH, TW*2, TH*2);
+
+    const hg = ctx.createRadialGradient(lx-TW*0.28, ly-TH*0.32, 6, lx-TW*0.18, ly-TH*0.2, TW*0.5);
+    hg.addColorStop(0, 'rgba(255,255,255,0.18)');
+    hg.addColorStop(0.4, 'rgba(255,255,255,0.05)');
+    hg.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = hg;
+    ctx.fillRect(lx-TW, ly-TH, TW*2, TH*2);
+    ctx.restore();
+
+    ctx.strokeStyle = 'rgba(180,200,220,0.22)';
+    ctx.lineWidth = 1.5*DPR;
+    tubePath(ctx, lx, ly, TW, TH, 3.2);
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(180,200,220,0.4)';
+    ctx.lineWidth = 1*DPR;
+    tubePath(ctx, mx, my, sw2, sh2, 3.2);
+    ctx.stroke();
+  }
+
+  // vignette
+  const vg = ctx.createRadialGradient(S/2,S/2,S*0.35,S/2,S/2,S*0.74);
+  vg.addColorStop(0,'transparent');
+  vg.addColorStop(1,'rgba(0,0,0,0.5)');
+  ctx.fillStyle = vg;
+  ctx.fillRect(0,0,S,S);
+
+  gctx.drawImage(cv, 0, 0);
+}
+
+function loop(){
+  t++;
+  if(t === 1) buildTextMask(S/SIZES[sizeIdx], KINDS[kindIdx]);
+  updateCRT();
+  const ps = SIZES[sizeIdx];
+  const L = LAYERS[ps];
+  renderSpiral(L);
+  drawTriads(L, TILES[KINDS[kindIdx]][ps]);
+  compose();
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>

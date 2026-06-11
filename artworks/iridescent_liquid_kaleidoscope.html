@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const off  = document.createElement('canvas');   // scene
+const octx = off.getContext('2d');
+const meta = document.createElement('canvas');    // metaball mask
+const mctx = meta.getContext('2d');
+const tmp  = document.createElement('canvas');    // bubble compositing + warped output
+const tx   = tmp.getContext('2d');
+
+let t = 0;
+let W = 0, H = 0;
+let dstData = null;
+
+const SEGMENTS = 8;
+
+const waves = [
+  { amp:14, freq:0.025, speed:0.6, phase:0 },
+  { amp:10, freq:0.04,  speed:1.0, phase:2 },
+  { amp:8,  freq:0.06,  speed:0.8, phase:5 },
+  { amp:6,  freq:0.09,  speed:1.4, phase:1 },
+];
+
+function resize() {
+  const s = Math.min(window.innerWidth, window.innerHeight);
+  canvas.width = s; canvas.height = s;
+  W = s; H = s;
+  off.width = W;  off.height = H;
+  meta.width = W; meta.height = H;
+  tmp.width = W;  tmp.height = H;
+  dstData = octx.createImageData(W, H);
+}
+resize();
+window.addEventListener('resize', resize);
+
+function hsl(h, s, l, a = 1) {
+  return `hsla(${h % 360},${s}%,${l}%,${a})`;
+}
+
+const bubbles = Array.from({ length: 7 }, (_, i) => ({
+  x:   Math.random(),
+  y:   Math.random(),
+  r:   0.06 + Math.random() * 0.07,
+  spx: 0.15 + Math.random() * 0.35,
+  spy: 0.15 + Math.random() * 0.35,
+  ax:  0.18 + Math.random() * 0.14,
+  ay:  0.18 + Math.random() * 0.14,
+  ph:  Math.random() * Math.PI * 2,
+  hue: Math.random() * 360,
+}));
+
+const oilSpots = Array.from({ length: 4 }, () => ({
+  x:   Math.random(),
+  y:   Math.random(),
+  r:   0.025 + Math.random() * 0.05,
+  spx: 0.08 + Math.random() * 0.20,
+  spy: 0.08 + Math.random() * 0.20,
+  ax:  0.10 + Math.random() * 0.20,
+  ay:  0.10 + Math.random() * 0.20,
+  ph:  Math.random() * Math.PI * 2,
+  hue: Math.random() * 360,
+  squash: 0.5 + Math.random() * 0.6,
+  rot: Math.random() * Math.PI,
+}));
+
+const caustics = Array.from({ length: 16 }, () => ({
+  x: Math.random(), y: Math.random(),
+  r: 0.10 + Math.random() * 0.18,
+  speed: 0.2 + Math.random() * 0.5,
+  phase: Math.random() * Math.PI * 2,
+  alpha: 0.05 + Math.random() * 0.08,
+}));
+
+function positionsAt() {
+  return bubbles.map((b, i) => {
+    const x = (0.5 + (b.x - 0.5) * 0.4 + Math.sin(t * b.spx + b.ph) * b.ax) * W;
+    const y = (0.5 + (b.y - 0.5) * 0.4 + Math.cos(t * b.spy + b.ph) * b.ay) * H;
+    const rr = Math.min(W, H) * b.r;
+    return { x, y, rr, hue: b.hue, i };
+  });
+}
+
+function buildMask(positions) {
+  mctx.clearRect(0, 0, W, H);
+  mctx.globalCompositeOperation = 'lighter';
+  for (const p of positions) {
+    const g = mctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.rr * 2.4);
+    g.addColorStop(0,    'rgba(255,255,255,1)');
+    g.addColorStop(0.35, 'rgba(255,255,255,0.7)');
+    g.addColorStop(0.7,  'rgba(255,255,255,0.28)');
+    g.addColorStop(1,    'rgba(255,255,255,0)');
+    mctx.fillStyle = g;
+    mctx.beginPath(); mctx.arc(p.x, p.y, p.rr * 2.4, 0, Math.PI * 2); mctx.fill();
+  }
+  mctx.globalCompositeOperation = 'source-over';
+  const fld = mctx.getImageData(0, 0, W, H);
+  const fd = fld.data;
+  const HI = 165, HI_SOFT = 22, LO = 95, LO_SOFT = 45;
+  for (let p = 3; p < fd.length; p += 4) {
+    const a = fd[p];
+    const core   = a < HI ? 0 : a > HI + HI_SOFT ? 255 : ((a - HI) / HI_SOFT) * 255;
+    const bridge = a < LO ? 0 : a > LO + LO_SOFT ? 255 : ((a - LO) / LO_SOFT) * 255;
+    fd[p] = core > bridge ? core : bridge;
+  }
+  mctx.putImageData(fld, 0, 0);
+}
+
+function oilFill(c, x, y, rr, hue, shift) {
+  const bands = [
+    { cx: x - rr*0.25, cy: y - rr*0.20, hOff: 0,   a: 0.55 },
+    { cx: x + rr*0.15, cy: y - rr*0.10, hOff: 55,  a: 0.45 },
+    { cx: x - rr*0.10, cy: y + rr*0.25, hOff: 120, a: 0.40 },
+    { cx: x + rr*0.20, cy: y + rr*0.10, hOff: 190, a: 0.38 },
+    { cx: x - rr*0.05, cy: y - rr*0.30, hOff: 265, a: 0.35 },
+  ];
+  c.globalCompositeOperation = 'screen';
+  for (const b of bands) {
+    const gr = c.createRadialGradient(b.cx, b.cy, 0, b.cx, b.cy, rr * 1.3);
+    const h0 = (hue + b.hOff + shift) % 360;
+    gr.addColorStop(0,    hsl(h0,      100, 55, b.a));
+    gr.addColorStop(0.35, hsl(h0 + 40, 100, 35, b.a * 0.7));
+    gr.addColorStop(0.65, hsl(h0 + 90, 100, 55, b.a * 0.5));
+    gr.addColorStop(1,    hsl(h0,      100, 35, 0));
+    c.fillStyle = gr;
+    c.fillRect(x - rr*1.3, y - rr*1.3, rr * 2.6, rr * 2.6);
+  }
+  const gSpec = c.createRadialGradient(x - rr*0.3, y - rr*0.35, 0, x - rr*0.3, y - rr*0.35, rr * 0.38);
+  gSpec.addColorStop(0,   'rgba(255,255,255,0.20)');
+  gSpec.addColorStop(0.4, 'rgba(255,255,255,0.05)');
+  gSpec.addColorStop(1,   'rgba(255,255,255,0)');
+  c.fillStyle = gSpec;
+  c.fillRect(x - rr, y - rr, rr * 2, rr * 2);
+  c.globalCompositeOperation = 'source-over';
+}
+
+function oilyBackground(c, shift) {
+  const bg = c.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0,   'rgb(12,46,58)');
+  bg.addColorStop(0.4, 'rgb(8,32,46)');
+  bg.addColorStop(0.75,'rgb(5,18,32)');
+  bg.addColorStop(1,   'rgb(2,8,18)');
+  c.fillStyle = bg; c.fillRect(0, 0, W, H);
+
+  c.globalCompositeOperation = 'screen';
+  const rays = 5;
+  for (let i = 0; i < rays; i++) {
+    const baseX = ((i + 0.5) / rays) * W + Math.sin(t * 0.3 + i) * W * 0.04;
+    const w = W * 0.10;
+    const g = c.createLinearGradient(baseX, 0, baseX + W * 0.08, H);
+    g.addColorStop(0,   'rgba(90,180,200,0.10)');
+    g.addColorStop(0.6, 'rgba(40,110,140,0.04)');
+    g.addColorStop(1,   'rgba(0,0,0,0)');
+    c.fillStyle = g;
+    c.beginPath();
+    c.moveTo(baseX - w*0.3, 0);
+    c.lineTo(baseX + w*0.3, 0);
+    c.lineTo(baseX + W*0.08 + w, H);
+    c.lineTo(baseX + W*0.08 - w, H);
+    c.closePath();
+    c.fill();
+  }
+
+  for (const ca of caustics) {
+    const x = (ca.x + Math.sin(t * ca.speed * 0.4 + ca.phase) * 0.06) * W;
+    const y = (ca.y + Math.cos(t * ca.speed * 0.3 + ca.phase) * 0.05) * H;
+    const r = ca.r * Math.min(W, H) * (0.85 + 0.15 * Math.sin(t * ca.speed + ca.phase));
+    const g = c.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0,   `rgba(120,210,220,${ca.alpha})`);
+    g.addColorStop(0.5, `rgba(60,150,170,${ca.alpha * 0.5})`);
+    g.addColorStop(1,   'rgba(0,40,60,0)');
+    c.fillStyle = g;
+    c.beginPath();
+    c.ellipse(x, y, r, r * 0.55, t * ca.speed * 0.2, 0, Math.PI * 2);
+    c.fill();
+  }
+  c.globalCompositeOperation = 'source-over';
+}
+
+function drawOilSpots(c, shift) {
+  c.globalCompositeOperation = 'screen';
+  for (const s of oilSpots) {
+    const x = (0.5 + (s.x - 0.5) * 0.9 + Math.sin(t * s.spx + s.ph) * s.ax) * W;
+    const y = (0.5 + (s.y - 0.5) * 0.9 + Math.cos(t * s.spy + s.ph) * s.ay) * H;
+    const rr = Math.min(W, H) * s.r;
+    const hue = (s.hue + shift) % 360;
+    c.save();
+    c.translate(x, y);
+    c.rotate(s.rot + t * 0.05);
+    c.scale(1, s.squash);
+    const g = c.createRadialGradient(0, 0, 0, 0, 0, rr);
+    g.addColorStop(0,   hsl(hue,       100, 60, 0.30));
+    g.addColorStop(0.4, hsl(hue + 50,  100, 45, 0.22));
+    g.addColorStop(0.7, hsl(hue + 110, 100, 50, 0.14));
+    g.addColorStop(1,   hsl(hue + 160, 100, 40, 0));
+    c.fillStyle = g;
+    c.beginPath(); c.arc(0, 0, rr, 0, Math.PI * 2); c.fill();
+    c.restore();
+  }
+  c.globalCompositeOperation = 'source-over';
+}
+
+function drawScene() {
+  const shift = t * 50;
+
+  oilyBackground(octx, shift);
+  drawOilSpots(octx, shift);
+
+  const positions = positionsAt();
+  buildMask(positions);
+
+  tx.globalCompositeOperation = 'source-over';
+  tx.clearRect(0, 0, W, H);
+  tx.fillStyle = 'rgba(8,6,14,1)';
+  tx.fillRect(0, 0, W, H);
+  for (const p of positions) {
+    oilFill(tx, p.x, p.y, p.rr, (p.hue + p.i * 45 + t * 30) % 360, shift + p.i * 73);
+  }
+  tx.globalCompositeOperation = 'destination-in';
+  tx.drawImage(meta, 0, 0);
+  tx.globalCompositeOperation = 'source-over';
+
+  octx.drawImage(tmp, 0, 0);   // bubbles over background, scene complete in off
+}
+
+function kaleidoscope(c, srcCanvas) {
+  c.save();
+  c.clearRect(0, 0, W, H);
+  c.translate(W / 2, H / 2);
+  const step = (Math.PI * 2) / SEGMENTS;
+  const R = Math.hypot(W, H);
+  const spin = t * 0.15;
+  const bleed = 0.012; // slight wedge overlap to hide seams
+  for (let i = 0; i < SEGMENTS; i++) {
+    c.save();
+    c.rotate(spin + i * step);
+    if (i % 2 === 1) c.scale(1, -1);
+    c.beginPath();
+    c.moveTo(0, 0);
+    c.arc(0, 0, R, -step / 2 - bleed, step / 2 + bleed);
+    c.closePath();
+    c.clip();
+    c.scale(1.6, 1.6);
+    c.drawImage(srcCanvas, -W / 2, -H / 2);
+    c.restore();
+  }
+  c.restore();
+}
+
+function render() {
+  drawScene();                         // scene in off
+
+  // 1) warp off → tmp
+  const src = octx.getImageData(0, 0, W, H);
+  const sd = src.data, dd = dstData.data;
+  for (let y = 0; y < H; y++) {
+    let dxRow = 0;
+    for (const w of waves) dxRow += w.amp * Math.sin(y * w.freq + t * w.speed + w.phase);
+    for (let x = 0; x < W; x++) {
+      let dy = 0;
+      for (const w of waves) dy += w.amp * Math.cos(x * w.freq * 0.8 + t * w.speed * 0.9 + w.phase + 1);
+      let sx = x + dxRow; sx = sx < 0 ? 0 : sx > W-1 ? W-1 : sx | 0;
+      let sy = y + dy;    sy = sy < 0 ? 0 : sy > H-1 ? H-1 : sy | 0;
+      const di = (y * W + x) * 4, si = (sy * W + sx) * 4;
+      dd[di] = sd[si]; dd[di+1] = sd[si+1]; dd[di+2] = sd[si+2]; dd[di+3] = 255;
+    }
+  }
+  tx.putImageData(dstData, 0, 0);      // warped scene in tmp
+
+  // 2) kaleidoscope tmp → screen
+  kaleidoscope(ctx, tmp);
+
+  t += 0.02;
+  requestAnimationFrame(render);
+}
+render();
+</script>
+</body>
+</html>

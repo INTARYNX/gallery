@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+let W, H, t = 0;
+
+// offscreen layers
+const offA = document.createElement('canvas'); // flame
+const offB = document.createElement('canvas'); // metaballs + oil
+const offM = document.createElement('canvas'); // mask
+const ctxA = offA.getContext('2d');
+const ctxB = offB.getContext('2d');
+const ctxM = offM.getContext('2d');
+
+function resize() {
+  const s = Math.min(window.innerWidth, window.innerHeight);
+  W = H = s;
+  [canvas, offA, offB, offM].forEach(c => { c.width = s; c.height = s; });
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ── Fractal flame via GPU-friendly canvas gradients ────────────────────────
+// Instead of pixel-iteration IFS (slow), we approximate the flame density
+// using layered parametric structures: rotated sinusoidal arms + radial
+// gradients composited in 'lighter' mode → visually indistinguishable from
+// real flames at interactive framerates, fully blendable.
+
+const ARMS = Array.from({length: 6}, (_, i) => ({
+  baseAngle: (i / 6) * Math.PI * 2,
+  speed:     0.07 + i * 0.013,
+  twist:     1.2  + i * 0.3,
+  hueBase:   (i / 6) * 360,
+  r:         0.28 + (i % 3) * 0.06,
+  width:     0.10 + (i % 2) * 0.05,
+}));
+
+const SPARKS = Array.from({length: 22}, () => ({
+  ang:   Math.random() * Math.PI * 2,
+  dist:  0.05 + Math.random() * 0.38,
+  speed: 0.04 + Math.random() * 0.11,
+  size:  0.012 + Math.random() * 0.03,
+  hue:   Math.random() * 360,
+  phase: Math.random() * Math.PI * 2,
+}));
+
+function drawFlame(c, tt) {
+  c.clearRect(0, 0, W, H);
+  const cx = W * 0.5, cy = H * 0.5;
+  const R  = Math.min(W, H) * 0.42;
+
+  // dark void center
+  c.globalCompositeOperation = 'source-over';
+  const bg = c.createRadialGradient(cx, cy, 0, cx, cy, R * 1.1);
+  bg.addColorStop(0,   'rgba(2,4,12,1)');
+  bg.addColorStop(0.5, 'rgba(4,8,20,0.9)');
+  bg.addColorStop(1,   'rgba(0,0,0,0)');
+  c.fillStyle = bg; c.fillRect(0, 0, W, H);
+
+  c.globalCompositeOperation = 'lighter';
+
+  // sinusoidal arms – the "fractal" structure
+  for (const arm of ARMS) {
+    const steps = 48;
+    for (let s = 0; s < steps; s++) {
+      const frac = s / steps;
+      // parametric spiral with time-varying twist
+      const ang  = arm.baseAngle + tt * arm.speed + frac * Math.PI * 2 * arm.twist + Math.sin(tt * 0.4 + arm.baseAngle) * 0.6;
+      const dist = frac * arm.r * R * (0.9 + 0.1 * Math.sin(tt * 0.7 + frac * 5));
+      const x    = cx + Math.cos(ang) * dist;
+      const y    = cy + Math.sin(ang) * dist;
+      const sr   = arm.width * R * (1 - frac * 0.5) * (0.7 + 0.3 * Math.sin(tt * 1.1 + s));
+
+      const hue  = (arm.hueBase + tt * 28 + frac * 80) % 360;
+      const alpha = 0.06 * (1 - frac * 0.5);
+
+      const g = c.createRadialGradient(x, y, 0, x, y, sr);
+      g.addColorStop(0,   `hsla(${hue},100%,80%,${alpha})`);
+      g.addColorStop(0.4, `hsla(${(hue+30)%360},100%,55%,${alpha*0.6})`);
+      g.addColorStop(1,   `hsla(${(hue+60)%360},100%,30%,0)`);
+      c.fillStyle = g;
+      c.beginPath(); c.arc(x, y, sr, 0, Math.PI*2); c.fill();
+    }
+  }
+
+  // bright self-similar nodes along the arms
+  for (let pass = 0; pass < 3; pass++) {
+    for (const arm of ARMS) {
+      const frac = (pass / 3 + 0.1 + Math.sin(tt * arm.speed * 2) * 0.1);
+      const ang  = arm.baseAngle + tt * arm.speed + frac * Math.PI * 2 * arm.twist;
+      const dist = frac * arm.r * R;
+      const x    = cx + Math.cos(ang) * dist;
+      const y    = cy + Math.sin(ang) * dist;
+      const nr   = arm.width * R * 0.55;
+      const hue  = (arm.hueBase + tt * 28 + pass * 40) % 360;
+      const g2   = c.createRadialGradient(x, y, 0, x, y, nr);
+      g2.addColorStop(0,   `hsla(${hue},100%,95%,0.18)`);
+      g2.addColorStop(0.3, `hsla(${hue},100%,65%,0.10)`);
+      g2.addColorStop(1,   'rgba(0,0,0,0)');
+      c.fillStyle = g2;
+      c.beginPath(); c.arc(x, y, nr, 0, Math.PI*2); c.fill();
+    }
+  }
+
+  // sparks
+  for (const sp of SPARKS) {
+    const ang  = sp.ang + tt * sp.speed;
+    const dist = sp.dist * R * (0.8 + 0.2 * Math.sin(tt * sp.speed * 3 + sp.phase));
+    const x    = cx + Math.cos(ang) * dist;
+    const y    = cy + Math.sin(ang) * dist;
+    const sr   = sp.size * Math.min(W, H) * (0.7 + 0.3 * Math.sin(tt * 2 + sp.phase));
+    const hue  = (sp.hue + tt * 40) % 360;
+    const g3   = c.createRadialGradient(x, y, 0, x, y, sr);
+    g3.addColorStop(0,   `hsla(${hue},100%,95%,0.22)`);
+    g3.addColorStop(0.5, `hsla(${hue},100%,60%,0.10)`);
+    g3.addColorStop(1,   'rgba(0,0,0,0)');
+    c.fillStyle = g3;
+    c.beginPath(); c.arc(x, y, sr, 0, Math.PI*2); c.fill();
+  }
+
+  // central singularity glow
+  const cg = c.createRadialGradient(cx, cy, 0, cx, cy, R * 0.18);
+  const ch = (tt * 35) % 360;
+  cg.addColorStop(0,   `hsla(${ch},100%,98%,0.35)`);
+  cg.addColorStop(0.3, `hsla(${ch},100%,70%,0.15)`);
+  cg.addColorStop(1,   'rgba(0,0,0,0)');
+  c.fillStyle = cg;
+  c.fillRect(0, 0, W, H);
+
+  c.globalCompositeOperation = 'source-over';
+}
+
+// ── Metaballs ──────────────────────────────────────────────────────────────
+const bubbles = Array.from({length: 7}, () => ({
+  x:   Math.random(), y:   Math.random(),
+  r:   0.06 + Math.random() * 0.07,
+  spx: 0.15 + Math.random() * 0.35,
+  spy: 0.15 + Math.random() * 0.35,
+  ax:  0.18 + Math.random() * 0.14,
+  ay:  0.18 + Math.random() * 0.14,
+  ph:  Math.random() * Math.PI * 2,
+  hue: Math.random() * 360,
+}));
+
+function positionsAt(tt) {
+  return bubbles.map((b, i) => ({
+    x:  (0.5 + (b.x - 0.5) * 0.4 + Math.sin(tt * b.spx + b.ph) * b.ax) * W,
+    y:  (0.5 + (b.y - 0.5) * 0.4 + Math.cos(tt * b.spy + b.ph) * b.ay) * H,
+    rr: Math.min(W, H) * b.r,
+    hue: b.hue, i,
+  }));
+}
+
+function buildMask(positions) {
+  ctxM.clearRect(0, 0, W, H);
+  ctxM.globalCompositeOperation = 'lighter';
+  for (const p of positions) {
+    const g = ctxM.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.rr * 2.4);
+    g.addColorStop(0,    'rgba(255,255,255,1)');
+    g.addColorStop(0.35, 'rgba(255,255,255,0.7)');
+    g.addColorStop(0.7,  'rgba(255,255,255,0.28)');
+    g.addColorStop(1,    'rgba(255,255,255,0)');
+    ctxM.fillStyle = g;
+    ctxM.beginPath(); ctxM.arc(p.x, p.y, p.rr * 2.4, 0, Math.PI*2); ctxM.fill();
+  }
+  ctxM.globalCompositeOperation = 'source-over';
+  const fld = ctxM.getImageData(0, 0, W, H), fd = fld.data;
+  const HI = 165, HIS = 22, LO = 95, LOS = 45;
+  for (let p = 3; p < fd.length; p += 4) {
+    const a = fd[p];
+    const core   = a < HI ? 0 : a > HI+HIS ? 255 : ((a-HI)/HIS)*255;
+    const bridge = a < LO ? 0 : a > LO+LOS ? 255 : ((a-LO)/LOS)*255;
+    fd[p] = core > bridge ? core : bridge;
+  }
+  ctxM.putImageData(fld, 0, 0);
+}
+
+function oilFill(c, x, y, rr, hue, shift) {
+  const bands = [
+    {cx:x-rr*.25,cy:y-rr*.20,hOff:0,  a:.55},
+    {cx:x+rr*.15,cy:y-rr*.10,hOff:55, a:.45},
+    {cx:x-rr*.10,cy:y+rr*.25,hOff:120,a:.40},
+    {cx:x+rr*.20,cy:y+rr*.10,hOff:190,a:.38},
+    {cx:x-rr*.05,cy:y-rr*.30,hOff:265,a:.35},
+  ];
+  c.globalCompositeOperation = 'screen';
+  for (const b of bands) {
+    const gr = c.createRadialGradient(b.cx, b.cy, 0, b.cx, b.cy, rr*1.3);
+    const h0 = (hue + b.hOff + shift) % 360;
+    gr.addColorStop(0,    `hsla(${h0},100%,55%,${b.a})`);
+    gr.addColorStop(0.35, `hsla(${(h0+40)%360},100%,35%,${b.a*.7})`);
+    gr.addColorStop(0.65, `hsla(${(h0+90)%360},100%,55%,${b.a*.5})`);
+    gr.addColorStop(1,    `hsla(${h0},100%,35%,0)`);
+    c.fillStyle = gr;
+    c.fillRect(x-rr*1.3, y-rr*1.3, rr*2.6, rr*2.6);
+  }
+  const gs = c.createRadialGradient(x-rr*.3,y-rr*.35,0,x-rr*.3,y-rr*.35,rr*.38);
+  gs.addColorStop(0,'rgba(255,255,255,0.20)');
+  gs.addColorStop(.4,'rgba(255,255,255,0.05)');
+  gs.addColorStop(1,'rgba(255,255,255,0)');
+  c.fillStyle = gs; c.fillRect(x-rr,y-rr,rr*2,rr*2);
+  c.globalCompositeOperation = 'source-over';
+}
+
+// ── Waves (pixel warp) ─────────────────────────────────────────────────────
+const waves = [
+  {amp:10,freq:0.025,speed:0.6,phase:0},
+  {amp:7, freq:0.04, speed:1.0,phase:2},
+  {amp:5, freq:0.06, speed:0.8,phase:5},
+  {amp:4, freq:0.09, speed:1.4,phase:1},
+];
+
+// Warp only a downscaled copy then upscale → 4× fewer pixels
+const WARP_SCALE = 0.7;
+const warpC = document.createElement('canvas');
+const wctx  = warpC.getContext('2d');
+
+function render() {
+  const shift = t * 50;
+
+  // 1) Flame
+  drawFlame(ctxA, t);
+
+  // 2) Metaballs over flame
+  const positions = positionsAt(t);
+  buildMask(positions);
+
+  ctxB.globalCompositeOperation = 'source-over';
+  // transparent base so flame shows through
+  ctxB.clearRect(0, 0, W, H);
+  for (const p of positions) {
+    oilFill(ctxB, p.x, p.y, p.rr, (p.hue + p.i*45 + t*30) % 360, shift + p.i*73);
+  }
+  ctxB.globalCompositeOperation = 'destination-in';
+  ctxB.drawImage(offM, 0, 0);
+  ctxB.globalCompositeOperation = 'source-over';
+
+  // 3) Composite: flame + bubbles, then warp at low-res
+  const WS = (W * WARP_SCALE) | 0, HS = (H * WARP_SCALE) | 0;
+  if (warpC.width !== WS) { warpC.width = WS; warpC.height = HS; }
+  wctx.drawImage(offA, 0, 0, WS, HS);           // flame (small)
+  wctx.drawImage(offB, 0, 0, WS, HS);           // bubbles (small)
+
+  const src = wctx.getImageData(0, 0, WS, HS);
+  const dst = wctx.createImageData(WS, HS);
+  const sd = src.data, dd = dst.data;
+
+  for (let y = 0; y < HS; y++) {
+    let dxRow = 0;
+    for (const w of waves) dxRow += w.amp * WARP_SCALE * Math.sin(y / WARP_SCALE * w.freq + t * w.speed + w.phase);
+    for (let x = 0; x < WS; x++) {
+      let dy = 0;
+      for (const w of waves) dy += w.amp * WARP_SCALE * Math.cos(x / WARP_SCALE * w.freq * .8 + t * w.speed * .9 + w.phase + 1);
+      // bilinear sample instead of nearest-neighbour
+      const fx = x + dxRow, fy = y + dy;
+      const x0 = Math.max(0, Math.min(WS-2, fx|0)), x1 = x0+1;
+      const y0 = Math.max(0, Math.min(HS-2, fy|0)), y1 = y0+1;
+      const tx_ = fx - x0, ty_ = fy - y0;
+      const di = (y*WS+x)*4;
+      for (let c = 0; c < 3; c++) {
+        const tl = sd[(y0*WS+x0)*4+c], tr = sd[(y0*WS+x1)*4+c];
+        const bl = sd[(y1*WS+x0)*4+c], br = sd[(y1*WS+x1)*4+c];
+        dd[di+c] = (tl*(1-tx_)*(1-ty_) + tr*tx_*(1-ty_) + bl*(1-tx_)*ty_ + br*tx_*ty_) | 0;
+      }
+      dd[di+3] = 255;
+    }
+  }
+  wctx.putImageData(dst, 0, 0);
+
+  // 4) Scale back up with smoothing
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(warpC, 0, 0, W, H);
+
+  t += 0.018;
+  requestAnimationFrame(render);
+}
+render();
+</script>
+</body>
+</html>

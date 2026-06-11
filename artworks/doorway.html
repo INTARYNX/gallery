@@ -1,0 +1,419 @@
+<!-- Doorway -->
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+// Fixed-resolution offscreen + distortion buffers (constant CPU cost)
+const RES = 320;
+const off = document.createElement('canvas');
+off.width = off.height = RES;
+const octx = off.getContext('2d');
+const dist = document.createElement('canvas');
+dist.width = dist.height = RES;
+const dctx = dist.getContext('2d');
+
+let srcData = null, dstData = null;
+let t = 0;
+
+const waves = [
+  { amp:5,   freq:0.028, speed:0.5, phase:0 },
+  { amp:3,   freq:0.045, speed:0.9, phase:2 },
+  { amp:2,   freq:0.07,  speed:0.7, phase:5 },
+  { amp:1.5, freq:0.10,  speed:1.3, phase:1 },
+];
+
+// Light source held in hand, lower-left, just out of frame
+const LIGHT_X = 150, LIGHT_Y = 470;
+
+function resize() {
+  const s = Math.min(window.innerWidth, window.innerHeight) - 16;
+  canvas.width = canvas.height = s;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// Dust motes caught in the light
+const motes = Array.from({length: 70}, () => ({
+  x: Math.random()*500, y: Math.random()*500,
+  r: Math.random()*1.6 + 0.3,
+  speed: Math.random()*0.25 + 0.05,
+  drift: (Math.random()-0.5)*0.4,
+  phase: Math.random()*Math.PI*2,
+  alpha: Math.random()*0.4 + 0.1,
+}));
+
+// Drifting fog banks
+const fogBanks = Array.from({length: 6}, () => ({
+  x: Math.random()*500,
+  y: 280 + Math.random()*180,
+  r: 120 + Math.random()*100,
+  speed: 0.15 + Math.random()*0.25,
+  phase: Math.random()*Math.PI*2,
+  alpha: 0.04 + Math.random()*0.05,
+}));
+
+function noise(x, y, s) {
+  const n = Math.sin(x*127.1 + y*311.7 + s*74.3) * 43758.5453;
+  return n - Math.floor(n);
+}
+function fogNoise(x, y, time) {
+  let v = 0;
+  v += noise(x*0.012 + time*0.06, y*0.012, 0) * 0.5;
+  v += noise(x*0.025 + time*0.04, y*0.025 + time*0.02, 1) * 0.3;
+  v += noise(x*0.05  + time*0.07, y*0.05,  2) * 0.2;
+  return v;
+}
+
+function lanternFlicker() {
+  return 0.75 + Math.sin(t*13.1)*0.12 + Math.sin(t*29.7)*0.08 + Math.sin(t*5.3)*0.05;
+}
+
+// ── Background: mouldy blue wallpaper + red door ──────────
+function drawBackground(c) {
+  c.fillStyle = '#141a24';
+  c.fillRect(0,0,500,500);
+
+  // Vertical stripes
+  const stripeW = 22;
+  for (let x = 0; x < 500; x += stripeW*2) {
+    c.fillStyle = 'rgba(20,28,40,0.5)';
+    c.fillRect(x, 0, stripeW, 500);
+  }
+
+  // Horizontal aged lines
+  for (let y = 18; y < 500; y += 18) {
+    const alpha = 0.14 + Math.sin(y*0.3)*0.05;
+    c.strokeStyle = `rgba(60,80,100,${alpha})`;
+    c.lineWidth = 0.8 + Math.sin(y*0.7)*0.3;
+    c.beginPath(); c.moveTo(0,y); c.lineTo(500,y); c.stroke();
+  }
+
+  // Mould patches
+  const mould = [
+    [70,90,55],[400,140,70],[60,360,80],[440,400,60],
+    [250,60,45],[180,430,65],[330,290,50],[30,220,40]
+  ];
+  for (const [mx,my,mr] of mould) {
+    const g = c.createRadialGradient(mx,my,0,mx,my,mr);
+    g.addColorStop(0, 'rgba(18,30,25,0.55)');
+    g.addColorStop(0.5, 'rgba(22,34,30,0.3)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    c.fillStyle = g;
+    c.beginPath();
+    c.ellipse(mx, my, mr, mr*0.8, 0, 0, Math.PI*2);
+    c.fill();
+  }
+
+  // Door frame (extends below frame so its base is hidden)
+  const fx=140, fy=40, fw=220, fh=540, ft=14;
+  c.fillStyle = '#3a1010';
+  c.fillRect(fx-ft, fy-ft, fw+ft*2, fh+ft*2);
+  c.strokeStyle = 'rgba(90,30,30,0.7)';
+  c.lineWidth = 2;
+  c.strokeRect(fx-ft+2, fy-ft+2, fw+ft*2-4, fh+ft*2-4);
+
+  // Red door
+  const doorGrad = c.createLinearGradient(fx,fy,fx+fw,fy+fh);
+  doorGrad.addColorStop(0,'#5a1212');
+  doorGrad.addColorStop(0.4,'#6e1818');
+  doorGrad.addColorStop(0.7,'#4e1010');
+  doorGrad.addColorStop(1,'#3a0c0c');
+  c.fillStyle = doorGrad;
+  c.fillRect(fx, fy, fw, fh);
+
+  // Wood grain
+  c.strokeStyle = 'rgba(40,8,8,0.5)';
+  c.lineWidth = 1;
+  for (let i=0;i<14;i++) {
+    const gx = fx + 6 + i*(fw/14);
+    const wob = Math.sin(i*2.3)*3;
+    c.beginPath(); c.moveTo(gx+wob,fy); c.lineTo(gx-wob,fy+fh); c.stroke();
+  }
+
+  // Recessed panels
+  const panel = (px,py,pw,ph) => {
+    c.fillStyle = 'rgba(0,0,0,0.4)';
+    c.fillRect(px,py,pw,ph);
+    c.fillStyle = 'rgba(0,0,0,0.3)';
+    c.fillRect(px,py,pw,3); c.fillRect(px,py,3,ph);
+    c.fillStyle = 'rgba(130,40,40,0.25)';
+    c.fillRect(px,py+ph-3,pw,3); c.fillRect(px+pw-3,py,3,ph);
+  };
+  panel(fx+16, fy+18, fw-32, 180);
+  panel(fx+16, fy+210, fw-32, 250);
+
+  // Knob
+  const kx=fx+22, ky=fy+250;
+  const kg = c.createRadialGradient(kx-2,ky-2,1,kx,ky,8);
+  kg.addColorStop(0,'rgba(180,150,80,0.9)');
+  kg.addColorStop(0.5,'rgba(110,85,35,0.95)');
+  kg.addColorStop(1,'rgba(40,30,12,1)');
+  c.fillStyle = kg;
+  c.beginPath(); c.arc(kx,ky,8,0,Math.PI*2); c.fill();
+
+  // Keyhole with eerie light leaking through
+  const hx = kx, hy = ky + 22;
+  const flk = lanternFlicker();
+  const kglow = c.createRadialGradient(hx, hy, 0, hx, hy, 34);
+  kglow.addColorStop(0, `rgba(255,200,110,${0.6*flk})`);
+  kglow.addColorStop(0.3, `rgba(230,150,70,${0.28*flk})`);
+  kglow.addColorStop(0.7, `rgba(140,80,40,${0.1*flk})`);
+  kglow.addColorStop(1, 'rgba(0,0,0,0)');
+  c.fillStyle = kglow;
+  c.beginPath(); c.arc(hx, hy, 34, 0, Math.PI*2); c.fill();
+  c.fillStyle = `rgba(255,235,180,${0.9*flk})`;
+  c.beginPath(); c.arc(hx, hy, 3.5, 0, Math.PI*2); c.fill();
+  c.beginPath();
+  c.moveTo(hx-2.5, hy); c.lineTo(hx+2.5, hy);
+  c.lineTo(hx+1.5, hy+11); c.lineTo(hx-1.5, hy+11);
+  c.closePath(); c.fill();
+}
+
+// ── Fog ───────────────────────────────────────────────────
+function drawFog(c) {
+  for (const f of fogBanks) {
+    const nx = fogNoise(f.x, f.y, t*0.3+f.phase)*40 - 20;
+    const ny = fogNoise(f.x+300, f.y, t*0.25+f.phase)*20 - 10;
+    const g = c.createRadialGradient(f.x+nx, f.y+ny, 0, f.x+nx, f.y+ny, f.r);
+    g.addColorStop(0, `rgba(40,55,70,${f.alpha})`);
+    g.addColorStop(0.5, `rgba(25,35,48,${f.alpha*0.5})`);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    c.fillStyle = g;
+    c.beginPath();
+    c.ellipse(f.x+nx, f.y+ny, f.r, f.r*0.5, 0, 0, Math.PI*2);
+    c.fill();
+    f.x += f.speed * Math.sin(t*0.2+f.phase);
+    if (f.x < -150) f.x = 650;
+    if (f.x > 650) f.x = -150;
+  }
+}
+
+// ── Dark figure silhouette ────────────────────────────────
+function figureBody(c) {
+  const s1 = Math.sin(t*0.8)*4;
+  const s2 = Math.sin(t*1.3)*3;
+  const sway = Math.sin(t*0.5)*6;
+  c.beginPath();
+  c.moveTo(sway, -150);
+  c.lineTo(sway+16, -142);
+  c.lineTo(sway+20, -120);
+  c.lineTo(sway+14, -104);
+  c.lineTo(40, -92+s1);
+  c.lineTo(52, -70);
+  c.lineTo(46, -30);
+  c.lineTo(54, 20);
+  c.lineTo(48, 70+s2);
+  c.lineTo(40, 60);
+  c.lineTo(44, 110);
+  c.lineTo(30, 150);
+  c.lineTo(14, 175);
+  c.lineTo(0, 160+s1);
+  c.lineTo(-16, 178);
+  c.lineTo(-30, 150);
+  c.lineTo(-42, 112);
+  c.lineTo(-38, 65+s2);
+  c.lineTo(-50, 18);
+  c.lineTo(-44, -30);
+  c.lineTo(-50, -70);
+  c.lineTo(-38, -92+s1);
+  c.lineTo(sway-14, -104);
+  c.lineTo(sway-20, -120);
+  c.lineTo(sway-16, -142);
+  c.closePath();
+}
+
+function drawFigure(c) {
+  const cx = 250, cy = 330;
+  const floatY = Math.sin(t*0.4)*5;
+  const fl = lanternFlicker();
+  const sway = Math.sin(t*0.5)*6;
+
+  // Warm halo behind the neck/head (lantern backlight)
+  c.save();
+  c.translate(cx, cy+floatY);
+  c.scale(1.7, 1.7);
+  const haloG = c.createRadialGradient(sway, -118, 2, sway, -118, 60);
+  haloG.addColorStop(0, `rgba(255,190,100,${0.4*fl})`);
+  haloG.addColorStop(0.4, `rgba(225,140,60,${0.18*fl})`);
+  haloG.addColorStop(1, 'rgba(0,0,0,0)');
+  c.fillStyle = haloG;
+  c.beginPath();
+  c.ellipse(sway, -118, 50, 60, 0, 0, Math.PI*2);
+  c.fill();
+  c.restore();
+
+  // Solid black silhouette
+  c.save();
+  c.translate(cx, cy+floatY);
+  c.scale(1.7, 1.7);
+  figureBody(c);
+  c.fillStyle = 'rgba(0,0,0,0.96)';
+  c.fill();
+
+  // Faint cold rim light + warm side facing the held lantern
+  figureBody(c);
+  c.save(); c.clip();
+  const rim = c.createLinearGradient(-55,0,55,0);
+  rim.addColorStop(0, 'rgba(45,30,15,0.16)');
+  rim.addColorStop(0.2, 'rgba(0,0,0,0)');
+  rim.addColorStop(0.85, 'rgba(0,0,0,0)');
+  rim.addColorStop(1, 'rgba(35,50,65,0.16)');
+  c.fillStyle = rim;
+  c.fillRect(-60,-160,120,360);
+  c.restore();
+  c.restore();
+
+  // Fade lower body into darkness
+  c.save();
+  c.translate(cx, cy+floatY);
+  c.scale(1.7, 1.7);
+  figureBody(c);
+  c.save(); c.clip();
+  c.globalCompositeOperation = 'destination-out';
+  const fade = c.createLinearGradient(0,60,0,180);
+  fade.addColorStop(0, 'rgba(0,0,0,0)');
+  fade.addColorStop(1, 'rgba(0,0,0,1)');
+  c.fillStyle = fade;
+  c.fillRect(-60,60,120,130);
+  c.restore();
+  c.restore();
+
+  // Glowing eyes — closed at first, open slowly
+  const openDelay = 3, openDur = 2.5;
+  const open = Math.max(0, Math.min(1, (t - openDelay) / openDur));
+  if (open > 0.01) {
+    c.save();
+    c.translate(cx, cy+floatY);
+    c.scale(1.7, 1.7);
+    const eflk = (0.55 + Math.sin(t*9.3)*0.12 + Math.sin(t*23.1)*0.06) * open;
+    const eyes = [[sway-6, -126], [sway+6, -124]];
+    for (const [ex, ey] of eyes) {
+      const g = c.createRadialGradient(ex, ey, 0, ex, ey, 5);
+      g.addColorStop(0, `rgba(220,150,70,${0.85*eflk})`);
+      g.addColorStop(0.5, `rgba(170,95,40,${0.4*eflk})`);
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      c.fillStyle = g;
+      c.beginPath(); c.arc(ex, ey, 5, 0, Math.PI*2); c.fill();
+      c.fillStyle = `rgba(240,190,120,${0.7*eflk})`;
+      c.beginPath(); c.arc(ex, ey, 1, 0, Math.PI*2); c.fill();
+    }
+    c.restore();
+  }
+}
+
+// ── Held lantern glow (foreground) ────────────────────────
+function drawHeldLanternGlow(c) {
+  const fl = lanternFlicker();
+  const sway = Math.sin(t*0.7)*10;
+  const g = c.createRadialGradient(LIGHT_X+sway, LIGHT_Y, 8, LIGHT_X+sway, LIGHT_Y, 340);
+  g.addColorStop(0, `rgba(255,210,120,${0.85*fl})`);
+  g.addColorStop(0.18, `rgba(245,160,75,${0.5*fl})`);
+  g.addColorStop(0.4, `rgba(180,105,50,${0.26*fl})`);
+  g.addColorStop(0.65, `rgba(100,60,30,${0.1*fl})`);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  c.fillStyle = g;
+  c.fillRect(0,0,500,500);
+}
+
+// ── Dust motes ────────────────────────────────────────────
+function drawMotes(c) {
+  const fl = lanternFlicker();
+  for (const p of motes) {
+    const dx = p.x - LIGHT_X, dy = p.y - LIGHT_Y;
+    const dist = Math.sqrt(dx*dx+dy*dy);
+    const lightFactor = Math.max(0, 1 - dist/300);
+    const a = p.alpha * lightFactor * fl * (0.5+0.5*Math.sin(t*2+p.phase));
+    if (a > 0.01) {
+      c.fillStyle = `rgba(255,210,150,${a})`;
+      c.beginPath();
+      c.arc(p.x, p.y, p.r, 0, Math.PI*2);
+      c.fill();
+    }
+    p.y -= p.speed;
+    p.x += p.drift + Math.sin(t*0.5+p.phase)*0.2;
+    if (p.y < -5) { p.y = 505; p.x = Math.random()*500; }
+  }
+}
+
+// ── Vignette ──────────────────────────────────────────────
+function drawVignette(c) {
+  const v = c.createRadialGradient(250,250,90,250,250,360);
+  v.addColorStop(0, 'rgba(0,0,0,0)');
+  v.addColorStop(0.55, 'rgba(0,0,0,0.35)');
+  v.addColorStop(0.8, 'rgba(0,0,0,0.75)');
+  v.addColorStop(1, 'rgba(0,0,0,1)');
+  c.fillStyle = v;
+  c.fillRect(0,0,500,500);
+  const corner = c.createRadialGradient(250,250,200,250,250,420);
+  corner.addColorStop(0,'rgba(0,0,0,0)');
+  corner.addColorStop(1,'rgba(0,0,0,0.9)');
+  c.fillStyle = corner;
+  c.fillRect(0,0,500,500);
+}
+
+// ── Render loop ───────────────────────────────────────────
+function loop() {
+  const W = RES, H = RES;
+  const sc = W / 500;
+
+  if (!srcData) {
+    srcData = octx.createImageData(W, H);
+    dstData = dctx.createImageData(W, H);
+  }
+
+  octx.save();
+  octx.scale(sc, sc);
+  drawBackground(octx);
+  drawFog(octx);
+  drawFigure(octx);
+  drawHeldLanternGlow(octx);
+  drawMotes(octx);
+  drawVignette(octx);
+  octx.restore();
+
+  // Pixel wave distortion at fixed resolution
+  srcData = octx.getImageData(0,0,W,H);
+  const sd = srcData.data, dd = dstData.data;
+  for (let y = 0; y < H; y++) {
+    const edgeFade = Math.min(1, (H - y) / (H * 0.18));
+    for (let x = 0; x < W; x++) {
+      let dx=0, dy=0;
+      for (const w of waves) {
+        dx += w.amp * sc * Math.sin(y*w.freq/sc + t*w.speed + w.phase) * edgeFade;
+        dy += w.amp * sc * Math.cos(x*w.freq*0.8/sc + t*w.speed*0.9 + w.phase+1) * edgeFade;
+      }
+      const sx = Math.min(W-1, Math.max(0, Math.round(x+dx)));
+      const sy = Math.min(H-1, Math.max(0, Math.round(y+dy)));
+      const di=(y*W+x)*4, si=(sy*W+sx)*4;
+      dd[di]=sd[si]; dd[di+1]=sd[si+1]; dd[di+2]=sd[si+2]; dd[di+3]=sd[si+3];
+    }
+  }
+  dctx.putImageData(dstData, 0, 0);
+
+  // Upscale distorted buffer to display canvas (soft, dreamlike)
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(dist, 0, 0, canvas.width, canvas.height);
+
+  // Lantern flicker dim
+  const fl = lanternFlicker();
+  ctx.fillStyle = `rgba(0,0,0,${(1-fl)*0.15})`;
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  t += 0.016;
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>

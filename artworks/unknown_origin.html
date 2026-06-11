@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #03060e; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+  /* Unknown Origin */
+  canvas { display: block; border-radius: 12px; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const off = document.createElement('canvas');
+const octx = off.getContext('2d');
+const MARGIN = 28;
+
+// ── palette modes ─────────────────────────────────────────
+const PALETTES = [
+  { name: 'SCIFI', hues: [180, 190, 205, 270, 290, 315, 150], bg: '#040810', mid: 'rgba(10,30,55,0.6)', edge: 'rgba(8,2,20,0.6)', mesh: 195 },
+  { name: 'C64',   hues: [240, 200, 120, 50, 300, 25, 170],    bg: '#1a1033', mid: 'rgba(64,50,133,0.55)', edge: 'rgba(20,12,48,0.6)', mesh: 245 },
+  { name: 'GREEN', hues: [125, 130, 120, 135, 115, 128, 122],  bg: '#020a04', mid: 'rgba(8,40,16,0.6)', edge: 'rgba(2,12,5,0.6)', mesh: 125 },
+  { name: 'AMBER', hues: [38, 42, 35, 45, 30, 40, 33],         bg: '#0c0600', mid: 'rgba(50,30,4,0.6)', edge: 'rgba(14,7,0,0.6)', mesh: 38 },
+];
+let palIdx = 0;
+let pal = PALETTES[palIdx];
+const scifiHue = () => pal.hues[Math.floor(Math.random() * pal.hues.length)];
+
+function cyclePalette() {
+  palIdx = (palIdx + 1) % PALETTES.length;
+  pal = PALETTES[palIdx];
+}
+// auto-cycle, fast, no manual control
+setInterval(cyclePalette, 4000);
+
+const waves = [
+  { amp:9, freq:0.022, speed:0.5, phase:0 },
+  { amp:5, freq:0.038, speed:0.9, phase:2 },
+  { amp:3, freq:0.058, speed:0.7, phase:5 },
+];
+
+const cols = 26, rows = 26;
+const N = cols * rows;
+let t = 0, snakes = null, lcds = null;
+
+function resize() {
+  const s = Math.min(window.innerWidth, window.innerHeight) - 20;
+  canvas.width = s; canvas.height = s;
+  off.width = s + MARGIN*2; off.height = s + MARGIN*2;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ── grid helpers ──────────────────────────────────────────
+function neighbors(idx) {
+  const col = idx % cols, row = Math.floor(idx / cols), nb = [];
+  if (col > 0) nb.push(idx - 1);
+  if (col < cols-1) nb.push(idx + 1);
+  if (row > 0) nb.push(idx - cols);
+  if (row < rows-1) nb.push(idx + cols);
+  return nb;
+}
+const DIR = [1, -1, -cols, cols];
+function inBounds(idx, dir) {
+  const col = idx % cols, row = Math.floor(idx / cols);
+  if (dir === 0) return col < cols - 1;
+  if (dir === 1) return col > 0;
+  if (dir === 2) return row > 0;
+  return row < rows - 1;
+}
+function makeGlyph() {
+  const strokes = 4 + Math.floor(Math.random() * 5);
+  const seq = []; let last = -1;
+  for (let i = 0; i < strokes; i++) {
+    let d; do { d = Math.floor(Math.random() * 4); } while (d === (last ^ 1));
+    const reps = 1 + Math.floor(Math.random() * 3);
+    for (let r = 0; r < reps; r++) seq.push(d);
+    last = d;
+  }
+  return seq;
+}
+function makeSpiral(turns) {
+  const order = [0, 3, 1, 2]; const seq = []; let run = 1;
+  for (let i = 0; i < turns; i++) {
+    const d = order[i % 4];
+    for (let r = 0; r < run; r++) seq.push(d);
+    if (i % 2 === 1) run++;
+  }
+  return seq;
+}
+function makeSnake() {
+  const len = 16 + Math.floor(Math.random() * 16);
+  const body = [Math.floor(Math.random() * N)];
+  for (let i = 1; i < len; i++) {
+    const nb = neighbors(body[body.length - 1]);
+    body.push(nb[Math.floor(Math.random() * nb.length)]);
+  }
+  return { body, len, hue: scifiHue(), timer: 0, interval: 4 + Math.random()*6, glyph: makeGlyph(), gi: 0 };
+}
+function makeSpiralSnake() {
+  const start = Math.floor(rows/2) * cols + Math.floor(cols/2);
+  return { body: [start], len: 60, hue: scifiHue(), timer: 0, interval: 2.5, glyph: makeSpiral(12), gi: 0, spiral: true };
+}
+
+// ── glitchy numeric font ──────────────────────────────────
+const GLYPHSET = '0123456789ﾊﾐﾋｷﾂﾉﾘ▚▞█▓░※';
+function drawLCD(g, W, H) {
+  if (!lcds) {
+    lcds = Array.from({ length: 6 }, () => {
+      const digits = 2 + Math.floor(Math.random() * 3);
+      const vals = []; for (let i=0;i<digits;i++) vals.push(Math.floor(Math.random()*10).toString());
+      return { x: Math.random()*0.8+0.05, y: Math.random()*0.8+0.05, digits, vals,
+               hue: scifiHue(), timer: 0, interval: 20+Math.floor(Math.random()*60), changes: 0 };
+    });
+  }
+  const fs = Math.max(22, W * 0.075);
+  g.font = `900 ${fs}px "Courier New", monospace`;
+  g.textBaseline = 'top';
+  lcds.forEach(l => {
+    l.timer++;
+    if (l.timer >= l.interval) {
+      l.timer = 0;
+      // sometimes flip to a corrupted glyph, sometimes a digit
+      const gi = Math.floor(Math.random()*l.digits);
+      l.vals[gi] = Math.random() < 0.25
+        ? GLYPHSET[10 + Math.floor(Math.random()*(GLYPHSET.length-10))]
+        : Math.floor(Math.random()*10).toString();
+      l.changes++;
+      if (l.changes >= 5) {
+        l.changes = 0;
+        l.x = Math.random()*0.8+0.05; l.y = Math.random()*0.8+0.05; l.hue = scifiHue();
+      }
+    }
+    const px = l.x * W, py = l.y * H, adv = fs * 0.66;
+    for (let i = 0; i < l.digits; i++) {
+      const ch = l.vals[i];
+      const jx = (Math.random()-0.5) * fs * 0.12; // glitch jitter
+      const jy = (Math.random()-0.5) * fs * 0.06;
+      const x = px + i*adv + jx, y = py + jy;
+      // RGB split copies
+      g.fillStyle = `hsla(0,90%,55%,0.55)`;   g.fillText(ch, x - 2.5, y);
+      g.fillStyle = `hsla(190,90%,55%,0.55)`; g.fillText(ch, x + 2.5, y);
+      // core
+      g.fillStyle = `hsla(${l.hue},95%,72%,0.95)`; g.fillText(ch, x, y);
+    }
+  });
+}
+
+// ── generative scene → offscreen ──────────────────────────
+function drawGrid(c, W, H) {
+  c.fillStyle = pal.bg;
+  c.fillRect(0, 0, W, H);
+  const g = c.createRadialGradient(W/2, H/2, 0, W/2, H/2, W*0.7);
+  g.addColorStop(0, pal.mid);
+  g.addColorStop(1, pal.edge);
+  c.fillStyle = g; c.fillRect(0, 0, W, H);
+
+  const cw = W / cols, ch = H / rows;
+  const nodes = [];
+  for (let row = 0; row < rows; row++)
+    for (let col = 0; col < cols; col++)
+      nodes.push([col*cw + cw/2, row*ch + ch/2]);
+
+  const gap = 1.5;
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      const nx = (col/(cols-1))*2-1, ny = (row/(rows-1))*2-1;
+      const dist = Math.sqrt(nx*nx + ny*ny);
+      const shade = 8 + 10 * (0.5 + 0.5 * Math.sin(t*0.6 + dist*3));
+      c.fillStyle = `hsl(${pal.mesh}, 45%, ${shade}%)`;
+      c.fillRect(col*cw + gap, row*ch + gap, cw - gap*2, ch - gap*2);
+    }
+  }
+
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      const cx = col*cw + cw/2, cy = row*ch + ch/2;
+      const nx = (col/(cols-1))*2-1, ny = (row/(rows-1))*2-1;
+      const dist = Math.sqrt(nx*nx + ny*ny);
+      const angle = Math.atan2(ny, nx) + t*0.4 + dist*2.6;
+      const pulse = 0.5 + 0.5 * Math.sin(t*1.2 + dist*4.2 - angle);
+      const size = cw * 0.42 * (1 - dist*0.28) * (0.55 + 0.5*pulse);
+      if (size <= 0) continue;
+      const idx = Math.floor((((angle*57.3 + dist*80 + t*35) % 360) + 360) % 360 / 360 * pal.hues.length) % pal.hues.length;
+      const hue = pal.hues[idx], sat = 75 + 20*pulse, lgt = 34 + 22*pulse, alpha = 0.8 - dist*0.2;
+      c.save(); c.translate(cx, cy); c.rotate(angle);
+      c.fillStyle = `hsla(${hue},${sat}%,${lgt}%,${alpha})`;
+      const ct = (row + col) % 3;
+      if (ct === 0) c.fillRect(-size/2, -size/2, size, size);
+      else if (ct === 1) { c.beginPath(); c.arc(0,0,size/2,0,Math.PI*2); c.fill(); }
+      else { c.beginPath(); c.moveTo(0,-size/2); c.lineTo(size/2,0); c.lineTo(0,size/2); c.lineTo(-size/2,0); c.closePath(); c.fill(); }
+      c.restore();
+    }
+  }
+
+  if (!snakes) snakes = [...Array.from({ length: 17 }, makeSnake), makeSpiralSnake()];
+  snakes.forEach(sn => {
+    sn.timer++;
+    if (sn.timer >= sn.interval) {
+      sn.timer = 0;
+      const head = sn.body[0];
+      if (sn.gi < sn.glyph.length && inBounds(head, sn.glyph[sn.gi])) {
+        sn.body.unshift(head + DIR[sn.glyph[sn.gi]]); sn.gi++;
+        if (sn.body.length > sn.len) sn.body.pop();
+      } else {
+        sn.body.unshift(null); if (sn.body.length > sn.len) sn.body.pop();
+        sn.body.unshift(Math.floor(Math.random() * N)); if (sn.body.length > sn.len) sn.body.pop();
+        sn.glyph = sn.spiral ? makeSpiral(12) : makeGlyph(); sn.gi = 0; sn.hue = scifiHue();
+      }
+    }
+    const pts = sn.body.map(i => i == null ? null : nodes[i]);
+    if (pts.length < 2) return;
+    c.lineCap = 'round'; c.lineJoin = 'round';
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = 0; i < pts.length - 1; i++) {
+        const p1 = pts[i], p2 = pts[i+1];
+        if (!p1 || !p2) continue;
+        const p0 = pts[Math.max(0,i-1)] || p1, p3 = pts[Math.min(pts.length-1,i+2)] || p2;
+        const fade = 1 - i / pts.length;
+        const cp1x = p1[0]+(p2[0]-p0[0])/6, cp1y = p1[1]+(p2[1]-p0[1])/6;
+        const cp2x = p2[0]-(p3[0]-p1[0])/6, cp2y = p2[1]-(p3[1]-p1[1])/6;
+        c.beginPath(); c.moveTo(p1[0],p1[1]);
+        c.bezierCurveTo(cp1x,cp1y,cp2x,cp2y,p2[0],p2[1]);
+        if (pass === 0) { c.strokeStyle = `hsla(${sn.hue},95%,60%,${fade*0.18})`; c.lineWidth = fade*9 + 4; }
+        else { c.strokeStyle = `hsla(${sn.hue},90%,65%,${fade*0.9})`; c.lineWidth = fade*2.5 + 0.5; }
+        c.stroke();
+      }
+    }
+    const h = pts[0];
+    if (h) {
+      c.beginPath(); c.arc(h[0],h[1],5,0,Math.PI*2); c.fillStyle = `hsla(${sn.hue},95%,65%,0.25)`; c.fill();
+      c.beginPath(); c.arc(h[0],h[1],2.2,0,Math.PI*2); c.fillStyle = `hsla(${sn.hue},95%,80%,0.95)`; c.fill();
+    }
+  });
+
+  drawLCD(c, W, H);
+}
+
+// ── aggressive glitch compositor ──────────────────────────
+const BANDS = 70;
+let glitchTimer = 0, glitchBands = [], sweep = 0;
+function rollGlitch(H, bh) {
+  glitchBands = [];
+  const burst = Math.random() < 0.5 ? 0 : 2 + Math.floor(Math.random() * 6);
+  for (let i = 0; i < burst; i++) {
+    const y = Math.floor(Math.random() * H);
+    const h = bh * (1 + Math.floor(Math.random() * 6));
+    glitchBands.push({ y, h, shift: (Math.random()-0.5)*90, rgb: 4+Math.random()*14, crush: Math.random() < 0.35 });
+  }
+  glitchTimer = 4 + Math.floor(Math.random() * 40);
+}
+
+function render() {
+  const W = canvas.width, H = canvas.height;
+  const OW = W + MARGIN*2, OH = H + MARGIN*2;
+  drawGrid(octx, OW, OH);
+
+  ctx.clearRect(0, 0, W, H);
+  const bh = H / BANDS;
+  const wobble = 1 + 0.25 * Math.sin(t * 0.7);
+  if (glitchTimer-- <= 0) rollGlitch(H, bh);
+
+  for (let b = 0; b < BANDS; b++) {
+    const y = b * bh, cy = y + bh/2;
+    let dx = 0, dy = 0;
+    for (let k = 0; k < waves.length; k++) {
+      const w = waves[k];
+      dx += w.amp * wobble * Math.sin(cy*w.freq + t*w.speed + w.phase);
+      dy += w.amp * wobble * Math.cos(cy*w.freq*0.8 + t*w.speed*0.9 + w.phase + 1);
+    }
+    ctx.drawImage(off, MARGIN - dx, MARGIN + y - dy, W, bh, 0, y, W, bh);
+  }
+
+  // RGB split on the whole frame
+  const split = 2 + 2.5 * (1 + Math.sin(t * 1.3));
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = 0.4;
+  ctx.drawImage(canvas, -split, 0);
+  ctx.drawImage(canvas, split, 0);
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+
+  // hard glitch slices
+  glitchBands.forEach(gb => {
+    const sy = Math.max(0, Math.min(OH - gb.h, MARGIN + gb.y));
+    ctx.drawImage(off, MARGIN, sy, W, gb.h, gb.shift, gb.y, W, gb.h);
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = 'rgba(255,0,40,0.35)';
+    ctx.fillRect(gb.shift - gb.rgb, gb.y, W, gb.h);
+    ctx.fillStyle = 'rgba(0,180,255,0.35)';
+    ctx.fillRect(gb.shift + gb.rgb, gb.y, W, gb.h);
+    ctx.globalAlpha = 1;
+    if (gb.crush) {
+      ctx.globalCompositeOperation = 'difference';
+      ctx.fillStyle = `hsl(${scifiHue()},100%,55%)`;
+      ctx.fillRect(0, gb.y, W, gb.h);
+    }
+    ctx.globalCompositeOperation = 'source-over';
+  });
+
+  // scanlines
+  ctx.globalAlpha = 0.1;
+  ctx.fillStyle = '#000';
+  for (let y = 0; y < H; y += 3) ctx.fillRect(0, y, W, 1);
+  ctx.globalAlpha = 1;
+
+  // descending scan sweep
+  sweep = (sweep + 6) % (H + 80);
+  const grd = ctx.createLinearGradient(0, sweep-80, 0, sweep);
+  grd.addColorStop(0, 'rgba(120,240,255,0)');
+  grd.addColorStop(1, 'rgba(120,240,255,0.14)');
+  ctx.fillStyle = grd;
+  ctx.fillRect(0, sweep-80, W, 80);
+
+  t += 0.03;
+  requestAnimationFrame(render);
+}
+render();
+</script>
+</body>
+</html>

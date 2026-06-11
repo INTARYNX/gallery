@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html,body{margin:0;height:100%;display:flex;align-items:center;justify-content:center;background:#0a0a0f;overflow:hidden}
+  canvas{display:block;box-shadow:0 0 60px rgba(0,0,0,.6)}
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+</head>
+<body>
+<script>
+let S = 700, t = 0;
+const ACC = 12;
+let tex, TW = 1024, TH = 512, grain, bokeh = [], dots = [], bands = [];
+let staticFrames = [];
+let ripples = [];
+const SF = 4;
+const STATIC_SZ = 256;
+
+function spawnRipple(){
+  ripples.push({v:random(0.15,0.85), r:0, max:random(0.15,0.4), w:random(0.008,0.025), life:1, acc:random()<0.3});
+}
+
+function setup(){
+  const d = min(windowWidth, windowHeight) * 0.92;
+  S = floor(d);
+  createCanvas(S, S, WEBGL);
+  colorMode(HSB, 360, 100, 100, 1);
+  tex = createGraphics(TW, TH);
+  tex.colorMode(HSB, 360, 100, 100, 1);
+  tex.noStroke();
+
+  for(let i=0;i<70;i++){
+    dots.push({u:random(1), v:random(0.12,0.88), sp:random(0.3,1.2), sz:random(0.6,1.6), acc:random()<0.2});
+  }
+  for(let i=0;i<22;i++){
+    bokeh.push({u:random(1), v:random(0.1,0.9), r:random(0.04,0.13), sp:random(0.1,0.5), ph:random(TWO_PI), acc:random()<0.25, br:random(0.05,0.14)});
+  }
+  for(let i=0;i<4;i++){
+    bands.push({v:random(0.2,0.8), amp:random(0.04,0.12), freq:floor(random(2,5)), sp:random(0.2,0.7), ph:random(TWO_PI)});
+  }
+  makeGrain();
+  makeStatic();
+}
+
+function makeGrain(){
+  grain = createGraphics(TW,TH);
+  grain.loadPixels();
+  for(let i=0;i<grain.pixels.length;i+=4){
+    const on = random(255)<60;
+    const v = random(120,255);
+    grain.pixels[i]=grain.pixels[i+1]=grain.pixels[i+2]=v;
+    grain.pixels[i+3]= on ? random(50,160) : 0;
+  }
+  grain.updatePixels();
+}
+
+function makeStatic(){
+  staticFrames = [];
+  for(let f=0; f<SF; f++){
+    const sb = createGraphics(STATIC_SZ, STATIC_SZ);
+    sb.pixelDensity(1);
+    sb.noSmooth();
+    sb.loadPixels();
+    for(let i=0;i<sb.pixels.length;i+=4){
+      const v = random(255)<50 ? random(180,255) : random(0,60);
+      sb.pixels[i]=sb.pixels[i+1]=sb.pixels[i+2]=v;
+      sb.pixels[i+3]=255;
+    }
+    sb.updatePixels();
+    staticFrames.push(sb);
+  }
+}
+
+function orb(g, u, v, rpx, c0, c1){
+  const x = u*TW, y = v*TH;
+  for(let k=-1;k<=1;k++){
+    const px = x + k*TW;
+    if(px < -rpx || px > TW+rpx) continue;
+    const grad = g.drawingContext.createRadialGradient(px,y,0,px,y,rpx);
+    grad.addColorStop(0, c0);
+    grad.addColorStop(0.7, c1);
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    g.drawingContext.fillStyle = grad;
+    g.drawingContext.beginPath();
+    g.drawingContext.arc(px,y,rpx,0,TWO_PI);
+    g.drawingContext.fill();
+  }
+}
+
+function paintTexture(){
+  const g = tex;
+  g.push();
+  g.background(0, 0, 5, 0.14);
+
+  // vertical atmosphere gradient (poles darker)
+  const vg = g.drawingContext.createLinearGradient(0,0,0,TH);
+  vg.addColorStop(0,'hsla(230,40%,4%,0.5)');
+  vg.addColorStop(0.5,`hsla(${ACC},40%,12%,0.0)`);
+  vg.addColorStop(1,'hsla(230,40%,4%,0.5)');
+  g.drawingContext.fillStyle = vg;
+  g.drawingContext.fillRect(0,0,TW,TH);
+
+  // bokeh
+  g.push();
+  g.drawingContext.globalCompositeOperation = 'lighter';
+  for(const b of bokeh){
+    const u = (b.u + 0.02*sin(t*b.sp+b.ph)) % 1;
+    const v = b.v + 0.02*cos(t*b.sp*0.8+b.ph);
+    const rpx = b.r*TH*(1+0.15*sin(t*1.2+b.ph));
+    if(b.acc) orb(g,u,v,rpx,`hsla(${ACC},80%,60%,${b.br*1.4})`,`hsla(${ACC},70%,55%,${b.br*0.5})`);
+    else orb(g,u,v,rpx,`hsla(0,0%,100%,${b.br*1.4})`,`hsla(0,0%,90%,${b.br*0.5})`);
+  }
+  g.drawingContext.globalCompositeOperation = 'source-over';
+  g.pop();
+
+  // flowing bands (seamless)
+  g.push();
+  for(const bd of bands){
+    const steps = 60;
+    const wave = u => (bd.v + bd.amp*sin(TWO_PI*bd.freq*u + t*bd.sp + bd.ph));
+    g.beginShape();
+    g.fill(0,0,80,0.05);
+    for(let i=-2;i<=steps+2;i++){
+      const u = i/steps;
+      g.curveVertex(u*TW, wave(u)*TH);
+    }
+    for(let i=steps+2;i>=-2;i--){
+      const u = i/steps;
+      g.curveVertex(u*TW, (wave(u)+0.03)*TH);
+    }
+    g.endShape(CLOSE);
+  }
+  g.pop();
+
+  // orbiting halos
+  g.push();
+  g.drawingContext.globalCompositeOperation = 'lighter';
+  for(const dt of dots){
+    const u = (dt.u + t*dt.sp*0.04) % 1;
+    const v = dt.v + 0.02*sin(t*dt.sp + dt.u*20);
+    const rpx = dt.sz * (TH/700) * 22 * (1+0.2*sin(t*2+dt.u*10));
+    if(dt.acc) orb(g,u,v,rpx,`hsla(${ACC},80%,60%,0.22)`,`hsla(${ACC},70%,55%,0.08)`);
+    else orb(g,u,v,rpx,`hsla(0,0%,100%,0.14)`,`hsla(0,0%,90%,0.05)`);
+  }
+  g.drawingContext.globalCompositeOperation = 'source-over';
+  g.pop();
+
+  // horizontal wave glitches (propagate vertically, full width = seamless)
+  if(random()<0.06) spawnRipple();
+  g.push();
+  g.drawingContext.globalCompositeOperation = 'screen';
+  g.noFill();
+  for(let i=ripples.length-1;i>=0;i--){
+    const rp = ripples[i];
+    rp.r += rp.max*0.025;
+    rp.life = 1 - rp.r/rp.max;
+    if(rp.life<=0){ ripples.splice(i,1); continue; }
+    const wpx = rp.w*TH;
+    const a = rp.life*0.6;
+    const spread = rp.r*TH;
+    const yA = rp.v*TH - spread;
+    const yB = rp.v*TH + spread;
+    g.strokeWeight(wpx);
+    for(const y of [yA, yB]){
+      g.stroke(0, 100, 100, a*0.5);   g.line(0, y-wpx*1.2, TW, y-wpx*1.2);
+      g.stroke(120, 100, 100, a*0.5); g.line(0, y, TW, y);
+      g.stroke(240, 100, 100, a*0.5); g.line(0, y+wpx*1.2, TW, y+wpx*1.2);
+      if(rp.acc){ g.stroke(ACC,90,100,a); g.line(0, y, TW, y); }
+      else { g.stroke(0,0,100,a*0.7); g.line(0, y, TW, y); }
+    }
+  }
+  g.noStroke();
+  g.drawingContext.globalCompositeOperation = 'source-over';
+  g.pop();
+
+  // hard horizontal tear-slices
+  if(ripples.length && random()<0.4){
+    const rp = ripples[floor(random(ripples.length))];
+    const spread = rp.r*TH;
+    const cy = rp.v*TH + (random()<0.5?-spread:spread);
+    for(let s=0;s<floor(random(2,4));s++){
+      const sy = constrain(cy + random(-8,8), 0, TH-12);
+      const sh = random(2, 8);
+      const shift = random(-30,30);
+      g.copy(g, 0, sy, TW, sh, shift, sy, TW, sh);
+    }
+  }
+
+  // datamosh blocks
+  if(random()<0.2){
+    for(let b=0;b<2;b++){
+      const bw = random(40,120), bh = random(6,18);
+      const sx = random(TW-bw), sy = random(TH-bh);
+      g.copy(g, sx, sy, bw, bh, sx+random(-25,25), sy+random(-4,4), bw, bh);
+    }
+  }
+
+  // grunge scratches
+  g.push();
+  g.stroke(0,0,random(70,100),0.1);
+  g.strokeWeight(0.7);
+  for(let i=0;i<6;i++){
+    const x1=random(TW), y1=random(TH);
+    g.line(x1,y1,x1+random(-30,30),y1+random(-50,50));
+  }
+  g.noStroke();
+  g.pop();
+
+  // grain
+  g.push();
+  g.drawingContext.globalCompositeOperation='screen';
+  g.drawingContext.globalAlpha=0.45;
+  g.image(grain, 0, 0);
+  g.drawingContext.globalAlpha=1;
+  g.drawingContext.globalCompositeOperation='source-over';
+  g.pop();
+
+  g.pop();
+}
+
+function draw(){
+  t += 0.006;
+  if(frameCount % 2 === 0) paintTexture();
+
+  clear();
+  background(230, 40, 6);
+
+  // TV static background
+  push();
+  translate(0, 0, -300);
+  noStroke();
+  tint(0, 0, 100, 0.9);
+  texture(staticFrames[floor(frameCount/3) % SF]);
+  plane(S*1.6, S*1.6);
+  noTint();
+  pop();
+
+  // rotating planet
+  push();
+  rotateX(-0.35);
+  rotateY(t*0.4);
+  noStroke();
+  texture(tex);
+  textureWrap(REPEAT);
+  sphere(S*0.36, 48, 28);
+  pop();
+}
+
+function windowResized(){
+  const d = min(windowWidth, windowHeight) * 0.92;
+  S = floor(d);
+  resizeCanvas(S, S);
+}
+</script>
+</body>
+</html>
