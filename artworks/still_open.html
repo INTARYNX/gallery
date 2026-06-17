@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0e0e0f;
+    display: flex; align-items: center; justify-content: center; }
+  canvas { background: #000; border-radius: 6px; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const cv  = document.getElementById('c');
+const ctx = cv.getContext('2d', { alpha: false });
+const rnd = (a, b) => a + Math.random() * (b - a);
+const lerp = (a, b, t) => a + (b - a) * t;
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h || w; return c; };
+
+const TD = (devicePixelRatio || 1) >= 1.5 ? 2 : 1;
+let W, H, DPR, S, SRC, sctx, triad, tctx, triadImg, persist, BLANK, rgb, RES, PS, TILE;
+
+/* ============ slot mask ============ */
+function makeSlotTile(ps) {
+  const chan = new Int8Array(ps*ps).fill(-1);
+  const sw   = new Float32Array(ps*ps);
+  const amb  = new Float32Array(ps*ps);
+  const third = ps/3;
+  const g=0.10, e=0.06;
+  const vg=0.07, vEdge=0.18;
+  for (let y=0;y<ps;y++) {
+    const yn=(y+0.5)/ps;
+    if (yn<vg || yn>1-vg) continue;
+    const ya=(yn-vg)/(1-2*vg);
+    let vy=1;
+    if (ya<vEdge)        vy=Math.sin(ya/vEdge*Math.PI/2);
+    else if (ya>1-vEdge) vy=Math.sin((1-ya)/vEdge*Math.PI/2);
+    for (let x=0;x<ps;x++) {
+      const i=y*ps+x;
+      const s=Math.min(2,(x/third)|0);
+      const u=(x+0.5)/third - s;
+      if (u<g || u>1-g) continue;
+      let hx=1;
+      if (u<g+e) hx=(u-g)/e;
+      else if (u>1-g-e) hx=(1-g-u)/e;
+      chan[i]=s; sw[i]=hx*vy; amb[i]=0.18*vy;
+    }
+  }
+  return { ps, chan, sw, amb, stagY:true };
+}
+
+function sampleSource() {
+  const d = sctx.getImageData(0,0,S,S).data;
+  const step = Math.max(1, PS>>1);
+  for (let cy=0; cy<RES; cy++) for (let cx=0; cx<RES; cx++) {
+    let r=0,g=0,b=0,n=0; const bx=cx*PS, by=cy*PS;
+    for (let y=0;y<PS;y+=step){ const yy=by+y; if(yy>=S)break;
+      for (let x=0;x<PS;x+=step){ const xx=bx+x; if(xx>=S)break;
+        const i=(yy*S+xx)*4; r+=d[i]; g+=d[i+1]; b+=d[i+2]; n++; }}
+    const o=(cy*RES+cx)*3; rgb[o]=r/n; rgb[o+1]=g/n; rgb[o+2]=b/n;
+  }
+}
+
+const KR=239, KG=230, KB=222;
+function applyPersistence(D) {
+  for (let i=0,n=S*S*4;i<n;i+=4) {
+    const pr=(persist[i]*KR)>>8, pg=(persist[i+1]*KG)>>8, pb=(persist[i+2]*KB)>>8;
+    const r=D[i]>pr?D[i]:pr, g=D[i+1]>pg?D[i+1]:pg, b=D[i+2]>pb?D[i+2]:pb;
+    D[i]=persist[i]=r; D[i+1]=persist[i+1]=g; D[i+2]=persist[i+2]=b;
+  }
+}
+
+const BASE_BRIGHT = 2.3;
+function drawTriads() {
+  const { ps, chan, sw, amb, stagY } = TILE;
+  const D = triadImg.data;
+  D.set(BLANK);
+  const half = ps>>1;
+
+  // auto-pilote la luminosité selon la luminance moyenne des slots actifs
+  let totalLuma = 0, lumaN = 0;
+  for (let i=0, n=rgb.length; i<n; i+=3) {
+    const r=rgb[i], g=rgb[i+1], b=rgb[i+2];
+    if (r|g|b) { totalLuma += (r*0.299 + g*0.587 + b*0.114); lumaN++; }
+  }
+  const meanLuma = lumaN ? totalLuma / lumaN : 80;
+  const BRIGHT = Math.max(1.4, Math.min(3.0, 90 / Math.max(1, meanLuma) * 0.6 + BASE_BRIGHT * 0.4));
+
+  for (let cy=0; cy<RES; cy++) {
+    const py0r = cy*ps;
+    for (let cx=0; cx<RES; cx++) {
+      const ci = (cy*RES+cx)*3;
+      let r=rgb[ci], g=rgb[ci+1], b=rgb[ci+2];
+      if (r===0 && g===0 && b===0) continue;
+      r=Math.min(255,r*BRIGHT); g=Math.min(255,g*BRIGHT); b=Math.min(255,b*BRIGHT);
+      const px0 = cx*ps;
+      const py0 = py0r + ((stagY && (cx&1)) ? half : 0);
+      for (let ty=0; ty<ps; ty++) {
+        const row=py0+ty; if(row<0||row>=S)continue;
+        const tBase=ty*ps, rowBase=row*S;
+        for (let tx=0; tx<ps; tx++) {
+          const x=px0+tx; if(x>=S)continue;
+          const ti=tBase+tx;
+          const a=amb[ti], w=sw[ti];
+          if (a===0 && w===0) continue;
+          const o=(rowBase+x)*4, c=chan[ti];
+          D[o]   = (c===0 ? r*(a+w) : r*a);
+          D[o+1] = (c===1 ? g*(a+w) : g*a);
+          D[o+2] = (c===2 ? b*(a+w) : b*a);
+        }
+      }
+    }
+  }
+  applyPersistence(D);
+  tctx.putImageData(triadImg, 0, 0);
+}
+
+/* ============ caméra clip 80s ============ */
+let SHOTS = [{ x:.50, y:.40, z:1.0 }];
+let shotStart=0, shotDur=1, shotEnd=0, transStart=0, transDur=300, driftZ=0;
+let camPrev={x:.5,y:.40,z:1}, camTo={x:.5,y:.40,z:1};
+let firstShot = true;
+
+function sampleCam(t) {
+  const trans = Math.min(1, (t-transStart)/transDur);
+  const te = trans*trans*(3-2*trans);
+  const prog = Math.min(1, (t-shotStart)/shotDur);
+  const z = camTo.z + driftZ*prog;
+  return { x: lerp(camPrev.x,camTo.x,te), y: lerp(camPrev.y,camTo.y,te), z: lerp(camPrev.z,z,te) };
+}
+let rawFlash = false;
+function tickCamera(t) {
+  if (t <= shotEnd) return;
+  camPrev = sampleCam(t);
+
+  if (firstShot) {
+    camTo = { x:.50, y:.40, z:1.0 }; driftZ = 0;
+    shotStart = t; shotDur = 2000; shotEnd = t + shotDur;
+    transStart = t; transDur = 1; firstShot = false;
+    return;
+  }
+
+  // cible : plan large ou n'importe quelle lettre, au hasard
+  const r = Math.random();
+  if (r < 0.33) {
+    camTo = { x:.50, y:.40, z: rnd(1.0, 1.15) };
+  } else {
+    const p = SHOTS[1 + ((Math.random()*(SHOTS.length-1))|0)];
+    camTo = { x:p.x, y:p.y, z: p.z * rnd(0.85, 1.25) };   // zoom varié
+  }
+  driftZ = camTo.z > 1.2 ? rnd(-0.4, 0.8) : 0;            // push-in OU pull-back
+
+  // rythme varié : stutter rapide, coupe normale, ou plan tenu
+  const k = Math.random();
+  shotDur = k < 0.30 ? rnd(110, 280) : k < 0.75 ? rnd(450, 1100) : rnd(1300, 2400);
+  transStart = t;
+  transDur = Math.random() < 0.7 ? rnd(30, 90) : rnd(250, 600);  // snap ou glissé
+
+  // le mode brut = un FLASH bref et sec, jamais tenu
+  rawFlash = Math.random() < 0.4;
+  if (rawFlash) { shotDur = rnd(45, 110); transDur = 1; }
+
+  shotEnd = t + shotDur;
+}
+
+const BLANK_ALPHA = i => i;
+function compose(now) {
+  const cam = sampleCam(now);
+  ctx.globalCompositeOperation='source-over';
+  ctx.fillStyle='#000'; ctx.fillRect(0,0,S,S);
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  const fx = cam.x*S, fy = cam.y*S;
+  ctx.translate(S/2, S/2); ctx.scale(cam.z, cam.z); ctx.translate(-fx, -fy);
+  if (rawFlash) {
+    // version brute (sans masque CRT) : image source pleine luminosité
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.drawImage(SRC, 0, 0);
+    ctx.restore();
+  } else {
+    // base nette (image originale assombrie) surtout en plan large -> netteté
+    const sharpW = Math.max(0, Math.min(1, (2.2 - cam.z) / 1.2));
+    if (sharpW > 0) {
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 0.55 * sharpW;
+      ctx.drawImage(SRC, 0, 0);
+      ctx.globalAlpha = 1;
+    }
+    ctx.globalCompositeOperation='lighter';
+    ctx.drawImage(triad,0,0);
+    ctx.restore();
+  }
+  ctx.globalCompositeOperation='source-over';
+  const vg=ctx.createRadialGradient(S/2,S/2,S*0.35,S/2,S/2,S*0.74);
+  vg.addColorStop(0,'transparent'); vg.addColorStop(1,'rgba(0,0,0,0.5)');
+  ctx.fillStyle=vg; ctx.fillRect(0,0,S,S);
+  const hg=ctx.createRadialGradient(S*0.3,S*0.25,8,S*0.3,S*0.25,S*0.5);
+  hg.addColorStop(0,'rgba(255,255,255,0.06)'); hg.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.fillStyle=hg; ctx.fillRect(0,0,S,S);
+}
+
+/* ============ bruit ============ */
+function noiseCanvas(w, h, alpha) {
+  const n = mk(w, h);
+  const g = n.getContext('2d');
+  const img = g.createImageData(w, h);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const v = Math.random() * 255 | 0;
+    img.data[i] = img.data[i+1] = img.data[i+2] = v;
+    img.data[i+3] = alpha;
+  }
+  g.putImageData(img, 0, 0);
+  return n;
+}
+
+/* ============ géométrie perspective ============ */
+let G;
+function buildGeometry() {
+  const s = Math.min(W, H) / 1000;
+  const xL = W * 0.01, xR = W * 0.97;
+  const capL = H * 0.34, capR = H * 0.18;
+  const baseL = H * 0.56, baseR = H * 0.36;
+  const margin = 0.30;
+
+  const yTopL = capL - (baseL - capL) * margin + H * 0.05;
+  const yBotL = baseL + (baseL - capL) * margin;
+  const yTopR = capR - (baseR - capR) * margin;
+  const yBotR = baseR + (baseR - capR) * margin;
+
+  const TL = { x: xL, y: yTopL }, TR = { x: xR, y: yTopR };
+  const BL = { x: xL, y: yBotL }, BR = { x: xR, y: yBotR };
+
+  const slope = (yBotR - yBotL) / (xR - xL);
+  const awY = x => yBotL + slope * (x - xL) + 6 * s;
+  const awTh = H * 0.15;
+
+  G = { s, xL, xR, capL, capR, baseL, baseR, TL, TR, BL, BR, awY, awTh };
+}
+
+function quad(g, a, b, c, d) {
+  g.beginPath();
+  g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.lineTo(c.x, c.y); g.lineTo(d.x, d.y);
+  g.closePath();
+}
+
+/* ============ mur de briques ============ */
+let wall;
+function buildWall() {
+  wall = mk(W, H);
+  const g = wall.getContext('2d');
+  g.fillStyle = '#160c06'; g.fillRect(0, 0, W, H);
+
+  g.save();
+  g.translate(W * 0.55, H); g.rotate(-0.045); g.transform(1, -0.06, 0, 1, 0, 0);
+  let rowH = H * 0.052; const shrink = 0.965; let y = 0, row = 0;
+  while (y < H * 1.8 && rowH > 2.5) {
+    const bw2 = rowH * 2.35, mortar = rowH * 0.16;
+    const off = (row % 2) * ((bw2 + mortar) / 2);
+    const heightT = Math.min(1, y / (H * 1.4)), lum = 0.55 + heightT * 0.75;
+    for (let x = -W; x < W; x += bw2 + mortar) {
+      const v = rnd(0.7, 1.25) * lum;
+      g.fillStyle = `rgb(${Math.min(255,165*v)|0},${64*v|0},${26*v|0})`;
+      g.fillRect(x + off + rnd(-1, 1), -y - rowH, bw2 + rnd(-1.5, 1.5), rowH);
+      if (Math.random() < 0.3) { g.fillStyle = `rgba(0,0,0,${rnd(0.08, 0.3)})`;
+        g.fillRect(x + off + rnd(0, bw2*0.5), -y - rowH + rnd(0, rowH*0.4), bw2*rnd(0.3,0.6), rowH*rnd(0.4,0.8)); }
+      if (Math.random() < 0.12) { g.fillStyle = `rgba(255,200,150,${rnd(0.03,0.09)})`;
+        g.fillRect(x + off, -y - rowH, bw2, rowH*0.4); }
+      g.fillStyle = `rgba(0,0,0,${0.35 - heightT*0.15})`; g.fillRect(x + off, -y - 1.5, bw2, 1.5);
+    }
+    y += rowH + mortar; rowH *= shrink; row++;
+  }
+  const px = -W * 0.38, pw = W * 0.08;
+  g.fillStyle = 'rgba(255,170,110,0.07)'; g.fillRect(px, -H * 1.8, pw, H * 1.8);
+  g.fillStyle = 'rgba(0,0,0,0.4)'; g.fillRect(px + pw, -H * 1.8, 7, H * 1.8);
+  g.fillStyle = 'rgba(255,220,170,0.09)'; g.fillRect(px - 5, -H * 1.8, 5, H * 1.8);
+  for (let i = 0; i < 28; i++) {
+    const x = rnd(-W, W), y0 = rnd(-H * 1.6, -H * 0.3), len = rnd(H * 0.1, H * 0.5);
+    const dg = g.createLinearGradient(0, y0, 0, y0 + len);
+    dg.addColorStop(0, `rgba(10,5,3,${rnd(0.1, 0.3)})`); dg.addColorStop(1, 'rgba(10,5,3,0)');
+    g.fillStyle = dg; g.fillRect(x, y0, rnd(2, 8), len);
+  }
+  g.restore();
+
+  for (let i = 0; i < 10; i++) {
+    const x = rnd(0, W), y = rnd(0, H), rad = rnd(50, 200);
+    const sg = g.createRadialGradient(x, y, 0, x, y, rad);
+    sg.addColorStop(0, `rgba(15,8,4,${rnd(0.12, 0.3)})`); sg.addColorStop(1, 'rgba(15,8,4,0)');
+    g.fillStyle = sg; g.fillRect(x - rad, y - rad, rad*2, rad*2);
+  }
+  const n1 = noiseCanvas(256, 256, 255);
+  g.globalAlpha = 0.12; g.globalCompositeOperation = 'overlay';
+  g.fillStyle = g.createPattern(n1, 'repeat'); g.fillRect(0, 0, W, H);
+  g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
+  const lg = g.createRadialGradient(W*0.15, -H*0.15, 0, W*0.15, -H*0.15, H*1.4);
+  lg.addColorStop(0, 'rgba(255,150,60,0.5)'); lg.addColorStop(0.4, 'rgba(255,110,40,0.2)'); lg.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = lg; g.fillRect(0, 0, W, H);
+  const dg2 = g.createLinearGradient(0, 0, 0, H);
+  dg2.addColorStop(0, 'rgba(0,0,0,0.08)'); dg2.addColorStop(0.6, 'rgba(0,0,0,0.42)'); dg2.addColorStop(1, 'rgba(0,0,0,0.82)');
+  g.fillStyle = dg2; g.fillRect(0, 0, W, H);
+  const dg3 = g.createLinearGradient(W*0.45, 0, W, 0);
+  dg3.addColorStop(0, 'rgba(0,0,0,0)'); dg3.addColorStop(1, 'rgba(0,0,0,0.45)');
+  g.fillStyle = dg3; g.fillRect(0, 0, W, H);
+
+  const blurred = mk(W, H);
+  const bg = blurred.getContext('2d');
+  bg.filter = 'blur(2.5px)'; bg.drawImage(wall, 0, 0);
+  wall = blurred;
+}
+
+/* ============ avant-toit ============ */
+let awning;
+function buildAwning() {
+  const { awY, awTh } = G;
+  awning = mk(W, H);
+  const g = awning.getContext('2d');
+  const y0 = awY(-10), y1 = awY(W + 10);
+  g.beginPath();
+  g.moveTo(-10, y0); g.lineTo(W+10, y1); g.lineTo(W+10, y1 + awTh); g.lineTo(-10, y0 + awTh); g.closePath();
+  const mg = g.createLinearGradient(0, Math.min(y0, y1), 0, Math.max(y0, y1) + awTh);
+  mg.addColorStop(0, '#4e4e4a'); mg.addColorStop(0.3, '#383631'); mg.addColorStop(0.7, '#23211d'); mg.addColorStop(1, '#0e0d0b');
+  g.fillStyle = mg; g.fill();
+  g.save(); g.clip();
+  for (let i = 0; i < 60; i++) {
+    const x = rnd(0, W);
+    g.fillStyle = Math.random() < 0.5 ? `rgba(0,0,0,${rnd(0.1,0.35)})` : `rgba(120,90,60,${rnd(0.05,0.18)})`;
+    g.fillRect(x, awY(x) + rnd(0, awTh*0.8), rnd(2, 30), rnd(2, awTh*0.5));
+  }
+  g.strokeStyle = 'rgba(0,0,0,0.4)'; g.lineWidth = 1.5;
+  for (let k = 0.3; k < 1; k += 0.35) { g.beginPath(); g.moveTo(-10, y0 + awTh*k); g.lineTo(W+10, y1 + awTh*k); g.stroke(); }
+  const n = noiseCanvas(128, 128, 255);
+  g.globalAlpha = 0.15; g.globalCompositeOperation = 'overlay';
+  g.fillStyle = g.createPattern(n, 'repeat'); g.fillRect(0, 0, W, H);
+  g.restore(); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+  g.strokeStyle = 'rgba(200,200,190,0.22)'; g.lineWidth = 2;
+  g.beginPath(); g.moveTo(-10, y0); g.lineTo(W+10, y1); g.stroke();
+  g.beginPath(); g.moveTo(-10, y0 + awTh); g.lineTo(W+10, y1 + awTh); g.lineTo(W+10, H+10); g.lineTo(-10, H+10); g.closePath();
+  const ug = g.createLinearGradient(0, Math.min(y0, y1) + awTh, 0, H);
+  ug.addColorStop(0, '#080605'); ug.addColorStop(1, '#020101');
+  g.fillStyle = ug; g.fill();
+}
+
+/* ============ caisson ============ */
+let boxLayer;
+function buildBox() {
+  const { s, TL, TR, BL, BR, xL, xR } = G;
+  boxLayer = mk(W, H);
+  const g = boxLayer.getContext('2d');
+  g.save(); g.filter = `blur(${16*s}px)`;
+  quad(g, {x:TL.x+12*s,y:TL.y+20*s},{x:TR.x+12*s,y:TR.y+20*s},{x:BR.x+12*s,y:BR.y+24*s},{x:BL.x+12*s,y:BL.y+24*s});
+  g.fillStyle = 'rgba(0,0,0,0.7)'; g.fill(); g.restore(); g.filter = 'none';
+
+  quad(g, TL, TR, BR, BL);
+  const fg = g.createLinearGradient(xL, 0, xR, 0);
+  fg.addColorStop(0, '#181311'); fg.addColorStop(0.6, '#0d0a08'); fg.addColorStop(1, '#0a0806');
+  g.fillStyle = fg; g.fill();
+  g.strokeStyle = '#000'; g.lineWidth = 2.5; g.stroke();
+
+  g.save(); quad(g, TL, TR, BR, BL); g.clip();
+  for (let i = 0; i < 26; i++) {
+    const x = rnd(xL, xR), t = (x - xL) / (xR - xL);
+    const y = rnd(lerp(TL.y, TR.y, t), lerp(BL.y, BR.y, t));
+    const rad = rnd(15*s, 95*s) * lerp(1, 0.7, t);
+    const rg = g.createRadialGradient(x, y, 0, x, y, rad);
+    const warm = Math.random() < 0.7;
+    const col = warm ? `${90+rnd(0,60)|0},${25+rnd(0,25)|0},${8+rnd(0,12)|0}` : '20,16,14';
+    rg.addColorStop(0, `rgba(${col},${rnd(0.15,0.45)})`); rg.addColorStop(0.7, `rgba(${col},${rnd(0.05,0.15)})`); rg.addColorStop(1, `rgba(${col},0)`);
+    g.fillStyle = rg; g.beginPath(); g.ellipse(x, y, rad, rad*rnd(0.5,1), rnd(0,3.14), 0, 7); g.fill();
+  }
+  for (let i = 0; i < 40; i++) {
+    const x = rnd(xL, xR), t = (x - xL) / (xR - xL);
+    g.fillStyle = `rgba(0,0,0,${rnd(0.15,0.45)})`;
+    g.beginPath(); g.ellipse(x, rnd(lerp(TL.y, TR.y, t), lerp(BL.y, BR.y, t)), rnd(2,14)*s, rnd(1,8)*s, rnd(0,3.14), 0, 7); g.fill();
+  }
+  for (let i = 0; i < 50; i++) {
+    const x = rnd(xL, xR), t = (x - xL) / (xR - xL);
+    const y = rnd(lerp(TL.y, TR.y, t), lerp(BL.y, BR.y, t));
+    g.strokeStyle = Math.random() < 0.5 ? `rgba(200,160,120,${rnd(0.02,0.06)})` : `rgba(0,0,0,${rnd(0.1,0.3)})`;
+    g.lineWidth = rnd(0.4, 1.4);
+    const dx2 = rnd(20, 90)*s;
+    g.beginPath(); g.moveTo(x, y); g.lineTo(x + dx2, y + dx2 * ((TR.y - TL.y) / (xR - xL)) + rnd(-4, 4)*s); g.stroke();
+  }
+  const n = noiseCanvas(128, 128, 255);
+  g.globalAlpha = 0.14; g.globalCompositeOperation = 'overlay';
+  g.fillStyle = g.createPattern(n, 'repeat'); g.fillRect(xL, Math.min(TL.y, TR.y), xR - xL, Math.max(BL.y, BR.y) - Math.min(TL.y, TR.y));
+  g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
+  const mx = (xL + xR) / 2, my = (TL.y + BR.y) / 2;
+  const ig = g.createRadialGradient(mx, my, (BL.y - TL.y)*0.3, mx, my, (xR - xL)*0.62);
+  ig.addColorStop(0, 'rgba(0,0,0,0)'); ig.addColorStop(1, 'rgba(0,0,0,0.75)');
+  g.fillStyle = ig; g.fillRect(0, 0, W, H);
+  g.restore();
+}
+
+/* ============ lettres ============ */
+const letterDefs = {
+  O: { w: 62, draw(g){ g.beginPath(); g.ellipse(31, 50, 27, 48, 0.06, 0.35, 0.35 + Math.PI*2 - 0.12); } },
+  P: { w: 58, draw(g){ g.beginPath(); g.moveTo(8,100); g.lineTo(8,8); g.lineTo(30,4); g.bezierCurveTo(58,2,60,46,32,50); g.lineTo(10,52); } },
+  E: { w: 56, draw(g){ g.beginPath(); g.moveTo(52,2); g.lineTo(8,3); g.lineTo(8,49); g.lineTo(42,49); g.moveTo(8,49); g.lineTo(8,99); g.lineTo(54,98); } },
+  N: { w: 64, draw(g){ g.beginPath(); g.moveTo(8,100); g.lineTo(8,4); g.lineTo(54,96); g.lineTo(54,0); } },
+};
+const letters = ['O','P','E','N'];
+const lState = letters.map((_, i) => ({ v: 1, target: 1, next: 0, phase: rnd(0,6.28), hum: rnd(0.04,0.07), faulty: i === 1 }));
+const agePattern = letters.map(() => { const d = []; for (let k=0;k<5;k++) d.push(rnd(8,36), rnd(50,170)); return d; });
+
+// jitter de phase par lettre (signature VHS / champ magnétique)
+const phaseJitter = letters.map(() => ({ j: 0, jNext: 0 }));
+function tickPhaseJitter(t) {
+  for (let i=0; i<phaseJitter.length; i++) {
+    const p = phaseJitter[i];
+    if (t > p.jNext) {
+      const amp = lState[i].faulty ? rnd(0.04, 0.09) : rnd(0.005, 0.02);
+      p.j = (Math.random() - 0.5) * 2 * amp;
+      p.jNext = t + rnd(40, 220);
+    }
+  }
+}
+
+function tickLetters(t) {
+  lState.forEach(st => {
+    if (t > st.next) {
+      const r = Math.random();
+      if (st.faulty) {
+        if (st.target <= 0.3) {
+          if (r < 0.35) { st.target = r < 0.12 ? 1.25 : rnd(0.6,1); st.next = t + rnd(40,260); }
+          else { st.target = rnd(0,0.08); st.next = t + rnd(120,900); }
+        } else {
+          if (r < 0.8) { st.target = rnd(0,0.12); st.next = t + rnd(150,1100); }
+          else { st.target = rnd(0.4,0.8); st.next = t + rnd(30,120); }
+        }
+      } else {
+        if (r < 0.03) { st.target = rnd(0.03,0.2); st.next = t + rnd(60,300); }
+        else if (r < 0.13) { st.target = rnd(0.55,0.85); st.next = t + rnd(40,140); }
+        else { st.target = st.v < 0.5 ? 1.18 : 1; st.next = t + rnd(700,4200); }
+      }
+    }
+    st.v += (st.target - st.v) * (st.target > st.v ? 0.65 : 0.45);
+    if (st.target > 1 && Math.abs(st.v - st.target) < 0.05) st.target = 1;
+  });
+}
+
+const tubeStates = {
+  green: { v: 1, target: 1, next: 0, phase: rnd(0,6.28), hum: 0.09 },
+  red:   { v: 1, target: 1, next: 0, phase: rnd(0,6.28), hum: 0.11 }
+};
+function tickTubes(t) {
+  for (const k in tubeStates) {
+    const st = tubeStates[k];
+    if (t > st.next) {
+      const r = Math.random();
+      if (r < 0.78) { st.target = 1; st.next = t + rnd(500,2500); }
+      else if (r < 0.95) { st.target = rnd(0.45,0.8); st.next = t + rnd(50,200); }
+      else { st.target = rnd(0.1,0.3); st.next = t + rnd(60,180); }
+    }
+    st.v += (st.target - st.v) * 0.5;
+  }
+}
+const humOf = (st, t) => st.v * (1 - st.hum + st.hum * Math.sin(t * 0.012 + st.phase)) + (Math.random() - 0.5) * 0.03;
+
+function drawNeon(g, tNow) {
+  const { positions, shift, shear } = letterPosCache;
+  g.lineCap = 'round'; g.lineJoin = 'round';
+
+  positions.forEach((p, i) => {
+    const ch = letters[i], def = letterDefs[ch];
+    const px = p.x + shift;
+    const sc = p.scC;
+    const st = lState[i];
+    const it = Math.max(0.02, Math.min(1.2, humOf(st, tNow) + phaseJitter[i].j));
+    const litv = Math.min(1, it), boost = Math.max(0, it - 1);
+
+    g.save();
+    g.translate(px, p.midY - 50 * sc); g.scale(sc, sc);
+    g.translate(def.w / 2, 50); g.transform(1, shear, 0, 1, 0, 0); g.translate(-def.w / 2, -50);
+
+    if (it > 0.04) {
+      const passes = [
+        { blur: 52, w: 13,  c: `rgba(140,18,2,${0.42*litv})` },
+        { blur: 26, w: 10,  c: `rgba(220,30,8,${0.58*litv})` },
+        { blur: 12, w: 7,   c: `rgba(245,55,22,${0.88*litv})` },
+        { blur: 5,  w: 4.6, c: `rgba(255,85,45,${litv})` },
+        { blur: 2.2,w: 2.8, c: `rgba(255,150,110,${0.9*litv})` },
+        { blur: 0.8,w: 1.3, c: `rgba(255,225,205,${0.93*litv})` },
+      ];
+      for (const pa of passes) { def.draw(g); g.shadowBlur = pa.blur * (1 + boost * 1.6); g.shadowColor = pa.c; g.strokeStyle = pa.c; g.lineWidth = pa.w; g.stroke(); }
+      g.shadowBlur = 0;
+      g.setLineDash(agePattern[i]); g.strokeStyle = `rgba(75,18,8,${0.32 * litv})`; g.lineWidth = 3.4; def.draw(g); g.stroke(); g.setLineDash([]);
+    }
+    g.strokeStyle = `rgba(120,55,40,${0.45 - 0.3*litv})`; g.lineWidth = 1.4; def.draw(g); g.stroke();
+    g.restore();
+  });
+
+  const it = lState.reduce((a, s2) => a + s2.v, 0) / 4;
+  const mx = (G.xL + G.xR) / 2, my = (G.capL + G.baseR) / 2;
+  const hg = g.createRadialGradient(mx, my, 10, mx, my, (G.xR - G.xL)*0.8);
+  hg.addColorStop(0, `rgba(220,10,5,${0.13*it})`); hg.addColorStop(0.5, `rgba(150,5,5,${0.05*it})`); hg.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = hg; g.fillRect(0, 0, W, H);
+}
+
+function drawTube(g, yOff, core, glowC, st, s, t) {
+  const { awY } = G;
+  const a = { x: -10, y: awY(-10) + yOff }, b = { x: W + 10, y: awY(W + 10) + yOff };
+  const it = Math.max(0.05, Math.min(1.1, humOf(st, t))), litv = Math.min(1, it);
+  g.save(); g.lineCap = 'round';
+  const passes = [
+    { blur: 36*s, w: 9*s,   c: glowC, al: 0.35 },
+    { blur: 16*s, w: 6*s,   c: glowC, al: 0.65 },
+    { blur: 7*s,  w: 4*s,   c: core,  al: 1 },
+    { blur: 2.5*s,w: 2.2*s, c: '#fff7ea', al: 0.85 },
+    { blur: 0.8*s,w: 1.1*s, c: '#ffffff', al: 0.95 },
+  ];
+  for (const p of passes) { g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.shadowBlur = p.blur; g.shadowColor = p.c; g.strokeStyle = p.c; g.globalAlpha = p.al * litv; g.lineWidth = p.w; g.stroke(); }
+  g.shadowBlur = 0; g.globalAlpha = 0.3 * litv; g.strokeStyle = 'rgba(20,10,6,1)'; g.lineWidth = 3*s;
+  g.setLineDash([40*s, 170*s, 18*s, 240*s]); g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
+  g.setLineDash([70*s, 320*s]); g.lineDashOffset = -t * 0.12; g.globalAlpha = 0.10 * it; g.strokeStyle = '#ffffff'; g.shadowBlur = 6*s; g.shadowColor = '#ffffff'; g.lineWidth = 1.6*s;
+  g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke(); g.setLineDash([]);
+  g.globalAlpha = 1; g.shadowBlur = 0;
+  for (let i = 1; i < 7; i++) { const tt = i / 7; g.fillStyle = '#15120e'; g.fillRect(a.x + (b.x - a.x)*tt - 2*s, a.y + (b.y - a.y)*tt - 1*s, 4*s, 8*s); }
+  g.restore();
+}
+
+/* ============ brume ============ */
+let fogA, fogB;
+function buildFog() {
+  const make = () => {
+    const f = mk(W, H); const g = f.getContext('2d');
+    for (let i = 0; i < 14; i++) {
+      const x = rnd(0, W), y = rnd(0, H), r = rnd(H*0.15, H*0.45), a = rnd(0.10, 0.22);
+      for (const wx of [x - W, x, x + W]) {
+        const fg = g.createRadialGradient(wx, y, 0, wx, y, r);
+        fg.addColorStop(0, `rgba(255,205,165,${a})`); fg.addColorStop(1, 'rgba(255,205,165,0)');
+        g.fillStyle = fg; g.fillRect(wx - r, y - r, r*2, r*2);
+      }
+    }
+    return f;
+  };
+  fogA = make(); fogB = make();
+}
+function drawFog(g, layer, t, speed, alpha) {
+  const off = (t * speed) % W;
+  g.globalAlpha = alpha; g.globalCompositeOperation = 'screen';
+  g.drawImage(layer, off - W, 0); g.drawImage(layer, off, 0);
+  g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
+}
+
+/* ============ pluie ============ */
+let drops = [];
+function newDrop(anyY) {
+  return { x: rnd(-W*0.1, W*1.1), y: anyY ? rnd(0, H) : rnd(-H*0.1, 0), len: rnd(9, 22), sp: rnd(7, 14), drift: rnd(0.8, 1.8), a: rnd(0.12, 0.30), z: Math.random() };
+}
+function buildRain() { drops = []; const count = Math.floor(W * 0.28); for (let i = 0; i < count; i++) drops.push(newDrop(true)); }
+
+let _rainMx, _rainMy, _rainGlowR;
+function buildRainCache() {
+  _rainMx = (G.xL + G.xR) / 2;
+  _rainMy = (G.capL + G.baseR) / 2;
+  _rainGlowR = (G.xR - G.xL) * 0.6;
+}
+function drawRain(g) {
+  const mx = _rainMx, my = _rainMy, glowR = _rainGlowR;
+  g.save(); g.lineCap = 'round'; g.globalCompositeOperation = 'screen';
+  for (const d of drops) {
+    d.x += d.drift * d.sp * 0.18; d.y += d.sp;
+    if (d.y > H + 20 || d.x > W + 30) Object.assign(d, newDrop(false));
+    const dx = d.x - mx, dy = d.y - my;
+    const lit = Math.max(0, 1 - Math.sqrt(dx*dx + dy*dy) / glowR), sc = 0.5 + d.z * 0.5;
+    g.strokeStyle = `rgba(${190 + lit*65|0},${195 - lit*55|0},${190 - lit*90|0},${(d.a + lit*0.25) * sc})`;
+    g.lineWidth = 0.8 + d.z * 1.2;
+    g.beginPath(); g.moveTo(d.x, d.y); g.lineTo(d.x - d.drift * d.len * sc * 0.18, d.y - d.len * sc); g.stroke();
+  }
+  g.restore();
+}
+
+/* ============ grain ============ */
+let grains = [], grainIdx = 0, lastGrain = 0;
+function buildGrain() { grains = []; for (let i = 0; i < 3; i++) grains.push(noiseCanvas(Math.max(1, W/2|0), Math.max(1, H/2|0), 16)); }
+
+/* ============ rendu scène -> sctx ============ */
+function renderScene(t) {
+  const g = sctx, s = G.s, { awY, awTh } = G;
+  g.clearRect(0, 0, W, H);
+  g.drawImage(wall, 0, 0);
+  drawFog(g, fogA, t, 0.008, 0.85);
+
+  g.drawImage(awning, 0, 0, W, H);
+  drawTube(g, awTh*0.45, '#ff7a60', '#ff1505', tubeStates.red, s, t);
+
+  const y0 = awY(-10), y1 = awY(W + 10);
+  g.save();
+  g.beginPath(); g.moveTo(-10, y0); g.lineTo(W+10, y1); g.lineTo(W+10, y1+awTh); g.lineTo(-10, y0+awTh); g.closePath(); g.clip();
+  const rg = g.createLinearGradient(0, Math.min(y0,y1), 0, Math.max(y0,y1) + awTh);
+  rg.addColorStop(0.2, `rgba(60,255,120,${0.05*tubeStates.green.v})`);
+  rg.addColorStop(0.55, `rgba(255,40,10,${0.11*tubeStates.red.v})`);
+  rg.addColorStop(0.8, `rgba(255,40,10,${0.04*tubeStates.red.v})`);
+  g.fillStyle = rg; g.fillRect(0, 0, W, H);
+  g.restore();
+
+  g.drawImage(boxLayer, 0, 0, W, H);
+  drawNeon(g, t);
+  drawTube(g, -6*s, '#8affae', '#22d055', tubeStates.green, s, t);
+
+  drawFog(g, fogB, t, 0.015, 0.32);
+  drawRain(g);
+
+  if (t - lastGrain > 90) { grainIdx = (grainIdx + 1) % grains.length; lastGrain = t; }
+  g.globalCompositeOperation = 'overlay'; g.globalAlpha = 0.45; g.drawImage(grains[grainIdx], 0, 0, W, H);
+  g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
+}
+
+/* ============ drop-frame VHS (trame manquante) ============ */
+let dropCooldown = 0, dropPending = false;
+function maybeDropFrame(t) {
+  if (dropPending) {
+    dropPending = false;
+    const shiftY = (Math.random() < 0.5 ? 1 : 2) * (Math.random() < 0.5 ? 1 : -1);
+    ctx.drawImage(cv, 0, shiftY);
+    ctx.fillStyle = 'rgba(0,0,0,0.85)';
+    ctx.fillRect(0, (Math.random() * S) | 0, S, 4);
+    dropCooldown = t + rnd(180, 1200);
+    return true;
+  }
+  if (t > dropCooldown && Math.random() < 0.04) dropPending = true;
+  return false;
+}
+
+/* ============ boucle ============ */
+function loop(t) {
+  tickLetters(t); tickTubes(t); tickCamera(t); tickPhaseJitter(t);
+  if (maybeDropFrame(t)) { requestAnimationFrame(loop); return; }
+  renderScene(t);
+  sampleSource();
+  drawTriads();
+  compose(t);
+  requestAnimationFrame(loop);
+}
+
+/* centres réels des lettres (même calcul que drawNeon) -> cadrage centré */
+/* positions des lettres pré-calculées (une fois au resize) */
+let letterPosCache = null;
+function buildLetterPos() {
+  const { xL, xR, capL, capR, baseL, baseR } = G;
+  const inset = (xR - xL) * 0.09, x0 = xL + inset, x1 = xR - inset;
+  const scaleAt = t => (lerp(baseL, baseR, t) - lerp(capL, capR, t)) / 100;
+  const midAt = t => (lerp(capL, capR, t) + lerp(baseL, baseR, t)) / 2;
+  const gap = 24;
+  const positions = []; let xs = x0;
+  letters.forEach((ch) => { const t = (xs - xL) / (xR - xL); const sc = scaleAt(t); positions.push({ x: xs, sc }); xs += (letterDefs[ch].w + gap) * sc; });
+  const used = xs - gap * positions[3].sc - x0;
+  const shift = (x1 - x0 - used) / 2;
+  const shear = ((capR + baseR) / 2 - (capL + baseL) / 2) / (xR - xL);
+  positions.forEach((p, i) => {
+    const def = letterDefs[letters[i]];
+    const cxs = p.x + shift + def.w * p.sc / 2;
+    const tC = (cxs - xL) / (xR - xL);
+    p.scC = scaleAt(tC);
+    p.midY = midAt(tC) + (i === 0 ? H * 0.01 : 0);
+    p.cxs = cxs;
+  });
+  letterPosCache = { positions, shift, shear };
+}
+function buildShots() {
+  const Z = 2.6, ZC = 4.0;
+  const c = letterPosCache.positions.map(p => ({ x: p.cxs / W, y: p.midY / H }));
+  SHOTS = [{ x:.50, y:.40, z:1.0 },
+    ...c.map(p => ({ x: p.x, y: p.y, z: Z })),
+    { x: c[0].x, y: c[0].y, z: ZC },
+    { x: c[2].x, y: c[2].y, z: ZC }];
+}
+
+function resize() {
+  const css = Math.min(window.innerWidth, window.innerHeight);
+  S = 720 * TD;
+  cv.width = cv.height = S;
+  cv.style.width = cv.style.height = css + 'px';
+
+  W = S; H = S; DPR = 1;
+  PS = 8 * TD; RES = (S / PS) | 0;
+  rgb = new Uint8Array(RES * RES * 3);
+  SRC = mk(S); sctx = SRC.getContext('2d', { willReadFrequently: true });
+  triad = mk(S); tctx = triad.getContext('2d'); triadImg = tctx.createImageData(S, S);
+  persist = new Uint8ClampedArray(S*S*4);
+  BLANK = new Uint8ClampedArray(S*S*4); for (let i=3,n=S*S*4;i<n;i+=4) BLANK[i]=255;
+  TILE = makeSlotTile(PS);
+
+  buildGeometry(); buildWall(); buildAwning(); buildBox(); buildFog(); buildRain(); buildRainCache(); buildGrain();
+  buildLetterPos();
+  buildShots();
+}
+
+window.addEventListener('resize', resize);
+resize();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
