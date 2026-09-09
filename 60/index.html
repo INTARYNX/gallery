@@ -1,0 +1,966 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Patrick — Cap sur les 60 ans !</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@400;500;600&family=Spectral:ital,wght@1,300;1,500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --abyss:#04121b;
+    --sea:#0b2a3b;
+    --wave:#17516b;
+    --brass:#e0a83f;
+    --sail:#f1ede1;
+    --mist:#9dbecd;
+    --alert:#e05a4b;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;overflow:hidden;background:var(--abyss);color:var(--sail);
+    font-family:"Barlow Semi Condensed",system-ui,sans-serif;-webkit-tap-highlight-color:transparent;
+    overscroll-behavior:none}
+  canvas{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}
+
+  .hud{position:fixed;inset:0;pointer-events:none;display:flex;flex-direction:column;
+    justify-content:space-between;gap:8px;
+    padding:calc(10px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right))
+            calc(10px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left))}
+  .route{width:min(560px,100%);margin:0 auto}
+  .route .line{height:2px;background:rgba(157,190,205,.25);position:relative;margin:18px 0 6px}
+  .route .done{position:absolute;left:0;top:0;bottom:0;background:var(--brass);width:0}
+  .route .boat{position:absolute;top:-5px;width:12px;height:12px;margin-left:-6px;
+    background:var(--brass);clip-path:polygon(50% 0,100% 100%,0 100%);transform:rotate(90deg)}
+  .route .ends{display:flex;justify-content:space-between;font-family:Spectral,serif;font-style:italic;
+    font-size:clamp(12px,3.2vw,14px);color:var(--mist);letter-spacing:.04em}
+  .route .mid{text-align:center;font-size:clamp(11px,3vw,13px);color:var(--mist);margin-top:2px}
+
+  .gauges{display:flex;gap:8px;align-items:stretch;flex-wrap:wrap}
+  .card{background:rgba(4,18,27,.62);border:1px solid rgba(157,190,205,.18);
+    backdrop-filter:blur(6px);padding:7px 11px;border-radius:3px;flex:1 1 68px;min-width:0}
+  .card b{display:block;font-size:clamp(18px,5.2vw,26px);font-weight:600;line-height:1.05;
+    font-variant-numeric:tabular-nums}
+  .card span{display:block;font-size:clamp(10px,2.8vw,12px);color:var(--mist);letter-spacing:.05em;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .card.wide{flex:1 1 100%;order:-1}
+
+  .trim{position:relative;height:10px;background:rgba(157,190,205,.16);border-radius:2px;margin-top:7px}
+  .trim .zone{position:absolute;top:-2px;bottom:-2px;border:1px solid var(--brass);border-radius:2px;opacity:.85}
+  .trim .knob{position:absolute;top:-4px;width:4px;height:18px;background:var(--sail);margin-left:-2px}
+  .bar{height:6px;background:rgba(157,190,205,.16);border-radius:3px;margin-top:7px;overflow:hidden}
+  .bar i{display:block;height:100%;background:var(--brass);width:100%}
+
+  .keys{pointer-events:auto;display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:10px}
+  button{pointer-events:auto;font:inherit;font-size:clamp(13px,3.6vw,15px);color:var(--sail);
+    background:rgba(4,18,27,.7);border:1px solid rgba(157,190,205,.3);border-radius:3px;
+    padding:11px 15px;min-width:52px;min-height:44px;cursor:pointer;flex:0 1 auto}
+  button:active,button.on{background:var(--brass);color:#08202c;border-color:var(--brass)}
+  button:focus-visible{outline:2px solid var(--sail);outline-offset:2px}
+
+  .screen{position:fixed;inset:0;display:grid;place-items:center;background:rgba(4,18,27,.88);
+    backdrop-filter:blur(3px);padding:clamp(16px,5vw,28px);text-align:center;z-index:5;overflow:auto}
+  .screen.hide{display:none}
+  .screen h1{font-family:Spectral,serif;font-style:italic;font-weight:300;font-size:clamp(32px,9vw,60px);
+    line-height:1.05;margin-bottom:14px}
+  .screen p{max-width:44ch;color:var(--mist);font-size:clamp(14px,3.9vw,16px);line-height:1.5;margin:0 auto 10px}
+  .screen kbd{font:inherit;color:var(--sail);border:1px solid rgba(157,190,205,.4);border-radius:3px;padding:0 5px}
+  .screen button{margin-top:18px;padding:14px 26px}
+  .screen.intro,.screen.gift,.screen.failure,.screen.pin,.screen.arrival{isolation:isolate;background-color:var(--abyss);background-position:center;
+    background-size:cover;text-shadow:0 2px 18px rgba(0,0,0,.8)}
+  .screen.intro{place-items:center start;background-image:
+    linear-gradient(90deg,rgba(2,12,19,.92) 0%,rgba(2,12,19,.72) 38%,rgba(2,12,19,.12) 75%),
+    url('assets/audierne-splash.png')}
+  .intro-inner{width:min(520px,100%);text-align:left;margin-left:clamp(0px,5vw,72px)}
+  .intro-inner h1{font-size:clamp(42px,8vw,76px);margin-bottom:5px}
+  .intro-inner .eyebrow,.gift-card .eyebrow{color:var(--brass);font-size:clamp(12px,2.7vw,14px);
+    font-weight:600;letter-spacing:.2em;text-transform:uppercase;margin-bottom:12px}
+  .intro-inner .lead{color:var(--sail);font-size:clamp(18px,3vw,23px);line-height:1.35;margin:0 0 16px}
+  .intro-inner .rules{color:#c8dce4;font-size:clamp(13px,2.3vw,15px);margin:0}
+  .shortcuts{display:flex;flex-wrap:wrap;gap:9px 15px;align-items:center;margin-top:4px!important}
+  .shortcut{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+  .shortcut em{font-style:normal;color:#d7e7eb;margin-left:2px}
+  .shortcut kbd{display:inline-grid;place-items:center;min-width:25px;height:25px;padding:0 6px;
+    color:#fff;background:linear-gradient(180deg,rgba(255,255,255,.13),rgba(255,255,255,.04));
+    border:1px solid rgba(215,231,235,.42);border-bottom-color:rgba(215,231,235,.7);
+    border-radius:6px;box-shadow:0 2px 0 rgba(0,0,0,.55),inset 0 1px rgba(255,255,255,.12);
+    font:600 12px/1 "Barlow Semi Condensed",system-ui,sans-serif;text-shadow:none}
+  .secret{position:absolute;right:calc(12px + env(safe-area-inset-right));
+    bottom:calc(12px + env(safe-area-inset-bottom));z-index:2;min-width:44px;width:44px;
+    padding:8px!important;margin:0!important;border-radius:50%;opacity:.38;font-size:18px}
+  .secret:hover,.secret:focus-visible{opacity:1}
+
+  .screen.gift{background-image:
+    linear-gradient(90deg,rgba(2,12,19,.93) 0%,rgba(2,12,19,.72) 43%,rgba(2,12,19,.16) 78%),
+    url('assets/cadeau-badeparadies.png');place-items:center start;text-align:left}
+  .gift-card{width:min(590px,100%);margin-left:clamp(0px,4vw,58px);padding:clamp(20px,4vw,38px);
+    background:rgba(4,18,27,.78);border:1px solid rgba(224,168,63,.45);border-radius:12px;
+    box-shadow:0 24px 70px rgba(0,0,0,.38);backdrop-filter:blur(10px);text-align:left}
+  .gift-card h1{font-size:clamp(34px,6.5vw,62px);color:#fff;margin-bottom:10px}
+  .gift-card p{margin:0 0 12px;color:#d7e7eb;max-width:none;font-size:clamp(15px,2.4vw,18px)}
+  .gift-list{display:grid;gap:8px;margin:18px 0 20px;padding:0;list-style:none}
+  .gift-list li{font-size:clamp(17px,2.7vw,22px);color:#fff;padding-left:29px;position:relative}
+  .gift-list li::before{content:'✦';position:absolute;left:0;color:var(--brass)}
+  .gift-actions{display:flex;gap:10px;flex-wrap:wrap}
+  .gift-actions button,.gift-actions a{margin-top:6px}
+  .gift-actions a{pointer-events:auto;display:inline-flex;align-items:center;justify-content:center;
+    font-size:clamp(13px,3.6vw,15px);color:#08202c;background:var(--brass);border:1px solid var(--brass);
+    border-radius:3px;padding:14px 22px;min-height:44px;text-decoration:none}
+  .screen.failure{place-items:center start;text-align:left;background-image:
+    linear-gradient(90deg,rgba(2,10,16,.96) 0%,rgba(2,10,16,.7) 44%,rgba(2,10,16,.14) 78%),
+    url('assets/accident-dematage.png')}
+  .screen.failure.collision{background-image:
+    linear-gradient(90deg,rgba(2,10,16,.96) 0%,rgba(2,10,16,.7) 44%,rgba(2,10,16,.14) 78%),
+    url('assets/accident-conteneur.png')}
+  .failure-card,.pin-card{width:min(510px,100%);margin-left:clamp(0px,5vw,70px);padding:clamp(22px,4vw,38px);
+    background:rgba(3,12,19,.82);border:1px solid rgba(224,90,75,.5);border-radius:12px;
+    box-shadow:0 24px 70px rgba(0,0,0,.45);backdrop-filter:blur(10px)}
+  .failure-card .eyebrow{color:var(--alert);font-weight:600;letter-spacing:.18em;text-transform:uppercase}
+  .failure-card h1{color:#fff}
+  .screen.arrival{place-items:center start;text-align:left;background-image:
+    linear-gradient(90deg,rgba(2,12,19,.94) 0%,rgba(2,12,19,.68) 42%,rgba(2,12,19,.08) 78%),
+    url('assets/arrivee-martinique.png')}
+  .arrival-card{width:min(530px,100%);margin-left:clamp(0px,5vw,70px);padding:clamp(22px,4vw,38px);
+    background:rgba(4,18,27,.72);border:1px solid rgba(224,168,63,.5);border-radius:12px;
+    box-shadow:0 24px 70px rgba(0,0,0,.4);backdrop-filter:blur(9px)}
+  .arrival-card .eyebrow{color:var(--brass);font-weight:600;letter-spacing:.18em;text-transform:uppercase}
+  .arrival-card h1{color:#fff}
+  .screen.pin{background-image:linear-gradient(rgba(2,12,19,.88),rgba(2,12,19,.94)),url('assets/audierne-splash.png')}
+  .pin-card{margin:0;text-align:center;border-color:rgba(224,168,63,.5)}
+  .pin-row{display:flex;gap:9px;justify-content:center;margin:20px 0 8px}
+  .pin-input{width:min(210px,62vw);height:58px;border:1px solid rgba(224,168,63,.65);border-radius:7px;
+    background:rgba(0,0,0,.34);color:#fff;text-align:center;font:600 28px/1 "Barlow Semi Condensed";
+    letter-spacing:.35em;padding-left:.35em;outline:none}
+  .pin-input:focus{border-color:var(--brass);box-shadow:0 0 0 3px rgba(224,168,63,.17)}
+  .pin-error{min-height:22px;color:#ff9287!important;margin:4px 0 0!important}
+  .incident{position:fixed;inset:0;z-index:9;display:grid;place-items:end start;padding:clamp(18px,5vw,58px);
+    pointer-events:none;background-position:center;background-size:cover;opacity:0;visibility:hidden;
+    transition:opacity .28s ease,visibility .28s}
+  .incident.show{opacity:1;visibility:visible}
+  .incident.spi{background-image:linear-gradient(90deg,rgba(2,10,16,.88),rgba(2,10,16,.08)),url('assets/accident-spi.png')}
+  .incident.collision{background-image:linear-gradient(90deg,rgba(2,10,16,.88),rgba(2,10,16,.08)),url('assets/accident-conteneur.png')}
+  .incident-msg{max-width:440px;padding:18px 22px;background:rgba(3,12,19,.78);border-left:4px solid var(--alert);
+    box-shadow:0 12px 40px rgba(0,0,0,.4);font-family:Spectral,serif;font-style:italic;
+    font-size:clamp(19px,3.5vw,28px);color:#fff;text-shadow:0 2px 12px #000}
+  .event-card{position:fixed;z-index:4;right:22px;bottom:clamp(150px,23vh,190px);width:min(520px,calc(100vw - 44px));
+    display:grid;grid-template-columns:220px 1fr;overflow:hidden;background:rgba(3,16,24,.94);
+    border:1px solid rgba(224,168,63,.55);border-radius:10px;box-shadow:0 16px 50px rgba(0,0,0,.48);
+    opacity:0;visibility:hidden;transform:translateY(14px);transition:opacity .25s,transform .25s,visibility .25s;
+    pointer-events:none;text-align:left}
+  .event-card.show{opacity:1;visibility:visible;transform:none;pointer-events:auto}
+  .event-photo{min-height:180px;background-position:center;background-size:cover}
+  .event-card.dolphins .event-photo{background-image:url('assets/rencontre-dauphins.png')}
+  .event-card.flyingfish .event-photo{background-image:url('assets/rencontre-poissons-volants.png')}
+  .event-card.glow .event-photo{background-image:url('assets/rencontre-bioluminescence.png')}
+  .event-copy{padding:20px 18px;display:flex;flex-direction:column;justify-content:center}
+  .event-copy b{display:block;color:var(--brass);font:italic 500 23px/1.1 Spectral,serif;margin-bottom:9px}
+  .event-copy p{color:#c9dce3;font-size:15px;line-height:1.42;margin:0}
+  .event-card::after{content:'fermeture automatique';position:absolute;right:12px;bottom:7px;
+    color:rgba(200,220,228,.55);font-size:10px;letter-spacing:.05em}
+  .log{position:fixed;left:50%;transform:translateX(-50%);bottom:clamp(96px,22vh,150px);
+    width:max-content;max-width:86vw;text-align:center;font-family:Spectral,serif;
+    font-style:italic;font-size:clamp(15px,4vw,17px);color:var(--brass);opacity:0;
+    transition:opacity .4s;pointer-events:none}
+
+  /* mobile : cartouches serrés, boutons pleine largeur, indications clavier masquées */
+  @media (max-width:620px){
+    .card{padding:6px 8px;flex:1 1 22%}
+    .card.wide{padding:8px 10px}
+    .keys{gap:6px}
+    .keys button{flex:1 1 0;min-width:0;padding:12px 6px}
+    .kbdhint{display:none}
+    .screen.intro{place-items:end center;text-align:center;background-position:64% center;
+      background-image:linear-gradient(0deg,rgba(2,12,19,.98) 0%,rgba(2,12,19,.72) 47%,rgba(2,12,19,.12) 82%),
+      url('assets/audierne-splash.png');padding-bottom:calc(58px + env(safe-area-inset-bottom))}
+    .intro-inner{margin:0;text-align:center}
+    .intro-inner h1{font-size:clamp(38px,12vw,56px)}
+    .screen.gift{place-items:end center;background-position:62% center;
+      background-image:linear-gradient(0deg,rgba(2,12,19,.97) 0%,rgba(2,12,19,.7) 58%,rgba(2,12,19,.12) 100%),
+      url('assets/cadeau-badeparadies.png');
+      padding:120px 12px calc(12px + env(safe-area-inset-bottom))}
+    .gift-card{margin:0;padding:18px;border-radius:10px;max-height:calc(100svh - 132px);overflow:auto}
+    .gift-card h1{font-size:clamp(30px,10vw,43px)}
+    .gift-list{margin:12px 0 14px}
+    .gift-actions>*{flex:1 1 145px}
+    .screen.failure{place-items:end center;background-position:62% center;background-image:
+      linear-gradient(0deg,rgba(2,10,16,.98) 0%,rgba(2,10,16,.7) 58%,rgba(2,10,16,.1) 100%),
+      url('assets/accident-dematage.png')}
+    .screen.failure.collision{background-image:
+      linear-gradient(0deg,rgba(2,10,16,.98) 0%,rgba(2,10,16,.7) 58%,rgba(2,10,16,.1) 100%),
+      url('assets/accident-conteneur.png')}
+    .failure-card,.pin-card{margin:0;padding:20px}
+    .screen.arrival{place-items:end center;background-position:65% center;background-image:
+      linear-gradient(0deg,rgba(2,12,19,.98) 0%,rgba(2,12,19,.7) 56%,rgba(2,12,19,.08) 100%),
+      url('assets/arrivee-martinique.png');padding:110px 12px calc(12px + env(safe-area-inset-bottom))}
+    .arrival-card{margin:0;padding:20px;max-height:calc(100svh - 122px);overflow:auto}
+    .incident{place-items:end center;padding:14px 12px calc(78px + env(safe-area-inset-bottom));background-position:64% center}
+    .incident-msg{width:100%;font-size:19px}
+    .event-card{right:10px;bottom:158px;width:min(315px,calc(100vw - 20px));grid-template-columns:96px 1fr}
+    .event-photo{min-height:112px}
+    .event-copy{padding:9px 10px 8px}
+    .event-copy{padding:9px 10px 16px}.event-copy b{font-size:16px;margin-bottom:5px}.event-copy p{font-size:12px;line-height:1.3}
+    .event-card::after{right:8px;bottom:4px;font-size:9px}
+  }
+  /* paysage bas de plafond : on comprime la hauteur */
+  @media (max-height:520px){
+    .route .line{margin:10px 0 4px}
+    .route .ends,.route .mid{font-size:11px}
+    .card b{font-size:18px}
+    button{min-height:38px;padding:8px 12px}
+    .screen p{margin-bottom:6px}
+    .intro-inner .rules{display:none}
+    .screen.intro{padding-bottom:12px}
+    .gift-card{max-height:92svh}
+  }
+  /* souris et clavier : les boutons restent, en plus discret */
+  @media (hover:hover) and (pointer:fine){
+    .keys{opacity:.75}
+    .keys:hover{opacity:1}
+    .touchhint{display:none}
+  }
+  @media (prefers-reduced-motion:reduce){ .log{transition:none} }
+</style>
+</head>
+<body>
+<canvas id="sea"></canvas>
+
+<div class="hud">
+  <div class="route">
+    <div class="ends"><span>Audierne</span><span>Le Marin</span></div>
+    <div class="line"><div class="done" id="done"></div><div class="boat" id="mark"></div></div>
+    <div class="mid" id="remain">3 600 milles à courir</div>
+  </div>
+
+  <div>
+    <div class="gauges">
+      <div class="card"><b id="spd">0.0</b><span>nœuds</span></div>
+      <div class="card"><b id="tws">0</b><span>vent nds</span></div>
+      <div class="card"><b id="twa">0°</b><span>angle vent</span></div>
+      <div class="card"><b id="day">0</b><span>jours</span></div>
+      <div class="card wide">
+        <span id="trimlbl">réglage de voile</span>
+        <div class="trim"><div class="zone" id="zone"></div><div class="knob" id="knob"></div></div>
+        <span>coque</span>
+        <div class="bar"><i id="hull"></i></div>
+      </div>
+    </div>
+    <div class="keys">
+      <button id="bl" aria-label="bâbord">◀</button>
+      <button id="bt-">voile −</button>
+      <button id="bt+">voile +</button>
+      <button id="br" aria-label="tribord">▶</button>
+      <button id="reef">ris</button>
+      <button id="spi">spi</button>
+      <button id="map">carte</button>
+    </div>
+  </div>
+</div>
+
+<div class="log" id="log"></div>
+<div class="incident" id="incident" aria-live="assertive"><div class="incident-msg" id="incident-msg"></div></div>
+<aside class="event-card" id="event-card" aria-live="polite">
+  <div class="event-photo" role="img" aria-label="Rencontre en mer"></div>
+  <div class="event-copy"><b id="event-title"></b><p id="event-text"></p></div>
+</aside>
+
+<div class="screen intro" id="screen">
+  <div class="intro-inner">
+    <p class="eyebrow">Audierne · Bretagne</p>
+    <h1>Cap sur les 60 ans !</h1>
+    <p class="lead">Patrick, traverse l'Atlantique pour découvrir ton cadeau…</p>
+    <div class="rules shortcuts kbdhint" aria-label="Commandes clavier">
+      <span class="shortcut"><kbd>←</kbd><kbd>→</kbd><em>barrer</em></span>
+      <span class="shortcut"><kbd>↑</kbd><kbd>↓</kbd><em>régler la voile</em></span>
+      <span class="shortcut"><kbd>S</kbd><em>spi</em></span>
+      <span class="shortcut"><kbd>R</kbd><em>ris</em></span>
+      <span class="shortcut"><kbd>M</kbd><em>carte</em></span>
+    </div>
+    <p class="rules touchhint">Glisse sur la mer pour barrer et régler la voile, ou utilise les boutons du bas.</p>
+    <button id="go">Larguer les amarres</button>
+  </div>
+  <button class="secret" id="secret" aria-label="Accéder directement au cadeau" title="Accès capitaine">⚓</button>
+</div>
+
+<script>
+const cv = document.getElementById('sea'), ctx = cv.getContext('2d');
+let W=0,H=0,DPR=1,SC=1,PX=90;
+function resize(){ DPR=Math.min(devicePixelRatio||1,2); W=innerWidth; H=innerHeight;
+  cv.width=W*DPR; cv.height=H*DPR; ctx.setTransform(DPR,0,0,DPR,0,0);
+  SC=Math.min(Math.max(Math.min(W,H)/760,.62),1.25); PX=90*SC; }
+addEventListener('resize',resize); resize();
+
+const rad=d=>d*Math.PI/180, deg=r=>r*180/Math.PI;
+const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
+const wrap180=a=>{ a=(a+180)%360; return (a<0?a+360:a)-180; };
+
+const START_LAT=48.02, START_LON=-4.54, END_LAT=14.47, END_LON=-61.07, HOURS_PER_SEC=4;
+const ROUTE_NM=distanceNm(START_LAT,START_LON,END_LAT,END_LON), ARRIVAL_RADIUS_NM=70;
+
+let S;
+function reset(){
+  S={ lat:START_LAT, lon:START_LON, hdg:225, sheet:.5, reef:false, hull:100,
+      hours:0, speed:0, tws:0, twa:0, running:false, over:null, squalls:[], t:0,
+      map:false, track:[], puffs:[], debris:[], spi:false, spiBroken:false,
+      groove:0, shake:0, fast:0, dolphin:0, miles:0, failed:false, missed:false, positiveSeen:{}, seaTravel:0 };
+  for(let i=0;i<7;i++) S.squalls.push(newSquall(true));
+  for(let i=0;i<16;i++) S.puffs.push(newPuff(true));
+  for(let i=0;i<5;i++) S.debris.push(newDebris(true));
+  const initialWind=windAt(S.lat,S.lon,S.t);
+  S.windFrom=initialWind.from; S.tws=initialWind.spd;
+}
+function newSquall(anywhere){
+  return { lat: 6+Math.random()*30, lon: anywhere ? START_LON-Math.random()*46 : S.lon-8-Math.random()*6,
+           r: .8+Math.random()*1.4, spin: Math.random()<.5?-1:1, age:0 };
+}
+function newPuff(near){
+  return { lat: S.lat+(Math.random()-.5)*(near?7:5), lon: S.lon+(near?(Math.random()-.5)*7:2+Math.random()*4),
+           r: .25+Math.random()*.5, spd: 6+Math.random()*8 };
+}
+function newDebris(near){
+  return { lat: S.lat+(Math.random()-.5)*6, lon: S.lon-(near?Math.random()*6:3+Math.random()*4),
+           k: Math.random()<.5, a: Math.random()*6.3, hit:false };
+}
+
+// --- vent : alizés au sud, dépressions au nord, pot au noir en bas
+function windAt(lat,lon,t){
+  const trade   = Math.exp(-Math.pow((lat-21)/9,2));
+  const west    = 1/(1+Math.exp(-(lat-37)/2.5));
+  const calm    = Math.exp(-Math.pow((lat-7)/5,2));
+  let vx = 0, vy = 0; // vecteur "vers où souffle", x=est, y=nord
+  const add=(dirTo,spd)=>{ vx+=Math.sin(rad(dirTo))*spd; vy+=Math.cos(rad(dirTo))*spd; };
+  add(252, 17*trade);          // alizés vers l'ouest-sud-ouest
+  add(75,  26*west);           // vent d'ouest musclé
+  add(200, 4*calm);            // pot au noir : mou
+  const wob = Math.sin(lon*.28+t*.09)+.6*Math.sin(lat*.42-t*.15);
+  let spd = Math.hypot(vx,vy)*(1+.22*Math.sin(lon*.6+t*.26+lat*.3)) + 1.5;
+  let dirTo = deg(Math.atan2(vx,vy)) + wob*17;
+
+  for(const q of S.squalls){
+    const d = Math.hypot((lat-q.lat), (lon-q.lon)*.9);
+    if(d < q.r*2.2){
+      const f = Math.exp(-Math.pow(d/q.r,2));
+      spd += 34*f;
+      dirTo += q.spin*70*f;
+    }
+  }
+  for(const p of S.puffs){
+    const d = Math.hypot(lat-p.lat, lon-p.lon);
+    if(d < p.r*2) spd += p.spd*Math.exp(-Math.pow(d/p.r,2));
+  }
+  spd=Math.max(7,spd);
+  return { from: (dirTo+180+720)%360, spd };
+}
+
+// --- polaire du bateau
+const TWAS=[0,30,38,45,55,70,90,110,130,150,165,180];
+const FACT=[0,0,.36,.48,.55,.60,.64,.66,.60,.53,.48,.46];
+function polar(twa){
+  twa=Math.abs(twa);
+  for(let i=1;i<TWAS.length;i++) if(twa<=TWAS[i]){
+    const k=(twa-TWAS[i-1])/(TWAS[i]-TWAS[i-1]);
+    return FACT[i-1]+(FACT[i]-FACT[i-1])*k;
+  }
+  return .46;
+}
+const optSheet = twa => clamp((Math.abs(twa)-32)/145,0,1);
+
+// --- entrées
+const keys={};
+addEventListener('keydown',e=>{ if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].includes(e.key)) e.preventDefault();
+  keys[e.key]=true;
+  if(e.repeat) return;                        // pas de bascule en rafale si la touche reste enfoncée
+  if(e.key==='r'||e.key==='R') toggleReef();
+  if(e.key==='m'||e.key==='M') toggleMap(); if(e.key==='s'||e.key==='S') toggleSpi();
+  if((e.key==='c'||e.key==='C') && !S.failed) showPinGate(); });
+addEventListener('keyup',e=>keys[e.key]=false);
+// Capture du pointeur sur le bouton lui-même : relâcher un doigt ne coupe pas les autres commandes (multi-touch).
+const hold=(id,k)=>{ const b=document.getElementById(id);
+  const on=e=>{ e.preventDefault(); keys[k]=true; try{ b.setPointerCapture(e.pointerId); }catch(_){} };
+  const off=()=>{ keys[k]=false; };
+  b.addEventListener('pointerdown',on);
+  b.addEventListener('pointerup',off); b.addEventListener('pointercancel',off);
+  b.addEventListener('lostpointercapture',off); };
+hold('bl','ArrowLeft'); hold('br','ArrowRight'); hold('bt+','ArrowUp'); hold('bt-','ArrowDown');
+const reefBtn=document.getElementById('reef');
+function toggleReef(){ if(!S.running) return; S.reef=!S.reef; reefBtn.classList.toggle('on',S.reef);
+  say(S.reef?'Un ris dans la grand-voile.':'Grand-voile renvoyée.'); }
+reefBtn.addEventListener('click',toggleReef);
+
+const spiBtn=document.getElementById('spi');
+function toggleSpi(){
+  if(!S.running) return;
+  if(S.spiBroken){ say('Le spi est déchiré — impossible de le renvoyer.'); return; }
+  S.spi=!S.spi; spiBtn.classList.toggle('on',S.spi);
+  say(S.spi?'Spi envoyé — ça décolle au portant.':'Spi affalé.');
+}
+spiBtn.addEventListener('click',toggleSpi);
+
+const mapBtn=document.getElementById('map');
+function toggleMap(){ if(!S.running) return; S.map=!S.map; mapBtn.classList.toggle('on',S.map); }
+mapBtn.addEventListener('click',toggleMap);
+
+// glisser sur la mer : horizontale = barre, verticale = réglage de voile
+let drag=null;
+cv.addEventListener('pointerdown',e=>{ if(!S.running||S.map) return;
+  drag={x:e.clientX,y:e.clientY}; cv.setPointerCapture(e.pointerId); });
+cv.addEventListener('pointermove',e=>{ if(!drag||!S.running) return;
+  S.hdg=(S.hdg+(e.clientX-drag.x)*.45+360)%360;
+  S.sheet=clamp(S.sheet-(e.clientY-drag.y)*.004,0,1);
+  drag={x:e.clientX,y:e.clientY}; });
+const dragEnd=()=>drag=null;
+cv.addEventListener('pointerup',dragEnd); cv.addEventListener('pointercancel',dragEnd);
+
+const logEl=document.getElementById('log'); let logT=0;
+function say(txt){ logEl.textContent=txt; logEl.style.opacity=1; logT=3; }
+
+// --- boucle
+let last=performance.now();
+function loop(now){
+  const dt=Math.min((now-last)/1000,.05); last=now;
+  if(S.running) step(dt);
+  draw(dt);
+  requestAnimationFrame(loop);
+}
+
+function step(dt){
+  const h = dt*HOURS_PER_SEC;
+  S.t += dt; S.hours += h;
+  if(logT>0 && (logT-=dt)<=0) logEl.style.opacity=0;
+
+  // Au clavier, une barre plus douce évite de faire un demi-tour au moindre appui.
+  if(keys.ArrowLeft)  S.hdg-=42*dt;
+  if(keys.ArrowRight) S.hdg+=42*dt;
+  S.hdg=(S.hdg+360)%360;
+  if(keys.ArrowUp)   S.sheet=clamp(S.sheet+.8*dt,0,1);
+  if(keys.ArrowDown) S.sheet=clamp(S.sheet-.8*dt,0,1);
+
+  const rawWind = windAt(S.lat,S.lon,S.t);
+  S.windFrom=(S.windFrom+wrap180(rawWind.from-S.windFrom)*Math.min(1,dt*.55)+360)%360;
+  S.tws+=(rawWind.spd-S.tws)*Math.min(1,dt*.7);
+  const w={from:S.windFrom,spd:S.tws};
+  const twa = wrap180(S.hdg - w.from);       // 0° = nez au vent, 180° = plein vent arrière
+  S.twa=twa;
+
+  // le rythme : voile bien réglée assez longtemps, le bateau s'envole
+  const err = Math.abs(S.sheet-optSheet(twa));
+  const eff = clamp(1-1.25*err, .38, 1);
+  S.groove = clamp(S.groove + (err<.13 && Math.abs(twa)>35 ? dt*.55 : -dt*.55), 0, 1);
+
+  const power = S.reef ? .62 : 1;
+  const spiUp = S.spi && !S.spiBroken;
+  const spiOn = spiUp && Math.abs(twa)>90;
+  let v = w.spd*polar(twa)*eff*power*(.55+.45*S.hull/100)*(1+.22*S.groove)*(spiOn?1.35:1);
+  if(S.reef && w.spd<16) v*=.8;
+  if(spiUp && !spiOn) v*=.7;                   // spi qui faseye au près
+  S.speed = Math.min(v, 16);
+  S.miles += S.speed*h;
+  S.seaTravel+=S.speed*dt*5.2;               // défilement des lignes de houle sous le bateau
+
+  // surtoile : la coque encaisse
+  const load = w.spd*power*(spiOn?1.5:1) - (S.reef?38:24);
+  S.hull = clamp(S.hull + (load>0 ? -load*h*.12 : h*.18), 0, 100);
+  if(spiOn && w.spd>27 && Math.random()<dt*.18){
+    S.spi=false; S.spiBroken=true; S.hull=clamp(S.hull-7,0,100); S.shake=1;
+    spiBtn.classList.remove('on');spiBtn.disabled=true;spiBtn.textContent='spi HS';
+    say('Spi déchiré ! Il est inutilisable pour le reste de la traversée.');
+    showIncident('spi','Le spi se déchire dans le grain !');
+  }
+
+  const dist = S.speed*h;                      // milles
+  S.lat += dist*Math.cos(rad(S.hdg))/60;
+  S.lon += dist*Math.sin(rad(S.hdg))/(60*Math.cos(rad(S.lat)));
+  S.lat = clamp(S.lat, 2, 48);
+  const tr=S.track[S.track.length-1];
+  if(!tr || Math.hypot(tr.lat-S.lat,tr.lon-S.lon)>.12) S.track.push({lat:S.lat,lon:S.lon});
+
+  for(const q of S.squalls){ q.lon -= .012*h; q.lat += Math.sin(S.t*.1+q.r)*.004;
+    if(q.lon < S.lon-14 || q.lon > S.lon+16) Object.assign(q,newSquall(false)); }
+  for(const p of S.puffs){ p.lon -= .02*h;
+    if(Math.abs(p.lon-S.lon)>5 || Math.abs(p.lat-S.lat)>5) Object.assign(p,newPuff(false)); }
+  for(const d of S.debris){
+    if(!d.hit && Math.hypot(d.lat-S.lat,d.lon-S.lon)<.045){
+      d.hit=true; S.shake=1; S.groove=0;
+      const crashMsg=d.k?'Conteneur à la dérive — choc sourd dans l\'étrave.':'OFNI dans le safran.';
+      failCollision(crashMsg); return;
+    }
+    if(d.lon>S.lon+2 || Math.abs(d.lat-S.lat)>6) Object.assign(d,newDebris(false));
+  }
+
+  S.shake=Math.max(0,S.shake-dt*2);
+  S.fast = S.speed>10 ? S.fast+dt : 0;
+  if(S.dolphin>0) S.dolphin-=dt;
+  else if(S.fast>2.5 && Math.random()<dt*.4){ S.dolphin=7; say('Des dauphins viennent surfer l\'étrave.'); }
+  checkPositiveEvents();
+
+  const distanceToFinish=distanceNm(S.lat,S.lon,END_LAT,END_LON);
+  if(S.hull<=0) failDemasted();
+  else if(distanceToFinish<=ARRIVAL_RADIUS_NM){ const d=S.hours/24;
+    end('Terre en vue !', `${d.toFixed(1)} jours et ${Math.round(S.miles)} milles depuis Audierne. La traversée est accomplie : ton cadeau t'attend de l'autre côté de l'Atlantique.`); }
+  else if(S.lon<END_LON-1&&!S.missed){
+    S.missed=true;
+    say(`Le Marin est ${S.lat>END_LAT?'plus au sud':'plus au nord'} — corrige le cap pour rejoindre le port.`);
+  }
+  hud();
+}
+
+function end(title,txt){
+  S.running=false;
+  clearTimeout(incidentTimer); document.getElementById('incident').className='incident';
+  hidePositiveEvent();
+  const sc=document.getElementById('screen'); sc.classList.remove('hide');
+  sc.className='screen arrival';
+  sc.innerHTML=`<div class="arrival-card"><p class="eyebrow">Traversée accomplie</p><h1>${title}</h1><p>${txt}</p><button id="reveal">Découvrir mon cadeau</button></div>`;
+  document.getElementById('reveal').onclick=showGift;
+}
+
+function failDemasted(){
+  showFailure('demastage','Démâté…',
+    `Trop de toile dans le mauvais temps. Le gréement a lâché au ${(S.hours/24).toFixed(0)}ᵉ jour.`);
+}
+
+function failCollision(message){
+  showFailure('collision','Collision !',
+    `${message} Le bateau ne peut plus poursuivre la traversée.`);
+}
+
+function showFailure(kind,title,message){
+  if(S.failed)return;
+  S.running=false;S.failed=true;
+  clearTimeout(incidentTimer);document.getElementById('incident').className='incident';hidePositiveEvent();
+  const sc=document.getElementById('screen');
+  sc.className='screen failure '+kind;
+  sc.innerHTML=`<div class="failure-card">
+    <p class="eyebrow">Traversée interrompue</p>
+    <h1>${title}</h1>
+    <p>${message}</p>
+    <p>Le cadeau reste de l'autre côté de l'Atlantique. Il faut reprendre toute la traversée.</p>
+    <button id="retry">Repartir d'Audierne</button>
+  </div>`;
+  document.getElementById('retry').onclick=start;
+}
+
+function showPinGate(){
+  if(S.failed) return;
+  S.running=false;
+  hidePositiveEvent();
+  const sc=document.getElementById('screen');
+  sc.className='screen pin';
+  sc.innerHTML=`<form class="pin-card" id="pin-form">
+    <p class="eyebrow">Dernière énigme</p>
+    <h1>Le code du capitaine</h1>
+    <p>Entre le code PIN à quatre chiffres pour ouvrir le coffre.</p>
+    <div class="pin-row"><input class="pin-input" id="pin-input" type="password" inputmode="numeric"
+      pattern="[0-9]*" maxlength="4" autocomplete="off" aria-label="Code PIN à quatre chiffres" autofocus></div>
+    <p class="pin-error" id="pin-error" aria-live="polite"></p>
+    <button type="submit">Ouvrir le coffre</button>
+    <button type="button" id="pin-back">Retour</button>
+  </form>`;
+  const input=document.getElementById('pin-input');
+  input.addEventListener('input',()=>input.value=input.value.replace(/\D/g,'').slice(0,4));
+  document.getElementById('pin-form').onsubmit=e=>{
+    e.preventDefault();
+    if(input.value==='1966') showGift();
+    else { document.getElementById('pin-error').textContent='Code incorrect — le coffre reste fermé.'; input.value=''; input.focus(); }
+  };
+  document.getElementById('pin-back').onclick=showIntro;
+  setTimeout(()=>input.focus(),0);
+}
+
+let incidentTimer=0,eventTimer=0;
+function showIncident(kind,message){
+  const el=document.getElementById('incident');
+  el.className='incident '+kind+' show';
+  document.getElementById('incident-msg').textContent=message;
+  clearTimeout(incidentTimer);
+  incidentTimer=setTimeout(()=>el.className='incident',2400);
+}
+
+function checkPositiveEvents(){
+  const card=document.getElementById('event-card');
+  if(card.classList.contains('show')||S.failed)return;
+  const progress=clamp(1-distanceNm(S.lat,S.lon,END_LAT,END_LON)/ROUTE_NM,0,1);
+  if(progress>=.14&&!S.positiveSeen.dolphins){
+    S.positiveSeen.dolphins=true;S.dolphin=9;
+    showPositiveEvent('dolphins','Escorte surprise','Des dauphins jouent dans la vague d’étrave. Un joli présage pour la suite !');
+  }else if(progress>=.40&&!S.positiveSeen.flyingfish){
+    S.positiveSeen.flyingfish=true;
+    showPositiveEvent('flyingfish','Poissons volants','Un banc argenté jaillit des vagues et accompagne le voilier quelques instants.');
+  }else if(progress>=.68&&!S.positiveSeen.glow){
+    S.positiveSeen.glow=true;
+    showPositiveEvent('glow','Mer lumineuse','La nuit, le plancton illumine le sillage d’un bleu électrique. Magique.');
+  }
+}
+
+function showPositiveEvent(kind,title,message){
+  const card=document.getElementById('event-card');
+  card.className='event-card '+kind+' show';
+  document.getElementById('event-title').textContent=title;
+  document.getElementById('event-text').textContent=message;
+  card.onclick=hidePositiveEvent;
+  clearTimeout(eventTimer);
+  eventTimer=setTimeout(hidePositiveEvent,6000);
+}
+
+function hidePositiveEvent(){
+  const card=document.getElementById('event-card');
+  clearTimeout(eventTimer);
+  if(card){card.className='event-card';card.onclick=null;}
+}
+
+function showGift(){
+  S.running=false;
+  hidePositiveEvent();
+  const sc=document.getElementById('screen');
+  sc.className='screen gift';
+  sc.innerHTML=`<div class="gift-card">
+    <p class="eyebrow">Joyeux anniversaire Patrick</p>
+    <h1>L'aventure continue…</h1>
+    <p>Pour tes 60 ans, nous complétons ton cadeau de Noël au Badeparadies Schwarzwald :</p>
+    <ul class="gift-list">
+      <li>Une nuit d'hôtel supplémentaire</li>
+      <li>Les repas au restaurant pendant les deux soirées</li>
+    </ul>
+    <p>Soit deux nuits pour profiter pleinement de cette parenthèse de détente.</p>
+    <div class="gift-actions">
+      <a href="https://www.badeparadies-schwarzwald.de/en/" target="_blank" rel="noopener">Voir le Badeparadies</a>
+      <button id="replay">Rejouer la traversée</button>
+    </div>
+  </div>`;
+  document.getElementById('replay').onclick=showIntro;
+}
+
+function showIntro(){
+  reset();
+  const sc=document.getElementById('screen');
+  sc.className='screen intro';
+  sc.innerHTML=`<div class="intro-inner">
+    <p class="eyebrow">Audierne · Bretagne</p>
+    <h1>Cap sur les 60 ans !</h1>
+    <p class="lead">Patrick, traverse l'Atlantique pour découvrir ton cadeau…</p>
+    <div class="rules shortcuts kbdhint" aria-label="Commandes clavier">
+      <span class="shortcut"><kbd>←</kbd><kbd>→</kbd><em>barrer</em></span>
+      <span class="shortcut"><kbd>↑</kbd><kbd>↓</kbd><em>régler la voile</em></span>
+      <span class="shortcut"><kbd>S</kbd><em>spi</em></span>
+      <span class="shortcut"><kbd>R</kbd><em>ris</em></span>
+      <span class="shortcut"><kbd>M</kbd><em>carte</em></span>
+    </div>
+    <p class="rules touchhint">Glisse sur la mer pour barrer et régler la voile, ou utilise les boutons du bas.</p>
+    <button id="go">Larguer les amarres</button>
+  </div><button class="secret" id="secret" aria-label="Accéder directement au cadeau" title="Accès capitaine">⚓</button>`;
+  document.getElementById('go').onclick=start;
+  document.getElementById('secret').onclick=showPinGate;
+  reefBtn.classList.remove('on'); spiBtn.classList.remove('on'); mapBtn.classList.remove('on');
+  spiBtn.disabled=false; spiBtn.textContent='spi';
+  hud();
+}
+
+// --- HUD
+const $=id=>document.getElementById(id);
+function hud(){
+  $('spd').textContent=S.speed.toFixed(1);
+  $('tws').textContent=Math.round(S.tws);
+  $('twa').textContent=Math.round(Math.abs(S.twa))+'°';
+  $('day').textContent=(S.hours/24).toFixed(1);
+  const left=Math.round(distanceNm(S.lat,S.lon,END_LAT,END_LON));
+  const p=clamp(1-left/ROUTE_NM,0,1);
+  $('done').style.width=(p*100)+'%';
+  $('mark').style.left=(p*100)+'%';
+  const eta=S.speed>1?` · arrivée dans ${(left/S.speed/24).toFixed(1)} j au rythme actuel`:'';
+  $('remain').textContent=left+' milles à courir'+eta;
+  const o=optSheet(S.twa);
+  $('zone').style.left=(clamp(o-.13,0,1)*100)+'%'; $('zone').style.width='26%';
+  $('zone').style.background=`rgba(224,168,63,${.35*S.groove})`;
+  $('knob').style.left=(S.sheet*100)+'%';
+  $('knob').style.background=S.groove>.6?'#e0a83f':'var(--sail)';
+  $('hull').style.width=S.hull+'%';
+  $('hull').style.background = S.hull<35 ? 'var(--alert)' : 'var(--brass)';
+  $('trimlbl').textContent = Math.abs(S.twa)<35 ? 'dans le lit du vent — abattez'
+    : S.spiBroken ? 'spi déchiré · inutilisable'
+    : S.groove>.6 ? `dans le rythme · +${Math.round(22*S.groove)} %` : 'réglage de voile';
+}
+
+// --- rendu
+const streaks=[]; for(let i=0;i<135;i++) streaks.push({x:Math.random(),y:Math.random(),l:Math.random(),c:Math.random()-.5});
+const wavelets=[]; for(let i=0;i<95;i++) wavelets.push({x:Math.random(),y:Math.random(),s:.45+Math.random()*1.4,
+  a:.12+Math.random()*.34,p:Math.random()*6.28,d:Math.random()});
+const spray=[];
+function draw(dt){
+  const rawWind=windAt(S.lat,S.lon,S.t);
+  const w={from:S.windFrom??rawWind.from,spd:S.tws||rawWind.spd};
+  const flow=rad(w.from+180), storm=clamp((w.spd-18)/30,0,1);
+
+  // Eau profonde : la force du vent assombrit et désature la mer.
+  const g=ctx.createLinearGradient(0,0,W,H);
+  g.addColorStop(0,storm>.45?'#071923':'#0b3447');
+  g.addColorStop(.5,storm>.7?'#06151e':'#082a3b');
+  g.addColorStop(1,'#031019');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  const glow=ctx.createRadialGradient(W*.24,H*.14,0,W*.24,H*.14,Math.max(W,H)*.82);
+  glow.addColorStop(0,`rgba(71,142,166,${.17*(1-storm)})`);
+  glow.addColorStop(.55,'rgba(18,72,91,.05)'); glow.addColorStop(1,'rgba(0,0,0,.22)');
+  ctx.fillStyle=glow; ctx.fillRect(0,0,W,H);
+
+  ctx.save();
+  const sh=S.shake*9;
+  if(sh>.2) ctx.translate((Math.random()-.5)*sh,(Math.random()-.5)*sh);
+  const cx=W/2, cy=H/2;
+
+  // Grandes lignes de houle : elles défilent vers l'arrière du bateau selon son cap.
+  ctx.lineCap='round';
+  ctx.save();ctx.translate(cx,cy);ctx.rotate(rad(S.hdg));
+  const seaDiag=Math.hypot(W,H),waveGap=66*SC,waveOffset=S.seaTravel%waveGap;
+  let band=0;
+  for(let base=-seaDiag/2-waveGap+waveOffset;base<seaDiag/2+waveGap;base+=waveGap){
+    ctx.beginPath();
+    for(let x=-seaDiag/2-30;x<=seaDiag/2+30;x+=22){
+      const y=base+Math.sin(x*.010+band*1.7+S.t*.22)*10*SC+
+        Math.sin(x*.025-band*.8-S.t*.14)*3.5*SC;
+      x===-seaDiag/2-30?ctx.moveTo(x,y):ctx.lineTo(x,y);
+    }
+    ctx.strokeStyle=`rgba(65,133,157,${.11+storm*.08})`; ctx.lineWidth=1.2+storm*.5; ctx.stroke();
+    band++;
+  }
+  ctx.restore();
+
+  // Petites crêtes qui dérivent : leur quantité et leur blancheur suivent le vent.
+  for(const q of wavelets){
+    const parallax=.0045+q.d*.0045;
+    q.x+=(Math.sin(flow)*(.006+w.spd*.00045)-S.speed*Math.sin(rad(S.hdg))*parallax)*dt;
+    q.y+=(-Math.cos(flow)*(.006+w.spd*.00045)+S.speed*Math.cos(rad(S.hdg))*parallax)*dt;
+    if(q.x<-.08)q.x=1.08;if(q.x>1.08)q.x=-.08;if(q.y<-.08)q.y=1.08;if(q.y>1.08)q.y=-.08;
+    const px=q.x*W,py=q.y*H,L=(7+q.s*10+storm*9)*SC,bob=Math.sin(S.t*1.1+q.p)*2.2*SC;
+    ctx.strokeStyle=`rgba(190,224,232,${q.a*(.48+storm*.65)})`;ctx.lineWidth=.65+q.d*1.15;
+    ctx.beginPath();ctx.moveTo(px-L,py+bob+2);ctx.quadraticCurveTo(px,py+bob-2.5-q.s,px+L,py+bob+1);ctx.stroke();
+    if(w.spd>25&&q.d>.72){ctx.strokeStyle=`rgba(241,237,225,${.12+q.a*.35})`;
+      ctx.beginPath();ctx.moveTo(px-L*.45,py+bob);ctx.lineTo(px+L*.45,py+bob-.5);ctx.stroke();}
+  }
+
+  // risées : taches sombres qui filent sur l'eau, à aller chercher
+  for(const p of S.puffs){
+    const sx=cx+(p.lon-S.lon)*PX, sy=cy-(p.lat-S.lat)*PX, r=p.r*PX;
+    if(sx<-r||sx>W+r||sy<-r||sy>H+r) continue;
+    const rg=ctx.createRadialGradient(sx,sy,0,sx,sy,r);
+    rg.addColorStop(0,`rgba(11,42,59,${.35+p.spd/40})`); rg.addColorStop(1,'rgba(11,42,59,0)');
+    ctx.fillStyle=rg; ctx.beginPath(); ctx.ellipse(sx,sy,r*1.3,r,flow,0,7); ctx.fill();
+  }
+
+  // grains
+  for(const q of S.squalls){
+    const sx=cx+(q.lon-S.lon)*PX, sy=cy-(q.lat-S.lat)*PX, r=q.r*PX;
+    if(sx<-r*2||sx>W+r*2||sy<-r*2||sy>H+r*2) continue;
+    const rg=ctx.createRadialGradient(sx,sy,0,sx,sy,r*1.6);
+    rg.addColorStop(0,'rgba(3,10,16,.85)'); rg.addColorStop(1,'rgba(3,10,16,0)');
+    ctx.fillStyle=rg; ctx.beginPath(); ctx.arc(sx,sy,r*1.6,0,7); ctx.fill();
+    ctx.strokeStyle='rgba(157,190,205,.22)';
+    for(let i=0;i<26;i++){ const a=i*.6+S.t*q.spin*.4, d=r*(.2+.75*((i*37%100)/100));
+      const px=sx+Math.cos(a)*d, py=sy+Math.sin(a)*d;
+      ctx.beginPath(); ctx.moveTo(px,py); ctx.lineTo(px+3,py+7); ctx.stroke(); }
+  }
+
+  // Filets de vent courbes ; les rafales fortes deviennent plus longues et lumineuses.
+  const sp=w.spd, vx=Math.sin(flow)*sp*1.7, vy=-Math.cos(flow)*sp*1.7;
+  ctx.lineCap='round';
+  for(const s of streaks){
+    const px=s.x*W,py=s.y*H,len=.65+s.l*(.8+storm*.9),nx=Math.cos(flow),ny=Math.sin(flow);
+    ctx.strokeStyle=`rgba(205,231,237,${.055+(.13+storm*.16)*s.l})`;
+    ctx.lineWidth=.55+s.l*(.8+storm*.55);
+    ctx.beginPath();ctx.moveTo(px-vx*len,py-vy*len);
+    ctx.quadraticCurveTo(px-vx*len*.45+nx*s.c*14,py-vy*len*.45+ny*s.c*14,px,py);ctx.stroke();
+    s.x+=vx*dt/W; s.y+=vy*dt/H; s.l-=dt*.25;
+    if(s.l<=0||s.x<-.05||s.x>1.05||s.y<-.05||s.y>1.05){
+      s.x=Math.random();s.y=Math.random();s.l=.55+Math.random()*.45;s.c=Math.random()-.5;
+    }
+  }
+
+  // objets flottants
+  for(const d of S.debris){
+    const sx=cx+(d.lon-S.lon)*PX, sy=cy-(d.lat-S.lat)*PX;
+    if(sx<-30||sx>W+30||sy<-30||sy>H+30) continue;
+    ctx.save(); ctx.translate(sx,sy); ctx.rotate(d.a+Math.sin(S.t+d.a)*.08);
+    ctx.fillStyle=d.hit?'rgba(224,90,75,.5)':'#5c6b6f';
+    if(d.k) ctx.fillRect(-13,-5,26,10); else { ctx.beginPath(); ctx.ellipse(0,0,10,4,0,0,7); ctx.fill(); }
+    ctx.restore();
+  }
+
+  // dauphins à l'étrave
+  if(S.dolphin>0){
+    ctx.strokeStyle='rgba(200,225,235,.8)'; ctx.lineWidth=3; ctx.lineCap='round';
+    for(let i=0;i<3;i++){
+      const ph=(S.t*2.2+i*2.1)%6.28, sw=Math.sin(ph);
+      const ax=cx+Math.sin(rad(S.hdg))*(-34-i*6)+Math.cos(rad(S.hdg))*(i-1)*22;
+      const ay=cy-Math.cos(rad(S.hdg))*(-34-i*6)+Math.sin(rad(S.hdg))*(i-1)*22;
+      if(sw<0) continue;
+      ctx.beginPath(); ctx.arc(ax,ay,7+sw*3,Math.PI*1.1,Math.PI*1.9); ctx.stroke();
+    }
+  }
+
+  // embruns quand ça envoie
+  if(S.speed>5 && Math.random()<(.2+S.speed*.055)){
+    const back=38+S.speed*7,cross=(Math.random()-.5)*42;
+    spray.push({x:cx,y:cy,
+      vx:-Math.sin(rad(S.hdg))*back+Math.cos(rad(S.hdg))*cross,
+      vy: Math.cos(rad(S.hdg))*back+Math.sin(rad(S.hdg))*cross,l:1});
+  }
+  ctx.fillStyle='rgba(241,237,225,.5)';
+  for(let i=spray.length-1;i>=0;i--){ const s=spray[i];
+    s.x+=s.vx*dt; s.y+=s.vy*dt; s.l-=dt*1.6;
+    if(s.l<=0){ spray.splice(i,1); continue; }
+    ctx.globalAlpha=s.l*.6; ctx.beginPath(); ctx.arc(s.x,s.y,2.2,0,7); ctx.fill();
+  }
+  ctx.globalAlpha=1;
+
+  // sillage + bateau
+  const side = S.twa>0 ? -1 : 1;
+  ctx.save(); ctx.translate(cx,cy); ctx.scale(SC,SC);
+  ctx.rotate(rad(S.hdg));
+  ctx.strokeStyle='rgba(241,237,225,.18)'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(-4,16); ctx.lineTo(-10,16+S.speed*7);
+  ctx.moveTo(4,16); ctx.lineTo(10,16+S.speed*7); ctx.stroke();
+
+  const heel = clamp(S.tws*(S.reef?.5:1)/60,0,.45)*(S.twa>0?1:-1);
+  ctx.transform(1,0,heel*.5,1,0,0);          // gîte
+  ctx.fillStyle='#0d2b3b'; ctx.strokeStyle=S.groove>.6?'#f3c46a':'#e0a83f'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(0,-20); ctx.quadraticCurveTo(9,0,6,17);
+  ctx.lineTo(-6,17); ctx.quadraticCurveTo(-9,0,0,-20); ctx.closePath(); ctx.fill(); ctx.stroke();
+
+  if(S.spi && !S.spiBroken){                  // spi en cloche devant
+    ctx.save(); ctx.rotate(rad(side*10));
+    ctx.fillStyle='rgba(224,168,63,.85)';
+    ctx.beginPath(); ctx.moveTo(0,-14);
+    ctx.quadraticCurveTo(side*22,-34,0,-46); ctx.quadraticCurveTo(-side*8,-30,0,-14);
+    ctx.closePath(); ctx.fill(); ctx.restore();
+  }
+
+  const sa = side*(12+S.sheet*68);
+  ctx.rotate(rad(sa));
+  ctx.fillStyle='rgba(241,237,225,.92)';
+  ctx.beginPath(); ctx.moveTo(0,-16); ctx.quadraticCurveTo(side*(S.reef?5:9),2,0,14); ctx.lineTo(0,-16);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+  ctx.restore();                              // fin du tremblement
+
+  compass(W-52*SC-16, 74*SC+34, 40*SC, w.from);
+  if(S.map) chart();
+}
+
+// --- carte générale de l'Atlantique
+// Carte orientée normalement : Antilles à l'ouest (gauche), Bretagne à l'est (droite).
+const CL0=-65, CL1=2, CB0=1, CB1=51;
+function chart(){
+  const pad=Math.min(W,H)*.06;
+  const x0=pad, y0=Math.max(pad,H*.16), x1=W-pad, y1=H-Math.max(pad,H*.3);
+  const px=lon=>x0+(lon-CL0)/(CL1-CL0)*(x1-x0);
+  const py=lat=>y1-(lat-CB0)/(CB1-CB0)*(y1-y0);
+
+  ctx.fillStyle='rgba(4,18,27,.93)'; ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle='rgba(157,190,205,.3)'; ctx.lineWidth=1; ctx.strokeRect(x0,y0,x1-x0,y1-y0);
+  ctx.font='11px "Barlow Semi Condensed"'; ctx.textAlign='center';
+
+  ctx.strokeStyle='rgba(157,190,205,.12)';
+  for(let lat=10;lat<=40;lat+=10){ ctx.beginPath(); ctx.moveTo(x0,py(lat)); ctx.lineTo(x1,py(lat)); ctx.stroke();
+    ctx.fillStyle='rgba(157,190,205,.55)'; ctx.textAlign='left'; ctx.fillText(lat+'°N',x0+4,py(lat)-4); }
+  for(let lon=-20;lon>=-60;lon-=10){ ctx.beginPath(); ctx.moveTo(px(lon),y0); ctx.lineTo(px(lon),y1); ctx.stroke(); }
+  ctx.fillStyle='rgba(157,190,205,.55)';ctx.font='11px "Barlow Semi Condensed"';ctx.textAlign='center';
+  for(let lon=-60;lon<=0;lon+=10)ctx.fillText(Math.abs(lon)+'°'+(lon<0?'O':''),px(lon),y1-5);
+
+  // champ de vent
+  for(let i=0;i<9;i++) for(let j=0;j<7;j++){
+    const lon=CL0+(CL1-CL0)*(i+.5)/9, lat=CB0+(CB1-CB0)*(j+.5)/7;
+    const w=windAt(lat,lon,S.t), a=rad(w.from+180), L=(4+w.spd*1.1)*Math.min(1,SC);
+    const x=px(lon), y=py(lat), dx=Math.sin(a)*L, dy=-Math.cos(a)*L;
+    ctx.strokeStyle=`rgba(157,190,205,${clamp(.15+w.spd/45,.15,.75)})`; ctx.lineWidth=1.4;
+    ctx.beginPath(); ctx.moveTo(x-dx,y-dy); ctx.lineTo(x+dx,y+dy);
+    ctx.moveTo(x+dx,y+dy); ctx.lineTo(x+dx-dx*.4-dy*.25,y+dy-dy*.4+dx*.25); ctx.stroke();
+  }
+
+  ctx.fillStyle='rgba(157,190,205,.5)'; ctx.font=`italic 300 ${Math.round(15*Math.min(1.1,SC+.15))}px Spectral,serif`; ctx.textAlign='left';
+  ctx.fillText('vents d\'ouest', x0+12, py(41));
+  ctx.fillText('alizés', x0+12, py(21));
+  ctx.fillText('pot au noir', x0+12, py(6));
+
+  for(const q of S.squalls){
+    ctx.fillStyle='rgba(224,90,75,.22)'; ctx.strokeStyle='rgba(224,90,75,.5)';
+    ctx.beginPath(); ctx.arc(px(q.lon),py(q.lat),Math.max(4,q.r*7),0,7); ctx.fill(); ctx.stroke();
+  }
+
+  // route directe, trace, positions
+  ctx.setLineDash([5,5]); ctx.strokeStyle='rgba(157,190,205,.35)'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(px(START_LON),py(START_LAT)); ctx.lineTo(px(END_LON),py(END_LAT)); ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.strokeStyle='#e0a83f'; ctx.lineWidth=2; ctx.beginPath();
+  S.track.forEach((p,i)=> i?ctx.lineTo(px(p.lon),py(p.lat)):ctx.moveTo(px(p.lon),py(p.lat)));
+  ctx.stroke();
+
+  const mark=(lon,lat,label)=>{ ctx.fillStyle='rgba(157,190,205,.9)';
+    ctx.beginPath(); ctx.arc(px(lon),py(lat),3,0,7); ctx.fill();
+    ctx.font=`italic 300 ${Math.round(13*Math.min(1.1,SC+.2))}px Spectral,serif`; ctx.textAlign='center';
+    ctx.fillText(label,px(lon),py(lat)-9); };
+  mark(START_LON,START_LAT,'Audierne'); mark(END_LON,END_LAT,'Le Marin');
+  ctx.strokeStyle='rgba(224,168,63,.65)';ctx.lineWidth=1.5;ctx.setLineDash([3,3]);
+  ctx.beginPath();ctx.arc(px(END_LON),py(END_LAT),Math.max(8,ARRIVAL_RADIUS_NM/8),0,7);ctx.stroke();ctx.setLineDash([]);
+
+  ctx.save(); ctx.translate(px(S.lon),py(S.lat)); ctx.rotate(rad(S.hdg));
+  ctx.scale(Math.min(1.1,SC+.2),Math.min(1.1,SC+.2));
+  ctx.fillStyle='#f1ede1'; ctx.beginPath(); ctx.moveTo(0,-9); ctx.lineTo(6,7); ctx.lineTo(-6,7); ctx.closePath(); ctx.fill();
+  ctx.restore();
+
+  const targetBearing=bearingDeg(S.lat,S.lon,END_LAT,END_LON);
+  const targetDistance=Math.round(distanceNm(S.lat,S.lon,END_LAT,END_LON));
+  ctx.fillStyle='#e0a83f';ctx.font='600 13px "Barlow Semi Condensed"';ctx.textAlign='center';
+  ctx.fillText(`LE MARIN · CAP ${String(Math.round(targetBearing)).padStart(3,'0')}° · ${targetDistance} NM`,W/2,y1+22);
+  ctx.fillStyle='rgba(157,190,205,.72)';ctx.font='12px "Barlow Semi Condensed"';
+  ctx.fillText(W<620?'touchez « carte » pour revenir':'barre active · carte ou M pour revenir',W/2,y1+40);
+}
+
+function compass(x,y,r,from){
+  ctx.save(); ctx.translate(x,y);
+  ctx.strokeStyle='rgba(157,190,205,.35)'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.arc(0,0,r,0,7); ctx.stroke();
+  // zone morte
+  ctx.fillStyle='rgba(224,90,75,.16)';
+  ctx.beginPath(); ctx.moveTo(0,0);
+  ctx.arc(0,0,r,rad(from-90-35),rad(from-90+35)); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='rgba(157,190,205,.8)'; ctx.font='11px "Barlow Semi Condensed"'; ctx.textAlign='center';
+  ctx.fillText('N',0,-r-6);
+  // flèche de vent
+  ctx.rotate(rad(from));
+  ctx.strokeStyle='#9dbecd'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(0,-r+4); ctx.lineTo(0,r-10); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-5,r-16); ctx.lineTo(0,r-8); ctx.lineTo(5,r-16); ctx.stroke();
+  ctx.rotate(rad(S.hdg-from));
+  ctx.strokeStyle='#e0a83f'; ctx.lineWidth=3;
+  ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(0,-r+2); ctx.stroke();
+  ctx.restore();
+}
+
+function distanceNm(lat1,lon1,lat2,lon2){
+  const p1=rad(lat1), p2=rad(lat2), dp=rad(lat2-lat1), dl=rad(lon2-lon1);
+  const a=Math.sin(dp/2)**2+Math.cos(p1)*Math.cos(p2)*Math.sin(dl/2)**2;
+  return 3440.065*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+function bearingDeg(lat1,lon1,lat2,lon2){
+  const p1=rad(lat1),p2=rad(lat2),dl=rad(lon2-lon1);
+  const y=Math.sin(dl)*Math.cos(p2);
+  const x=Math.cos(p1)*Math.sin(p2)-Math.sin(p1)*Math.cos(p2)*Math.cos(dl);
+  return (deg(Math.atan2(y,x))+360)%360;
+}
+
+function start(){
+  reset();
+  clearTimeout(incidentTimer); document.getElementById('incident').className='incident';hidePositiveEvent();
+  document.getElementById('screen').classList.add('hide');
+  reefBtn.classList.remove('on'); spiBtn.classList.remove('on'); mapBtn.classList.remove('on');
+  spiBtn.disabled=false;spiBtn.textContent='spi';
+  spray.length=0;
+  S.running=true; last=performance.now(); hud();
+  say('Cap au sud-ouest pour trouver les alizés.');
+}
+document.getElementById('go').onclick=start;
+document.getElementById('secret').onclick=showPinGate;
+reset(); hud();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
