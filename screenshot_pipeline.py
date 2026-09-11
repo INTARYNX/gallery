@@ -18,10 +18,10 @@ CLICK_DELAY = 1
 VIEWPORT = {"width": 800, "height": 600}
 
 # ── SSH config ──
-SSH_HOST = "fournier-digital.ch"
+SSH_HOST = "v2202609417117518741.happysrv.de"
 SSH_PORT = 22
-SSH_USER = "almalinux"
-REMOTE_DIR = "/opt/www/upstride_ch"
+SSH_USER = "root"
+REMOTE_DIR = "/opt/www/gallery_intarynx_com"
 SYNC_PATHS = ["index.html", "artworks.json", "intarynx.jpg", "favicon.ico", "artworks", "screenshots"]
 
 # ── Git config ──
