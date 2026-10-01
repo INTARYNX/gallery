@@ -21,6 +21,7 @@ VIEWPORT = {"width": 800, "height": 600}
 SSH_HOST = "v2202609417117518741.happysrv.de"
 SSH_PORT = 22
 SSH_USER = "root"
+SSH_KEY_PATH = os.path.expanduser("~/.ssh/id_ed25519")
 REMOTE_DIR = "/opt/www/gallery_intarynx_com"
 SYNC_PATHS = ["index.html", "artworks.json", "intarynx.jpg", "favicon.ico", "artworks", "screenshots"]
 
@@ -150,7 +151,7 @@ def sync_to_server():
     print(f"\n=== Syncing to {SSH_USER}@{SSH_HOST}:{REMOTE_DIR} ===")
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(SSH_HOST, port=SSH_PORT, username=SSH_USER, allow_agent=True, look_for_keys=False)
+    client.connect(SSH_HOST, port=SSH_PORT, username=SSH_USER, key_filename=SSH_KEY_PATH, allow_agent=False, look_for_keys=False)
     sftp = client.open_sftp()
     try:
         for p in SYNC_PATHS:
