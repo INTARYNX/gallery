@@ -1,23 +1,24 @@
 @echo off
 
-:: 1. Vérifie si le dossier venv existe dans le répertoire courant
-if not exist "venv" (
-    echo [INFO] Le venv n'existe pas. Creation en cours...
-    python -m venv venv
-    
-    echo [INFO] Activation du venv et installation des paquets...
-    call venv\Scripts\activate
-    
-    python -m pip install --upgrade pip
-    pip install playwright paramiko
-    playwright install chromium
+:: Appelle directement le python du venv (pas d'activate : il garde en dur
+:: le chemin de creation, ce qui casse des que le dossier est deplace).
+set "VPY=%~dp0venv\Scripts\python.exe"
+
+:: 1. Cree le venv s'il manque ou s'il est inutilisable
+"%VPY%" -c "import playwright, paramiko" >nul 2>&1
+if errorlevel 1 (
+    echo [INFO] venv absent ou incomplet. Recreation en cours...
+    if exist "%~dp0venv" rmdir /s /q "%~dp0venv"
+    python -m venv "%~dp0venv"
+    "%VPY%" -m pip install --upgrade pip
+    "%VPY%" -m pip install playwright paramiko
+    "%VPY%" -m playwright install chromium
 ) else (
-    echo [INFO] venv detecte. Activation...
+    echo [INFO] venv OK.
 )
 
-:: 2. Active le venv et lance le script
-call venv\Scripts\activate
+:: 2. Lance le script
 echo [INFO] Lancement du pipeline...
-python screenshot_pipeline.py
+"%VPY%" "%~dp0screenshot_pipeline.py"
 
 pause
