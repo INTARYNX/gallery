@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mer de lave</title>
+<style>
+  html,body{margin:0;height:100%;display:grid;place-items:center;background:#0a0605}
+  canvas{width:min(90vw,90vh);height:min(90vw,90vh);image-rendering:auto;
+         border-radius:2px}
+</style>
+</head>
+<body>
+<canvas id="c" width="600" height="600"></canvas>
+<script>
+const view = document.getElementById('c');
+const vctx = view.getContext('2d');
+const N = 200;                                  // résolution de simulation
+const buf = document.createElement('canvas');
+buf.width = buf.height = N;
+const bctx = buf.getContext('2d');
+const img = bctx.createImageData(N, N);
+
+// --- bruit de valeur ---
+function hash(x, y) {
+  let h = x * 374761393 + y * 668265263;
+  h = (h ^ (h >> 13)) * 1274126177;
+  return ((h ^ (h >> 16)) >>> 0) / 4294967295;
+}
+const fade = t => t * t * (3 - 2 * t);
+function noise(x, y) {
+  const xi = Math.floor(x), yi = Math.floor(y);
+  const xf = x - xi, yf = y - yi;
+  const u = fade(xf), v = fade(yf);
+  const a = hash(xi, yi),     b = hash(xi + 1, yi);
+  const c = hash(xi, yi + 1), d = hash(xi + 1, yi + 1);
+  return (a + (b - a) * u) * (1 - v) + (c + (d - c) * u) * v;
+}
+function fbm(x, y, oct) {
+  let sum = 0, amp = 0.5, f = 1;
+  for (let i = 0; i < oct; i++) {
+    sum += amp * noise(x * f, y * f);
+    f *= 2.03; amp *= 0.5;
+  }
+  return sum;
+}
+
+// --- palette : croûte basaltique -> lave incandescente ---
+const LUT = new Uint8Array(256 * 3);
+for (let i = 0; i < 256; i++) {
+  const t = i / 255;
+  const r = Math.min(1, 1.55 * Math.pow(t, 0.85));
+  const g = Math.min(1, Math.max(0, 1.35 * (t - 0.28)) ** 1.35);
+  const b = Math.max(0, (t - 0.72) / 0.28) ** 2.2 * 0.85;
+  LUT[i * 3]     = 255 * (r * 0.95 + 0.04);
+  LUT[i * 3 + 1] = 255 * g;
+  LUT[i * 3 + 2] = 255 * (b + 0.03 * (1 - t));
+}
+
+let t0 = performance.now();
+let last = t0;
+const env = new Uint8ClampedArray(N * N * 4);
+const CX = N / 2, CY = N / 2, R = N * 0.26;
+const sample = (u, v, out) => {                 // échantillonnage du fond, bords repliés
+  u = ((u % N) + N) % N; v = ((v % N) + N) % N;
+  const o = (((v | 0) * N) + (u | 0)) * 4;
+  out[0] = env[o]; out[1] = env[o + 1]; out[2] = env[o + 2];
+};
+const rgb = [0, 0, 0];
+
+function frame(now) {
+  const t = (now - t0) * 0.00016;
+  const d = img.data;
+  for (let py = 0; py < N; py++) {
+    const y = py / N * 4.5;
+    for (let px = 0; px < N; px++) {
+      const x = px / N * 4.5;
+
+      // déformation du domaine : la croûte est étirée par la convection
+      const qx = fbm(x + 1.7, y + 9.2 + t * 0.6, 3);
+      const qy = fbm(x + 8.3 + t * 0.4, y + 2.8, 3);
+      const rx = fbm(x + 4 * qx + 1.7 + t * 0.9, y + 4 * qy + 9.2, 3);
+      const ry = fbm(x + 4 * qx + 8.3, y + 4 * qy + 2.8 - t * 0.7, 3);
+
+      let v = fbm(x + 4 * rx, y + 4 * ry - t * 1.2, 4);
+
+      // les fractures brillent : contraste + veines fines
+      const vein = 1 - Math.abs(v - 0.5) * 2.6;
+      v = v * 0.55 + Math.max(0, vein) ** 3 * 0.75 + (rx - ry) * 0.18;
+
+      let idx = (v * 255) | 0;
+      idx = idx < 0 ? 0 : idx > 255 ? 255 : idx;
+      const o = (py * N + px) * 4, l = idx * 3;
+      d[o] = LUT[l]; d[o + 1] = LUT[l + 1]; d[o + 2] = LUT[l + 2]; d[o + 3] = 255;
+    }
+  }
+  env.set(d);                                   // le fond devient la carte d'environnement
+
+  // --- sphère de métal : réflexion spéculaire du fond ---
+  const y0 = Math.max(0, (CY - R - 2) | 0), y1 = Math.min(N, (CY + R + 2) | 0);
+  const x0 = Math.max(0, (CX - R - 2) | 0), x1 = Math.min(N, (CX + R + 2) | 0);
+  const lx = -0.45, ly = -0.6, lz = 0.66;       // lumière rasante
+  for (let py = y0; py < y1; py++) {
+    for (let px = x0; px < x1; px++) {
+      const nx = (px + 0.5 - CX) / R, ny = (py + 0.5 - CY) / R;
+      const r2 = nx * nx + ny * ny;
+      if (r2 >= 1.04) continue;
+      const nz = Math.sqrt(Math.max(0, 1 - r2));
+
+      // réflexion du vecteur vue (0,0,-1) autour de la normale
+      const k = 2 * nz;
+      const ex = k * nx, ey = k * ny, ez = k * nz - 1;
+      const proj = R * 2.6 / (1.15 - ez * 0.85);
+      sample(CX + ex * proj, CY + ey * proj, rgb);
+
+      const fres = 0.16 + 0.84 * Math.pow(1 - nz, 4);          // Fresnel
+      const diff = Math.max(0, nx * lx + ny * ly + nz * lz);
+      const tint = [1.0, 0.93, 0.88];                          // acier légèrement chaud
+
+      let cr = rgb[0] * fres * tint[0] + rgb[0] * 0.22 + diff * 26;
+      let cg = rgb[1] * fres * tint[1] + rgb[1] * 0.22 + diff * 26;
+      let cb = rgb[2] * fres * tint[2] + rgb[2] * 0.22 + diff * 30 + 10;
+
+      const edge = Math.min(1, (1.04 - r2) / 0.06);            // anticrénelage du bord
+      const o = (py * N + px) * 4;
+      d[o]     += (cr - d[o]) * edge;
+      d[o + 1] += (cg - d[o + 1]) * edge;
+      d[o + 2] += (cb - d[o + 2]) * edge;
+    }
+  }
+
+  bctx.putImageData(img, 0, 0);
+
+  // intensité lumineuse de la lave (échantillonnage grossier du bas de l'image)
+  let sum = 0, n = 0;
+  for (let py = (N * 0.55) | 0; py < N; py += 6)
+    for (let px = 0; px < N; px += 6) { sum += env[(py * N + px) * 4]; n++; }
+  const glow = Math.min(1, sum / n / 190);
+
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+
+  drawLavaHaze(t);                                   // fond + distorsion de chaleur
+  stepFarEmbers(dt);
+  drawEmbers(dt, 0);                                 // braises lointaines
+  drawFSM(view.width / 2, view.height / 2, view.width * 0.0017, now * 0.003, glow);
+  drawEmbers(dt, 1);                                 // braises proches
+  drawAtmosphere(glow);                              // brume, halo de chaleur, vignette
+  drawBloom(glow);
+
+  requestAnimationFrame(frame);
+}
+
+// --- fond de lave avec distorsion de chaleur (plus forte au premier plan) ---
+function drawLavaHaze(t) {
+  const W = view.width, H = view.height, bands = 48, bh = H / bands, sh = N / bands;
+  for (let i = 0; i < bands; i++) {
+    const f = i / bands;
+    const amp = 0.25 + f * f * 3.2;
+    const dx = Math.sin(t * 26 + i * 0.55) * amp + Math.sin(t * 41 + i * 1.7) * amp * 0.4;
+    vctx.drawImage(buf, 0, i * sh, N, sh + 0.6, dx, i * bh - 0.5, W, bh + 1.2);
+  }
+}
+
+// --- braises ascendantes, deux plans de profondeur ---
+const embers = [];
+function seed(e, W, H) {
+  e.d = Math.random();                               // 0 = lointain, 1 = proche
+  e.x = Math.random() * W;
+  e.y = H * (0.55 + Math.random() * 0.55);
+  e.vy = -(14 + Math.random() * 46) * (0.4 + e.d);
+  e.vx = (Math.random() - 0.5) * 22;
+  e.r = (0.6 + Math.random() * 1.8) * (0.5 + e.d * 1.9);
+  e.life = e.max = 2.5 + Math.random() * 4;
+  e.ph = Math.random() * 6.283;
+  return e;
+}
+function drawEmbers(dt, layer) {
+  const W = view.width, H = view.height;
+  while (embers.length < 70) embers.push(seed({}, W, H));
+  vctx.save();
+  vctx.globalCompositeOperation = 'lighter';
+  if (!layer) vctx.filter = 'blur(3px)';
+  for (const e of embers) {
+    const near = e.d > 0.5 ? 1 : 0;
+    if (near !== layer) continue;
+    if (layer === 1) {                               // mise à jour une fois par frame
+      e.ph += dt * 3;
+      e.x += (e.vx + Math.sin(e.ph) * 26) * dt;
+      e.y += e.vy * dt;
+      e.life -= dt;
+      if (e.life <= 0 || e.y < -20) seed(e, W, H);
+    }
+    const k = e.life / e.max;
+    const a = Math.min(1, k * 2.2) * (0.10 + e.d * 0.32);
+    const rr = e.r * (0.6 + k * 0.6);
+    const grd = vctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, rr * 5);
+    grd.addColorStop(0, `rgba(255,${(215 - 90 * (1 - k)) | 0},150,${a})`);
+    grd.addColorStop(0.35, `rgba(255,${(120 * k + 40) | 0},20,${a * 0.55})`);
+    grd.addColorStop(1, 'rgba(255,60,0,0)');
+    vctx.fillStyle = grd;
+    vctx.fillRect(e.x - rr * 5, e.y - rr * 5, rr * 10, rr * 10);
+  }
+  vctx.filter = 'none';
+  vctx.restore();
+}
+// la mise à jour se fait dans la passe proche : on la déclenche aussi pour les lointaines
+function stepFarEmbers(dt) {
+  for (const e of embers) if (e.d <= 0.5) {
+    e.ph += dt * 3;
+    e.x += (e.vx + Math.sin(e.ph) * 26) * dt;
+    e.y += e.vy * dt;
+    e.life -= dt;
+    if (e.life <= 0 || e.y < -20) seed(e, view.width, view.height);
+  }
+}
+
+// --- profondeur : brume chaude au loin, chaleur au premier plan, vignette ---
+let fog, heat, vign;
+function buildGradients() {
+  const W = view.width, H = view.height;
+  fog = vctx.createLinearGradient(0, 0, 0, H * 0.62);
+  fog.addColorStop(0, 'rgba(58,22,10,.34)');
+  fog.addColorStop(0.55, 'rgba(96,38,12,.12)');
+  fog.addColorStop(1, 'rgba(120,50,16,0)');
+  heat = vctx.createLinearGradient(0, H, 0, H * 0.45);
+  heat.addColorStop(0, 'rgba(255,96,10,.12)');
+  heat.addColorStop(1, 'rgba(255,80,0,0)');
+  vign = vctx.createRadialGradient(W / 2, H * 0.5, H * 0.28, W / 2, H * 0.5, H * 0.78);
+  vign.addColorStop(0, 'rgba(0,0,0,0)');
+  vign.addColorStop(1, 'rgba(12,3,0,.42)');
+}
+function drawAtmosphere(glow) {
+  if (!fog) buildGradients();
+  const W = view.width, H = view.height;
+  vctx.save();
+  vctx.fillStyle = fog; vctx.fillRect(0, 0, W, H * 0.62);
+  vctx.globalCompositeOperation = 'lighter';
+  vctx.globalAlpha = 0.35 + glow * 0.3;
+  vctx.fillStyle = heat; vctx.fillRect(0, H * 0.45, W, H * 0.55);
+  vctx.restore();
+  vctx.fillStyle = vign; vctx.fillRect(0, 0, W, H);
+}
+
+// --- bloom : seuil par mise au carré, flou, recomposition additive ---
+const bloomC = document.createElement('canvas');
+bloomC.width = bloomC.height = 160;
+const blc = bloomC.getContext('2d');
+function drawBloom(glow) {
+  blc.globalCompositeOperation = 'source-over';
+  blc.clearRect(0, 0, 160, 160);
+  blc.drawImage(view, 0, 0, 160, 160);
+  blc.globalCompositeOperation = 'multiply';
+  blc.drawImage(bloomC, 0, 0);                       // ^2 : écrase les tons sombres
+  vctx.save();
+  vctx.globalCompositeOperation = 'lighter';
+  vctx.globalAlpha = 0.16 + glow * 0.12;
+  vctx.filter = 'blur(18px)';
+  vctx.drawImage(bloomC, 0, 0, view.width, view.height);
+  vctx.filter = 'none';
+  vctx.restore();
+}
+
+// --- Monstre en Spaghetti Volant, style cartoon ---
+function drawFSM(cx, cy, s, t, glow) {
+  const g = vctx;
+  g.save();
+  g.translate(cx, cy);
+  g.scale(s, s);
+  g.translate(0, -22);
+  g.lineCap = 'round';
+  g.lineJoin = 'round';
+
+  // --- tracés des nouilles (réutilisés par chaque passe d'éclairage) ---
+  const paths = [];
+  for (let i = 0; i < 7; i++) {                   // appendices pendants
+    const w = Math.sin(t * 1.3 + i) * 22;
+    const len = [1.0, 1.32, 1.12, 1.5, 1.05, 1.4, 1.2][i];
+    paths.push(() => {
+      g.beginPath();
+      g.moveTo(-60 + i * 20, 10);
+      g.bezierCurveTo(-90 + i * 30 + w, 60 * len, -20 + i * 25 - w, 95 * len,
+                      -50 + i * 32 + w * 1.4, 138 * len);
+    });
+  }
+  for (let i = 0; i < 3; i++) {                   // bras traversant le centre
+    const o = (i - 1) * 9;
+    const wL = Math.sin(t * 1.1 + i * 1.3 - 1) * 10;
+    const wR = Math.sin(t * 1.1 + i * 1.3 + 1) * 10;
+    const arm = (sg, w) => [
+      [sg * (70 + o), 24 + o], [sg * (122 + o), 30 + w], [sg * (134 + o), -6 + w],
+      [sg * (142 + o), -46 + w], [sg * (118 + o), -74 + w], [sg * (92 + o * 1.4), -62 + w * 1.3]
+    ];
+    const L = arm(-1, wL), R = arm(1, wR);
+    paths.push(() => {
+      g.beginPath();
+      g.moveTo(L[5][0], L[5][1]);
+      g.bezierCurveTo(L[4][0], L[4][1], L[3][0], L[3][1], L[2][0], L[2][1]);
+      g.bezierCurveTo(L[1][0], L[1][1], L[0][0], L[0][1], 0, o * 0.6);
+      g.bezierCurveTo(R[0][0], R[0][1], R[1][0], R[1][1], R[2][0], R[2][1]);
+      g.bezierCurveTo(R[3][0], R[3][1], R[4][0], R[4][1], R[5][0], R[5][1]);
+    });
+  }
+  const stroke = () => paths.forEach(p => { p(); g.stroke(); });
+
+  // ombre portée du monstre sur la sphère, dirigée par l'éclat de la lave
+  g.save();
+  g.beginPath(); g.arc(0, 22, 153, 0, 7); g.clip();
+  g.globalCompositeOperation = 'multiply';
+  g.translate(12 + glow * 6, 22 + glow * 10);
+  g.filter = 'blur(7px)';
+  g.lineWidth = 26;
+  g.strokeStyle = `rgba(26,8,0,${0.3 + 0.35 * glow})`;
+  stroke();
+  g.filter = 'none';
+  g.restore();
+
+  // contour puis pâte
+  for (let pass = 0; pass < 2; pass++) {
+    g.lineWidth = pass ? 13 : 21;
+    g.strokeStyle = pass ? '#f6dfae' : '#3a2410';
+    g.shadowColor = 'rgba(18,7,0,.55)';
+    g.shadowBlur = pass ? 9 : 16;
+    g.shadowOffsetX = 5; g.shadowOffsetY = 9;
+    stroke();
+  }
+  g.shadowColor = 'transparent';
+  g.shadowBlur = g.shadowOffsetX = g.shadowOffsetY = 0;
+
+  // reflet orange de la lave sous les pâtes
+  g.save();
+  g.globalCompositeOperation = 'lighter';
+  g.translate(0, 6);
+  g.lineWidth = 8;
+  g.strokeStyle = `rgba(255,${(70 + 70 * glow) | 0},18,${0.2 + 0.35 * glow})`;
+  stroke();
+  g.lineWidth = 3;
+  g.strokeStyle = `rgba(255,${(190 + 50 * glow) | 0},120,${0.15 + 0.25 * glow})`;
+  stroke();
+  g.restore();
+
+  // pédoncules oculaires (ancrés derrière les boulettes)
+  const eyes = [];
+  for (const [dx, tilt] of [[-30, -0.5], [26, 0.45]]) {
+    const w = Math.sin(t * 1.7 + dx) * 7;
+    g.lineWidth = 15; g.strokeStyle = '#3a2410';
+    g.beginPath();
+    g.moveTo(dx, -20);
+    g.quadraticCurveTo(dx + tilt * 45 + w, -75, dx + tilt * 62 + w, -108);
+    g.stroke();
+    g.lineWidth = 8; g.strokeStyle = '#f6dfae'; g.stroke();
+    eyes.push([dx + tilt * 62 + w, -112]);
+  }
+
+  // boulettes de viande
+  const balls = [[-58, -18, 34], [62, -12, 38]];
+  balls.forEach(([bx, by, r], bi) => {
+    g.save();
+    g.beginPath(); g.arc(bx, by, r, 0, 7); g.clip();
+
+    const grd = g.createRadialGradient(bx - r * .35, by - r * .4, r * .1, bx, by, r * 1.15);
+    grd.addColorStop(0, '#b3672f'); grd.addColorStop(.55, '#8a4a24'); grd.addColorStop(1, '#4e2410');
+    g.fillStyle = grd; g.fillRect(bx - r, by - r, r * 2, r * 2);
+
+    // motif psychédélique en tons de viande (hue 10–38°)
+    for (let i = 10; i >= 0; i--) {
+      const rad = r * 1.25 * (i + 1) / 11;
+      const h = 12 + 24 * (0.5 + 0.5 * Math.sin(i * 0.8 + t * 1.2 + bi));
+      g.beginPath(); g.arc(bx, by, rad, 0, 7);
+      g.fillStyle = `hsl(${h} ${58 + (i % 2) * 14}% ${26 + (i % 2) * 20}%)`;
+      g.fill();
+    }
+    g.lineWidth = 5; g.lineCap = 'round';
+    for (let s2 = 0; s2 < 3; s2++) {
+      g.beginPath();
+      for (let k = 0; k <= 60; k++) {
+        const a = k / 60 * 7 + s2 * 2.1 - t * 1.4;
+        const rr = r * 1.3 * (k / 60);
+        const fx = bx + Math.cos(a) * rr, fy = by + Math.sin(a) * rr;
+        k ? g.lineTo(fx, fy) : g.moveTo(fx, fy);
+      }
+      g.strokeStyle = `hsl(${16 + 18 * (0.5 + 0.5 * Math.sin(t + s2 * 2))} 62% ${s2 % 2 ? 62 : 24}%)`;
+      g.stroke();
+    }
+
+    // ombre de contact et éclat
+    const rim = g.createRadialGradient(bx, by, r * .62, bx, by, r);
+    rim.addColorStop(0, 'rgba(0,0,0,0)'); rim.addColorStop(1, 'rgba(40,14,0,.55)');
+    g.fillStyle = rim; g.fillRect(bx - r, by - r, r * 2, r * 2);
+    g.restore();
+
+    g.beginPath(); g.arc(bx, by, r, 0, 7);
+    g.lineWidth = 7; g.strokeStyle = '#3a2410'; g.stroke();
+  });
+
+  // yeux, avec pulsation lumineuse venue de la lave
+  const pulse = 0.5 + 0.5 * Math.sin(t * 2.4);
+  for (const [ex, ey] of eyes) {
+    g.save();
+    g.globalCompositeOperation = 'lighter';
+    const halo = g.createRadialGradient(ex, ey, 8, ex, ey, 52);
+    halo.addColorStop(0, `rgba(255,150,40,${(0.18 + 0.22 * pulse) * (0.4 + glow)})`);
+    halo.addColorStop(1, 'rgba(255,90,0,0)');
+    g.fillStyle = halo;
+    g.fillRect(ex - 56, ey - 56, 112, 112);
+    g.restore();
+
+    g.beginPath(); g.arc(ex, ey, 25, 0, 7);
+    g.fillStyle = '#fffdf5'; g.fill();
+    // reflet chaud sur le bas du globe
+    g.save();
+    g.beginPath(); g.arc(ex, ey, 25, 0, 7); g.clip();
+    g.globalCompositeOperation = 'lighter';
+    const wg = g.createLinearGradient(0, ey + 25, 0, ey - 6);
+    wg.addColorStop(0, `rgba(255,${(120 + 60 * pulse) | 0},30,${0.35 + 0.3 * glow * pulse})`);
+    wg.addColorStop(1, 'rgba(255,120,0,0)');
+    g.fillStyle = wg; g.fillRect(ex - 26, ey - 26, 52, 52);
+    g.restore();
+    g.beginPath(); g.arc(ex, ey, 25, 0, 7);
+    g.lineWidth = 7; g.strokeStyle = '#3a2410'; g.stroke();
+    g.beginPath(); g.arc(ex + Math.sin(t * 0.8) * 7, ey + 4, 10, 0, 7);
+    g.fillStyle = '#1a1208'; g.fill();
+  }
+  g.restore();
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

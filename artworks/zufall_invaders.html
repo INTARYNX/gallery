@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vitrail</title>
+<style>
+  html,body{margin:0;height:100%;background:#000;display:flex;align-items:center;justify-content:center;}
+  canvas{background:#000;max-width:100vmin;max-height:100vmin;}
+</style>
+</head>
+<body>
+<canvas id="c" width="800" height="800"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const SIZE = 800;
+
+// --- Layout ---
+const PANELS = 4;
+const MULLION = 22;
+const BORDER = 14;
+const ROWS_DIVIDERS = 6;
+const DIV = 8;
+const CELL = 14;
+
+const COLORS = [
+  '#1b1ec9','#2f4fff','#3a8bff','#5ad1ff','#8fe3ff',
+  '#00b3a4','#1fbf4f','#7ed957','#c8f542',
+  '#ffe11a','#ffb01f','#ff7a1f','#ff3b1f','#d61f3a',
+  '#ff5fa2','#ff9ad1','#c45cff','#8a3fff','#b56bff',
+  '#ffffff','#e8e8ff','#dfeaff','#fff4c2'
+];
+const COLD = ['#0033ff','#0066ff','#0099ff','#00cfff','#00ffe1','#33ffff','#66e0ff','#9ad8ff','#ffffff'];
+
+const panelW = Math.floor((SIZE - 2*BORDER - (PANELS-1)*MULLION - 40) / PANELS / CELL) * CELL;
+
+// --- Lancet pointed arch, ONE per panel ---
+// Each lancet is topped by a pointed (ogival) arch. The arch is a two-centred
+// curve: the apex rises ARCH_RISE above the springline. Choose a modest rise so
+// the head is a neat point, not a huge sweep.
+const ARCH_RISE = panelW * 0.6;
+const SPRING_Y  = BORDER + ARCH_RISE;
+const panelTop  = SPRING_Y;
+const panelH    = SIZE - BORDER - panelTop;
+const rowH      = (panelH - (ROWS_DIVIDERS-1)*DIV) / ROWS_DIVIDERS;
+
+// Two-centred arch radius so that an arc through one springline corner also
+// passes through the apex (apexX = centreX of panel, apexY = BORDER).
+// Solve for radius R and centre offset on the springline:
+//   the left arc is centred at offset C on the springline (measured from left corner),
+//   passes through the left corner (dist C) and the apex (dist sqrt((W/2-C)^2+RISE^2)).
+//   C = (W^2/4 + RISE^2) / W
+const W = panelW;
+const C_OFF = (W*W/4 + ARCH_RISE*ARCH_RISE) / W;
+const ARCH_R = C_OFF;
+
+const CONTENT_W = PANELS*panelW + (PANELS-1)*MULLION + 40;
+const MARGIN_X = (SIZE - CONTENT_W) / 2;
+const MID_GAP = 40;
+function panelLeft(p){ return MARGIN_X + p*(panelW + MULLION) + (p >= PANELS/2 ? MID_GAP : 0); }
+
+// --- Build cells: fill the FULL panel rectangle (top to bottom). The pointed
+// arch is carved out afterwards by an opaque black stone mask drawn on top, so
+// the glass and the stone share exactly one curve and can never disagree. ---
+const cells = [];
+function pushCell(x,y){
+  cells.push({
+    x, y,
+    color: COLORS[(Math.random()*COLORS.length)|0],
+    phase: Math.random()*Math.PI*2,
+    speed: 0.5 + Math.random()*2.5,
+    excite: 0, cold: 0, coldColor: '#cdfaff', inv: 0, invColor: '#fff'
+  });
+}
+const ROWS_PER_BLOCK = 7;   // glass rows between two horizontal stone bars
+const BAR = 4;              // thickness of a horizontal bar (px)
+for (let p = 0; p < PANELS; p++) {
+  const px = panelLeft(p);
+  const cols = Math.floor(panelW / CELL);
+  const ox = px + (panelW - cols*CELL)/2;
+  let row = 0, yy = BORDER;
+  for (; yy + CELL <= SIZE; row++) {
+    const isBar = (yy >= SPRING_Y && (row % (ROWS_PER_BLOCK+1)) === ROWS_PER_BLOCK);
+    if (isBar){ yy += BAR; continue; }
+    for (let i = 0; i < cols; i++) pushCell(ox + i*CELL, yy);
+    yy += CELL;
+  }
+}
+
+// --- Touch interaction ---
+const touches = [];
+function setTouches(list){
+  touches.length = 0;
+  const rect = canvas.getBoundingClientRect();
+  const sx = SIZE/rect.width, sy = SIZE/rect.height;
+  for (const t of list) touches.push({x:(t.clientX-rect.left)*sx, y:(t.clientY-rect.top)*sy});
+}
+function paint(){
+  const R = 55;
+  for (const t of touches)
+    for (const c of cells){
+      const dx=c.x+CELL/2-t.x, dy=c.y+CELL/2-t.y;
+      if (dx*dx+dy*dy < R*R){
+        if (c.cold <= 0) c.coldColor = COLD[(Math.random()*COLD.length)|0];
+        c.cold = 1; c.excite = 1;
+        if (c.state === 0) c.state = 1;
+      }
+    }
+}
+canvas.addEventListener('touchmove', e=>{e.preventDefault();setTouches(e.touches);paint();},{passive:false});
+canvas.addEventListener('touchstart',e=>{e.preventDefault();setTouches(e.touches);paint();},{passive:false});
+canvas.addEventListener('touchend',  e=>setTouches(e.touches));
+canvas.addEventListener('mousemove', e=>{if(e.buttons){setTouches([e]);paint();}});
+canvas.addEventListener('mousedown', e=>{setTouches([e]);paint();});
+
+// --- Excitable automaton ---
+const REFRACTORY = 8, THRESH = 2;
+const grid = new Map();
+const key = (gx,gy)=>gx+'_'+gy;
+for (const c of cells){
+  c.gx = Math.round(c.x/CELL); c.gy = Math.round(c.y/CELL);
+  c.state = 0; grid.set(key(c.gx,c.gy), c);
+}
+for (let i=0;i<14;i++) cells[(Math.random()*cells.length)|0].state = 1;
+const NB = [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[1,1],[-1,1],[1,-1]];
+// precompute neighbour cell references once
+for (const c of cells){
+  c.nbs = [];
+  for (const [dx,dy] of NB){ const n = grid.get(key(c.gx+dx,c.gy+dy)); if (n) c.nbs.push(n); }
+}
+const _next = new Int8Array(cells.length);
+function stepAutomaton(){
+  for (let i=0;i<cells.length;i++){
+    const c = cells[i];
+    if (c.state === 0){
+      let fire = 0;
+      for (const n of c.nbs){ if (n.state===1) fire++; }
+      _next[i] = (fire >= THRESH) ? 1 : 0;
+    } else _next[i] = (c.state + 1) % (REFRACTORY+1);
+  }
+  for (let i=0;i<cells.length;i++){
+    const c = cells[i]; c.state = _next[i];
+    if (c.state === 1){ c.excite = 1; c.cold = 1; c.coldColor = COLD[(Math.random()*COLD.length)|0]; }
+  }
+  for (let k=0;k<3;k++){ const c = cells[(Math.random()*cells.length)|0]; if (c.state===0) c.state=1; }
+  if (Math.random() < 0.06){
+    const c0 = cells[(Math.random()*cells.length)|0];
+    const rc = Math.ceil(40/CELL);
+    for (let dx=-rc;dx<=rc;dx++) for (let dy=-rc;dy<=rc;dy++){
+      const c = grid.get(key(c0.gx+dx, c0.gy+dy));
+      if (c && c.state===0){
+        const ex=c.x-c0.x, ey=c.y-c0.y;
+        if (ex*ex+ey*ey < 40*40) c.state = 1;
+      }
+    }
+  }
+}
+
+// --- Stone mask: paint the whole canvas black, then punch out each lancet
+// (straight body + pointed head) as a single filled shape. One curve, no mismatch. ---
+function lancetPath(p){
+  const left = panelLeft(p), right = left + panelW;
+  const cx = left + panelW/2;
+  const cL = left + C_OFF;          // centre offset from LEFT corner; its circle passes through LEFT corner + apex
+  const cR = right - C_OFF;         // centre offset from RIGHT corner; its circle passes through RIGHT corner + apex
+  const apexY = BORDER, bottom = SIZE + 30;
+  const leftCornerAng  = Math.atan2(0, left  - cL);            // left corner seen from cL
+  const apexFromCL     = Math.atan2(apexY - SPRING_Y, cx - cL);
+  const rightCornerAng = Math.atan2(0, right - cR);            // right corner seen from cR
+  const apexFromCR     = Math.atan2(apexY - SPRING_Y, cx - cR);
+  const path = new Path2D();
+  path.moveTo(left, bottom);
+  path.lineTo(left, SPRING_Y);
+  path.arc(cL, SPRING_Y, ARCH_R, leftCornerAng, apexFromCL, false);  // left corner -> apex
+  path.arc(cR, SPRING_Y, ARCH_R, apexFromCR, rightCornerAng, false); // apex -> right corner
+  path.lineTo(right, bottom);
+  path.closePath();
+  return path;
+}
+// union of all lancet interiors, used as a clip so glass only shows inside them
+function lancetRegion(){
+  const r = new Path2D();
+  for (let p = 0; p < PANELS; p++) r.addPath(lancetPath(p));
+  return r;
+}
+const GLASS_CLIP = lancetRegion();
+
+// --- Render ---
+// --- Space invaders drifting across the glass ---
+const INVADER = [
+  [0,0,1,0,0,0,0,0,1,0,0],
+  [0,0,0,1,0,0,0,1,0,0,0],
+  [0,0,1,1,1,1,1,1,1,0,0],
+  [0,1,1,0,1,1,1,0,1,1,0],
+  [1,1,1,1,1,1,1,1,1,1,1],
+  [1,0,1,1,1,1,1,1,1,0,1],
+  [1,0,1,0,0,0,0,0,1,0,1],
+  [0,0,0,1,1,0,1,1,0,0,0]
+];
+const invaders = [];
+const MAX_INVADERS = 5;
+function spawnInvader(){
+  if (invaders.length >= MAX_INVADERS) return;
+  const dir = Math.random()<0.5?1:-1;
+  invaders.push({
+    x: dir>0? -INVADER[0].length*CELL : SIZE,
+    y: BORDER + Math.round((SPRING_Y+40-BORDER)/CELL)*CELL + (Math.random()*((SIZE-SPRING_Y-160)/CELL)|0)*CELL,
+    dir, s: CELL,
+    color: COLD[(Math.random()*COLD.length)|0], frame:0, ft:0
+  });
+}
+setInterval(spawnInvader, 2600);
+spawnInvader();
+
+function stepInvaders(){
+  for (const c of cells) c.inv = 0;
+  const occupied = new Map();   // cell -> invader color, for cross detection
+  for (let i=invaders.length-1;i>=0;i--){
+    const v=invaders[i];
+    v.x += v.dir*v.s;
+    const gx0 = Math.round(v.x/CELL), gy0 = Math.round(v.y/CELL);
+    for (let r=0;r<INVADER.length;r++){
+      for (let cc=0;cc<INVADER[r].length;cc++){
+        if (!INVADER[r][cc]) continue;
+        const c = grid.get(key(gx0+cc, gy0+r));
+        if (!c) continue;
+        // cross-flash: two invaders on the same cell -> white burst
+        if (occupied.has(c)) { c.invColor = '#ffffff'; }
+        else c.invColor = v.color;
+        occupied.set(c, v.color);
+        c.inv = 1.0; c.excite = 1;
+      }
+    }
+    if (v.x < -INVADER[0].length*CELL-CELL || v.x > SIZE+CELL) invaders.splice(i,1);
+  }
+}
+
+let last = 0, lastInv = 0;
+function draw(t){
+  if (t-last > 70){ stepAutomaton(); last = t; }
+  if (t-lastInv > 55){ stepInvaders(); lastInv = t; }
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0,0,SIZE,SIZE);
+  ctx.save();
+  ctx.clip(GLASS_CLIP);
+  for (const c of cells){
+    const blink = Math.abs(Math.sin(t*0.001*c.speed + c.phase));
+    ctx.globalAlpha = 1 - c.excite*0.65 + c.excite*0.65*blink;
+    ctx.fillStyle = c.color;
+    ctx.fillRect(c.x, c.y, CELL-1, CELL-1);
+    if (c.cold > 0){
+      ctx.globalAlpha = c.cold;
+      ctx.fillStyle = c.coldColor;
+      ctx.fillRect(c.x, c.y, CELL-1, CELL-1);
+      c.cold -= 0.012;
+    }
+    if (c.excite > 0) c.excite -= 0.0008;
+    if (c.inv > 0){
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = c.invColor;
+      ctx.fillRect(c.x, c.y, CELL-1, CELL-1);
+    }
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+  for (let p = 0; p < PANELS; p++){
+    const path = lancetPath(p);
+    ctx.lineJoin = 'round';
+    // faint colored glow bleeding from the glass around the stone edge
+    ctx.save();
+    ctx.shadowColor = 'rgba(120,150,255,0.5)'; ctx.shadowBlur = 12;
+    ctx.strokeStyle = 'rgba(20,18,16,1)'; ctx.lineWidth = 16; ctx.stroke(path);
+    ctx.restore();
+    // dark stone silhouette
+    ctx.strokeStyle = '#0a0908'; ctx.lineWidth = 12; ctx.stroke(path);
+    // barely-lit top edge where light wraps the stone
+    ctx.strokeStyle = 'rgba(80,90,120,0.25)'; ctx.lineWidth = 3; ctx.stroke(path);
+  }
+  ctx.shadowBlur = 0;
+  requestAnimationFrame(draw);
+}
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>

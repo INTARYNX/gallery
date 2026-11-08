@@ -1,0 +1,576 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
+<title>Vae Noctis</title>
+<style>
+  html,body{margin:0;padding:0;background:#000;overflow:hidden;height:100%;}
+  body{display:flex;align-items:center;justify-content:center;}
+  .wrap{width:min(100vmin,100vh);aspect-ratio:1/1;}
+  canvas{display:block;width:100%;height:100%;background:#000;}
+</style>
+</head>
+<body>
+<div class="wrap"><canvas id="c"></canvas></div>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const DPR = Math.min(devicePixelRatio || 1, 2);
+const SIZE = 1024;
+
+function resize(){
+  canvas.width = SIZE * DPR;
+  canvas.height = SIZE * DPR;
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+resize();
+addEventListener('resize', resize);
+
+let seed = (Date.now() ^ (Math.random()*0xffffffff)) | 0;
+function srand(){
+  seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+  let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+const rand=(a,b)=>a+(b-a)*srand();
+const irand=(a,b)=>Math.floor(rand(a,b+1));
+
+const HY = SIZE * 0.62;
+
+// ──── Arbres (statiques, avec halo de profondeur) ────
+let treesCanvas = null;
+function buildTrees(){
+  const off = document.createElement('canvas');
+  off.width = SIZE; off.height = SIZE;
+  const c = off.getContext('2d');
+  const xs = [0.08,0.20,0.32,0.45,0.55,0.68,0.80,0.92];
+  const stack = [];
+  for (const px of xs){
+    const baseX = px*SIZE;
+    const baseY = HY + rand(-8, 12);
+    const h = rand(SIZE*0.22, SIZE*0.40);
+    const tilt = rand(-0.15, 0.15);
+    stack.push([baseX, baseY, h, -Math.PI/2 + tilt, 7, true]);
+  }
+  // passe 1 : halo doux, flouté UNE SEULE FOIS après coup (au lieu d'un filter par trait -> gain perf énorme)
+  const halo = document.createElement('canvas');
+  halo.width = SIZE; halo.height = SIZE;
+  const hc = halo.getContext('2d');
+  hc.strokeStyle = 'rgba(0,0,0,0.5)';
+  const stackCopy = stack.map(s=>[...s]);
+  drawBranches(hc, stackCopy, 1.4);
+  c.save();
+  c.filter = 'blur(3px)';
+  c.drawImage(halo, 0, 0);
+  c.restore();
+  // passe 2 : trait net
+  c.strokeStyle = 'rgba(4,3,6,0.92)';
+  drawBranches(c, stack, 1.0);
+  treesCanvas = off;
+
+  function drawBranches(ctx2, st, widthMul){
+    while (st.length){
+      const [x,y,L,ang,depth] = st.pop();
+      if (depth<=0 || L<1.5) continue;
+      // légère courbure organique du segment (au lieu d'un trait droit)
+      const bend = rand(-0.12, 0.12) * (1 - depth/9);
+      const midAng = ang + bend*0.5;
+      const mx = x + Math.cos(midAng)*L*0.5;
+      const my = y + Math.sin(midAng)*L*0.5;
+      const endAng = ang + bend;
+      const x2 = mx + Math.cos(endAng)*L*0.5;
+      const y2 = my + Math.sin(endAng)*L*0.5;
+      ctx2.lineWidth = Math.max(1.2, Math.pow(depth/7, 1.5)*10) * widthMul;
+      ctx2.lineCap = 'round';
+      ctx2.beginPath();
+      ctx2.moveTo(x,y); ctx2.quadraticCurveTo(mx,my,x2,y2);
+      ctx2.stroke();
+      if (depth<=1) continue;
+      // dominance apicale : une branche "meneuse" prolonge le tronc, les autres divergent davantage
+      st.push([x2,y2, L*rand(0.72,0.85), endAng + rand(-0.08,0.08), depth-1]);
+      const nSide = depth>4 ? (srand()<0.55 ? 1 : 0) : irand(1,2);
+      for (let i=0;i<nSide;i++){
+        if (srand()<0.12) continue; // avortement occasionnel -> silhouette moins symétrique
+        const side = srand()<0.5 ? -1 : 1;
+        const spread = depth>4 ? rand(0.35,0.55) : rand(0.5,0.9);
+        st.push([x2,y2, L*rand(0.45,0.68), endAng + side*spread, depth-1]);
+      }
+    }
+  }
+}
+
+// ──── Collines : dégradés lisses (remplace tout tracé pixel-par-pixel) ────
+let farHillsCanvas = null;
+let nearHillsCanvas = null;
+function buildHills(){
+  farHillsCanvas = document.createElement('canvas');
+  farHillsCanvas.width = SIZE; farHillsCanvas.height = SIZE;
+  const f = farHillsCanvas.getContext('2d');
+  const base = HY - 2;
+  let cur = base - rand(20, 50);
+  const pts = [{x:0,y:cur}];
+  for (let x=0; x<=SIZE; x+=8){
+    cur = Math.max(base-60, Math.min(base+8, cur + (srand()-0.5)*18));
+    pts.push({x, y:cur});
+  }
+  const fg = f.createLinearGradient(0, base-70, 0, base+4);
+  fg.addColorStop(0, 'rgba(30,18,26,0.85)');
+  fg.addColorStop(1, 'rgba(14,10,16,0.9)');
+  f.fillStyle = fg;
+  f.beginPath(); f.moveTo(0, base);
+  for (const p of pts) f.lineTo(p.x, p.y);
+  f.lineTo(SIZE, base); f.lineTo(SIZE, SIZE); f.lineTo(0, SIZE);
+  f.closePath(); f.fill();
+  // brume atmosphérique qui mange la base des collines lointaines
+  const hazeF = f.createLinearGradient(0, base-40, 0, base+2);
+  hazeF.addColorStop(0, 'rgba(60,40,44,0)');
+  hazeF.addColorStop(1, 'rgba(70,45,48,0.35)');
+  f.fillStyle = hazeF;
+  f.fillRect(0, base-40, SIZE, 44);
+
+  nearHillsCanvas = document.createElement('canvas');
+  nearHillsCanvas.width = SIZE; nearHillsCanvas.height = SIZE;
+  const n = nearHillsCanvas.getContext('2d');
+  const base2 = HY + rand(8, 28);
+  let cur2 = base2 - rand(30, 80);
+  const pts2 = [{x:0,y:cur2}];
+  for (let x=0; x<=SIZE; x+=6){
+    cur2 = Math.max(base2-90, Math.min(base2+14, cur2 + (srand()-0.5)*32));
+    pts2.push({x, y:cur2});
+  }
+  const ng = n.createLinearGradient(0, base2-90, 0, base2+14);
+  ng.addColorStop(0, '#120a0e');
+  ng.addColorStop(1, '#050304');
+  n.fillStyle = ng;
+  n.beginPath(); n.moveTo(0, base2);
+  for (const p of pts2) n.lineTo(p.x, p.y);
+  n.lineTo(SIZE, base2); n.lineTo(SIZE, SIZE); n.lineTo(0, SIZE);
+  n.closePath(); n.fill();
+  // liseré de contre-jour sur la crête (rim light)
+  n.strokeStyle = 'rgba(210,90,80,0.25)';
+  n.lineWidth = 2;
+  n.beginPath(); n.moveTo(pts2[0].x, pts2[0].y);
+  for (const p of pts2) n.lineTo(p.x, p.y);
+  n.stroke();
+}
+
+// ──── Rothko : zones + grain (bruit doux via gradients superposés, plus de per-pixel) ────
+const N = 96;
+const noiseA = new Float32Array(N*N);
+const noiseB = new Float32Array(N*N);
+for (let i=0;i<N*N;i++) noiseA[i] = srand();
+for (let i=0;i<N*N;i++) noiseB[i] = srand();
+function noise2D(buf, x, y){
+  x = ((x%N)+N)%N; y = ((y%N)+N)%N;
+  const x0 = Math.floor(x), y0 = Math.floor(y);
+  const x1 = (x0+1)%N,     y1 = (y0+1)%N;
+  const fx = x - x0, fy = y - y0;
+  const a = buf[y0*N + x0];
+  const b = buf[y0*N + x1];
+  const c = buf[y1*N + x0];
+  const d = buf[y1*N + x1];
+  const u = fx*fx*(3-2*fx);
+  const v = fy*fy*(3-2*fy);
+  return a*(1-u)*(1-v) + b*u*(1-v) + c*(1-u)*v + d*u*v;
+}
+
+const ZONES = [
+  { x:0.05, y:0.05, w:0.55, h:0.35, c:[78,38,42], alpha:0.55 },
+  { x:0.40, y:0.18, w:0.55, h:0.55, c:[28,24,38], alpha:0.85 },
+  { x:0.20, y:0.38, w:0.70, h:0.30, c:[40,26,26], alpha:0.45 },
+  { x:0.50, y:0.30, w:0.45, h:0.45, c:[50,44,38], alpha:0.35 },
+];
+
+let rothkoBitmap = null;
+function buildRothko(){
+  const off = document.createElement('canvas');
+  off.width = SIZE;
+  off.height = (HY | 0) - 2;
+  const c = off.getContext('2d');
+  c.fillStyle = '#000000';
+  c.fillRect(0, 0, SIZE, off.height);
+  function blobPath(ctx2, cx, cy, rx, ry, points, jitter){
+    const pts = [];
+    for (let i=0;i<points;i++){
+      const ang = (i/points)*Math.PI*2;
+      const rr = 1 + (srand()-0.5)*jitter;
+      pts.push({x: cx+Math.cos(ang)*rx*rr, y: cy+Math.sin(ang)*ry*rr});
+    }
+    ctx2.beginPath();
+    for (let i=0;i<points;i++){
+      const p0=pts[i], p1=pts[(i+1)%points];
+      const mx=(p0.x+p1.x)/2, my=(p0.y+p1.y)/2;
+      if (i===0) ctx2.moveTo(mx,my);
+      else ctx2.quadraticCurveTo(p0.x,p0.y,mx,my);
+    }
+    ctx2.closePath();
+  }
+
+  for (const z of ZONES){
+    const x = z.x*SIZE, y = z.y*SIZE;
+    const w = z.w*SIZE, h = z.h*SIZE;
+    const cx = x + w/2, cy = y + h/2;
+    const rad = Math.max(w, h) * 0.95;
+
+    // couches superposées : bords organiques déformés, léger décalage par couche (profondeur de pigment)
+    const layers = 3;
+    for (let L=0; L<layers; L++){
+      const ox = rand(-w*0.08, w*0.08), oy = rand(-h*0.08, h*0.08);
+      const jr = rad * rand(0.85, 1.05);
+      c.save();
+      blobPath(c, cx+ox, cy+oy, jr, jr*rand(0.7,1.0), 10, 0.32);
+      c.clip();
+      const a = z.alpha * (L===0 ? 1 : 0.55);
+      const g = c.createRadialGradient(cx+ox, cy+oy, jr*0.10, cx+ox, cy+oy, jr);
+      g.addColorStop(0,    `rgba(${z.c[0]},${z.c[1]},${z.c[2]},${a})`);
+      g.addColorStop(0.55, `rgba(${z.c[0]},${z.c[1]},${z.c[2]},${a*0.6})`);
+      g.addColorStop(1,    `rgba(${z.c[0]},${z.c[1]},${z.c[2]},0)`);
+      c.fillStyle = g;
+      c.fillRect(x-w, y-h, w*3, h*3);
+      c.restore();
+    }
+
+    // coups de brosse : traits courts et flous, variations de pigment (plus clair/plus sombre), direction cohérente
+    c.save();
+    blobPath(c, cx, cy, rad, rad*0.9, 10, 0.30);
+    c.clip();
+    c.filter = 'blur(6px)';
+    const strokeDir = rand(0, Math.PI);
+    for (let s=0; s<16; s++){
+      const sx = x + rand(0, w), sy = y + rand(0, h);
+      const len = rand(w*0.15, w*0.42);
+      const ang = strokeDir + rand(-0.4, 0.4);
+      const ex = sx + Math.cos(ang)*len, ey = sy + Math.sin(ang)*len;
+      const shade = srand() < 0.5 ? rand(1.15,1.4) : rand(0.6,0.85);
+      const rr = Math.min(255, z.c[0]*shade)|0, gg = Math.min(255, z.c[1]*shade)|0, bb = Math.min(255, z.c[2]*shade)|0;
+      c.strokeStyle = `rgba(${rr},${gg},${bb},${rand(0.08,0.20)})`;
+      c.lineWidth = rand(8, 24);
+      c.lineCap = 'round';
+      c.beginPath(); c.moveTo(sx,sy); c.lineTo(ex,ey); c.stroke();
+    }
+    c.restore();
+  }
+  // grain fin réparti par petits patches semi-transparents (sub-sampling coarse)
+  const id = c.getImageData(0, 0, SIZE, off.height);
+  const d = id.data;
+  for (let y=0; y<off.height; y+=2){
+    for (let x=0; x<SIZE; x+=2){
+      const n1 = noise2D(noiseA, x*0.02, y*0.02);
+      const n2 = noise2D(noiseB, x*0.06, y*0.06);
+      let n = n1*0.7 + n2*0.3;
+      n = (n-0.5)*2;
+      const idx = (y*SIZE + x)*4;
+      const lum = (d[idx]+d[idx+1]+d[idx+2])/3;
+      const darken = Math.max(0, -n) * 22;
+      const lighten = Math.max(0, n) * 10 * (1-lum/255);
+      const v = -darken + lighten;
+      d[idx]   = Math.max(0,Math.min(255,d[idx]+v));
+      d[idx+1] = Math.max(0,Math.min(255,d[idx+1]+v));
+      d[idx+2] = Math.max(0,Math.min(255,d[idx+2]+v));
+    }
+  }
+  c.putImageData(id, 0, 0);
+  rothkoBitmap = off;
+}
+
+let grainTile = null;
+function buildGrain(){
+  const TS = 512;
+  const off = document.createElement('canvas');
+  off.width = TS; off.height = TS;
+  const c = off.getContext('2d');
+  const id = c.createImageData(TS, TS);
+  const d = id.data;
+  for (let i=0;i<d.length;i+=4){
+    const n = (Math.random()*255) | 0;
+    d[i] = n; d[i+1] = n; d[i+2] = n; d[i+3] = 18;
+  }
+  c.putImageData(id, 0, 0);
+  grainTile = off;
+}
+
+// ──── Bloom : version floue des zones lumineuses, plaquée en 'screen' ────
+let bloomCanvas = null;
+function buildBloom(){
+  const SCALE = 0.25; // blur à basse résolution puis upscale : même look, coût divisé par ~16
+  const small = document.createElement('canvas');
+  small.width = SIZE*SCALE; small.height = SIZE*SCALE;
+  const sb = small.getContext('2d');
+  sb.filter = 'blur(5px)';
+  if (rothkoBitmap) sb.drawImage(rothkoBitmap, 0, 0, small.width, small.height);
+  sb.filter = 'none';
+  sb.globalAlpha = 0.6;
+  const g = sb.createRadialGradient(small.width*0.55, small.height*0.55*0.62/0.62, 3, small.width*0.55, small.height*0.55, small.width*0.5);
+  g.addColorStop(0, 'rgba(220,90,70,0.9)');
+  g.addColorStop(1, 'rgba(220,90,70,0)');
+  sb.fillStyle = g;
+  sb.fillRect(0,0,small.width,small.height);
+
+  bloomCanvas = document.createElement('canvas');
+  bloomCanvas.width = SIZE; bloomCanvas.height = SIZE;
+  const b = bloomCanvas.getContext('2d');
+  b.imageSmoothingEnabled = true;
+  b.drawImage(small, 0, 0, SIZE, SIZE); // upscale fait le "flou" visuel restant, gratuit
+}
+
+const dust = Array.from({length: 500}, ()=>({
+  x: rand(0, SIZE),
+  y: rand(0, SIZE),
+  vy: rand(0.04, 0.18),
+  vx: rand(-0.05, 0.05),
+  r: rand(0.3, 1.2),
+  a: rand(0.10, 0.30),
+}));
+const darkRain = Array.from({length: 300}, ()=>({
+  x: rand(0, SIZE),
+  y: rand(0, SIZE),
+  vy: rand(3.0, 7.0),
+  len: rand(20, 90),
+  w:  rand(0.8, 2.2),
+}));
+
+const fog = Array.from({length: 140}, ()=>{
+  const depth = srand(); // 0 = proche du sol/horizon (chaud), 1 = loin/bas (froid, dilué)
+  return {
+    x: rand(-SIZE*0.5, SIZE*1.5),
+    y: HY + rand(2, SIZE*0.22),
+    baseY: 0,
+    len: rand(SIZE*0.10, SIZE*0.45),
+    vx: rand(0.02, 0.07) * (srand() < 0.5 ? -1 : 1),
+    thick: rand(6, 26),
+    a: rand(0.10, 0.30),
+    depth,
+    bobPhase: rand(0, Math.PI*2),
+    bobSpeed: rand(0.0003, 0.0009),
+  };
+});
+fog.forEach(f => f.baseY = f.y);
+
+const reflectionScratch = document.createElement('canvas');
+reflectionScratch.width = SIZE; reflectionScratch.height = SIZE;
+const reflectionCtx = reflectionScratch.getContext('2d');
+
+let pulsePhase = 0;
+let fogTime = 0;
+
+// ──── DESSIN ────
+
+function drawSky(){
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, SIZE, SIZE);
+}
+
+function drawRothkoLayer(){
+  if (rothkoBitmap) ctx.drawImage(rothkoBitmap, 0, 0);
+}
+
+function drawBloom(){
+  if (!bloomCanvas) return;
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+  ctx.drawImage(bloomCanvas, 0, 0);
+  ctx.restore();
+}
+
+// Reflet + bande d'horizon : dégradés lisses au lieu de boucles pixel (net gain qualité + perf)
+function drawReflectedHorizon(dt){
+  pulsePhase += dt * 0.0009;
+  const pulse = 0.85 + Math.sin(pulsePhase) * 0.10;
+  const bandH = SIZE * 0.30;
+  const maxAlpha = 0.42 * pulse;
+  const g = ctx.createLinearGradient(0, HY, 0, HY + bandH);
+  g.addColorStop(0,   `rgba(200,60,60,${maxAlpha})`);
+  g.addColorStop(0.4, `rgba(190,55,60,${maxAlpha*0.5})`);
+  g.addColorStop(1,   `rgba(190,55,60,0)`);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, HY, SIZE, bandH);
+}
+
+function drawHorizon(dt){
+  pulsePhase += dt * 0.0009;
+  const amp  = SIZE * 0.015;
+  const drift = pulsePhase * 0.06;
+  const pulse = 0.85 + Math.sin(pulsePhase) * 0.08;
+  const bandH = SIZE * 0.16;
+  const wave = HY + Math.sin(drift * 2) * amp; // légère ondulation globale, lue en douceur
+  const g = ctx.createLinearGradient(0, wave - bandH/2, 0, wave + bandH/2);
+  g.addColorStop(0.0, `rgba(190,55,60,0)`);
+  g.addColorStop(0.5, `rgba(220,80,65,${0.9*pulse})`);
+  g.addColorStop(1.0, `rgba(190,55,60,0)`);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, wave - bandH/2, SIZE, bandH);
+  // filament d'horizon net et lumineux (ligne de fuite, aspect "sun bar")
+  ctx.save();
+  ctx.filter = 'blur(1px)';
+  ctx.strokeStyle = `rgba(255,150,120,${0.7*pulse})`;
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(0, wave); ctx.lineTo(SIZE, wave); ctx.stroke();
+  ctx.restore();
+}
+
+function drawRings(){
+  for (let rr=SIZE*0.45; rr>8; rr -= 3){
+    const a = 0.08 + srand()*0.10;
+    ctx.strokeStyle = `rgba(${irand(120,170)},${irand(115,165)},${irand(130,175)},${a})`;
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    ctx.arc(SIZE/2, HY*0.5, rr, 0, Math.PI*2);
+    ctx.stroke();
+  }
+}
+
+function drawFog(dt){
+  fogTime += dt;
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+  for (const f of fog){
+    f.x += f.vx * dt;
+    const span = SIZE + f.len;
+    if (f.vx > 0 && f.x > SIZE) f.x -= span;
+    else if (f.vx < 0 && f.x + f.len < 0) f.x += span;
+    const bob = Math.sin(fogTime * f.bobSpeed + f.bobPhase) * 6;
+    const cx = f.x + f.len/2;
+    const cy = f.baseY + bob;
+    // teinte : chaud près de l'horizon, plus froid/dilué en profondeur
+    const warm = [70,50,50], cool = [34,34,40];
+    const mix = f.depth;
+    const r = warm[0]+(cool[0]-warm[0])*mix, gC = warm[1]+(cool[1]-warm[1])*mix, bC = warm[2]+(cool[2]-warm[2])*mix;
+    const rad = Math.max(f.len/2, 40);
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, rad);
+    g.addColorStop(0,   `rgba(${r|0},${gC|0},${bC|0},${f.a})`);
+    g.addColorStop(0.6, `rgba(${r|0},${gC|0},${bC|0},${f.a*0.35})`);
+    g.addColorStop(1,   `rgba(${r|0},${gC|0},${bC|0},0)`);
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, f.len/2, f.thick, 0, 0, Math.PI*2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawDarkRain(dt){
+  ctx.strokeStyle = '#000000';
+  ctx.lineCap = 'butt';
+  for (const d of darkRain){
+    d.y += d.vy * dt * 0.4;
+    if (d.y > SIZE){
+      d.y = -d.len - rand(0, 80);
+      d.x = rand(0, SIZE);
+    }
+    ctx.lineWidth = d.w;
+    ctx.beginPath();
+    ctx.moveTo(d.x, d.y);
+    ctx.lineTo(d.x + 0.4, d.y + d.len);
+    ctx.stroke();
+  }
+}
+
+function drawDust(dt){
+  for (const p of dust){
+    p.y += p.vy * dt * 0.06;
+    p.x += p.vx * dt * 0.06;
+    if (p.y > SIZE){ p.y = -2; p.x = rand(0, SIZE); }
+    if (p.x < 0) p.x += SIZE;
+    if (p.x > SIZE) p.x -= SIZE;
+    ctx.fillStyle = `rgba(220,215,210,${p.a})`;
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2); ctx.fill();
+  }
+}
+
+function drawGrain(){
+  if (!grainTile) return;
+  ctx.save();
+  ctx.globalCompositeOperation = 'soft-light';
+  ctx.globalAlpha = 0.5;
+  for (let y=0; y<SIZE; y+=512) for (let x=0; x<SIZE; x+=512){
+    ctx.drawImage(grainTile, x, y);
+  }
+  ctx.restore();
+}
+
+function drawVignette(){
+  const cx = SIZE/2, cy = SIZE/2;
+  const g = ctx.createRadialGradient(cx, cy, SIZE*0.10, cx, cy, SIZE*0.95);
+  g.addColorStop(0.00, 'rgba(0,0,0,0)');
+  g.addColorStop(0.50, 'rgba(0,0,0,0.05)');
+  g.addColorStop(0.75, 'rgba(0,0,0,0.20)');
+  g.addColorStop(1.00, 'rgba(0,0,0,0.55)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, SIZE, SIZE);
+}
+
+// légère correction filmique finale (contraste/saturation) sur tout le canvas
+function drawColorGrade(){
+  ctx.save();
+  ctx.globalCompositeOperation = 'overlay';
+  ctx.globalAlpha = 0.12;
+  const g = ctx.createLinearGradient(0,0,0,SIZE);
+  g.addColorStop(0, 'rgba(40,20,30,1)');
+  g.addColorStop(1, 'rgba(10,8,14,1)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0,0,SIZE,SIZE);
+  ctx.restore();
+}
+
+function drawGroundReflection(){
+  reflectionCtx.clearRect(0,0,SIZE,SIZE);
+  reflectionCtx.drawImage(canvas, 0,0,canvas.width,canvas.height, 0,0,SIZE,SIZE);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, HY, SIZE, SIZE-HY);
+  ctx.clip();
+  ctx.translate(0, HY*2);
+  ctx.scale(1,-1);
+  ctx.globalAlpha = 0.22;
+  ctx.drawImage(reflectionScratch, 0, 0);
+  ctx.restore();
+  const g = ctx.createLinearGradient(0, HY, 0, SIZE);
+  g.addColorStop(0, 'rgba(0,0,0,0.15)');
+  g.addColorStop(0.6, 'rgba(0,0,0,0.45)');
+  g.addColorStop(1, 'rgba(0,0,0,0.75)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, HY, SIZE, SIZE-HY);
+}
+
+// ──── BOUCLE ────
+buildTrees();
+buildHills();
+buildRothko();
+buildBloom();
+buildGrain();
+
+let last = performance.now();
+
+function frame(now){
+  const dt = Math.min(50, now - last);
+  last = now;
+
+  ctx.clearRect(0,0,SIZE,SIZE);
+  drawSky();
+  drawRothkoLayer();
+  drawBloom();
+  drawReflectedHorizon(dt);
+  drawHorizon(dt);
+  if (farHillsCanvas) ctx.drawImage(farHillsCanvas, 0, 0);
+  if (nearHillsCanvas) ctx.drawImage(nearHillsCanvas, 0, 0);
+  drawRings();
+  if (treesCanvas) ctx.drawImage(treesCanvas, 0, 0);
+  drawGroundReflection();
+  drawFog(dt);
+  drawDarkRain(dt);
+  drawDust(dt);
+  drawColorGrade();
+  drawGrain();
+  drawVignette();
+
+  requestAnimationFrame(frame);
+}
+
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

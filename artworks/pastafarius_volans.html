@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pastafarius Volans</title>
+<style>
+  body {
+    margin: 0; min-height: 100vh; overflow: hidden;
+    background: #1a1a1a; font-family: monospace;
+    display: flex; justify-content: center; align-items: center;
+  }
+  canvas {
+    background: #c9b795;
+    border: 20px solid #2a2a2a;
+    box-shadow: 0 0 50px rgba(0,0,0,.5);
+    filter: blur(0.3px) contrast(1.08);
+    width: min(88vw, 88vh); height: min(88vw, 88vh);
+    cursor: pointer;
+  }
+  .wrapper { animation: breathe 4s ease-in-out infinite; }
+  @keyframes breathe {
+    0%, 100% { transform: scale(1); }
+    50%      { transform: scale(1.002); }
+  }
+</style>
+</head>
+<body>
+<div class="wrapper"><canvas id="c" width="900" height="900"></canvas></div>
+<script>
+const cv = document.getElementById('c'), x = cv.getContext('2d');
+const S = 900, TAU = Math.PI * 2;
+const PAPER = '#c9b795', INK = '#241f19';
+const PASTA_D = '#2e2419', PASTA = '#4a3a28', PASTA_L = '#7d6a4b';
+const BALL_D = '#241b12', BALL = '#3b2c1d', GLOW = '#a49a86';
+
+const STEPS = 16;        // phases par cycle : la bande du bas en compte autant
+const STRIDE = 0.9;      // secondes par ondulation complète
+let running = true, clock = 0, last = null, lastFi = null;
+const GHOST_INK = '#3b3227';
+
+// ---------- une nouille : onde progressive, épaisseur qui s'amenuise ----------
+function strand(ctx, len, amp, k, ph, w, curl, col, hi) {
+  const segs = 18, pts = [];
+  for (let i = 0; i <= segs; i++) {
+    const u = i / segs;
+    pts.push([len * u, Math.sin(TAU * (k * u - ph)) * amp * u + curl * len * u * u]);
+  }
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = col;
+  for (let i = 0; i < segs; i++) {          // segment par segment : la pâte s'affine vers la pointe
+    ctx.lineWidth = w * (1 - 0.7 * i / segs);
+    ctx.beginPath(); ctx.moveTo(pts[i][0], pts[i][1]); ctx.lineTo(pts[i + 1][0], pts[i + 1][1]); ctx.stroke();
+  }
+  if (hi) {                                  // filet de lumière sur le dessus du tube
+    ctx.strokeStyle = hi; ctx.lineWidth = w * 0.26;
+    ctx.beginPath();
+    for (let i = 0; i <= segs * 0.6; i++) {
+      const o = -w * 0.24 * (1 - i / segs);
+      i ? ctx.lineTo(pts[i][0], pts[i][1] + o) : ctx.moveTo(pts[i][0], pts[i][1] + o);
+    }
+    ctx.stroke();
+  }
+  const e = pts[segs], b = pts[segs - 1];
+  return { x: e[0], y: e[1], a: Math.atan2(e[1] - b[1], e[0] - b[0]) };
+}
+
+function appendage(ctx, ax, ay, ang, len, amp, k, ph, w, curl, col, hi) {
+  ctx.save(); ctx.translate(ax, ay); ctx.rotate(ang);
+  const t = strand(ctx, len, amp, k, ph, w, curl, col, hi);
+  ctx.restore();
+  const c = Math.cos(ang), s = Math.sin(ang);
+  return { x: ax + t.x * c - t.y * s, y: ay + t.x * s + t.y * c, a: ang + t.a };
+}
+
+function meatball(ctx, cx, cy, r) {
+  ctx.save(); ctx.translate(cx, cy);
+  const g = ctx.createRadialGradient(-r * 0.35, -r * 0.4, r * 0.15, 0, 0, r);
+  g.addColorStop(0, BALL); g.addColorStop(1, BALL_D);
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill();
+  ctx.fillStyle = 'rgba(160,140,100,0.22)';                  // grumeaux de viande hachée
+  for (let i = 0; i < 26; i++) {
+    const a = i * 2.399, d = r * 0.9 * Math.sqrt((i + 0.5) / 26);
+    ctx.beginPath();
+    ctx.ellipse(Math.cos(a) * d, Math.sin(a) * d, 1.1 + (i % 3) * 0.6, 0.9 + (i % 2) * 0.5, a, 0, TAU);
+    ctx.fill();
+  }
+  ctx.fillStyle = 'rgba(214,198,160,0.30)';                  // reflet gras
+  ctx.beginPath(); ctx.ellipse(-r * 0.34, -r * 0.42, r * 0.24, r * 0.15, -0.6, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+
+function eye(ctx, tip) {
+  ctx.save(); ctx.translate(tip.x, tip.y); ctx.rotate(tip.a);
+  ctx.fillStyle = PASTA_D; ctx.beginPath(); ctx.arc(0, 0, 11, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#d8cba9'; ctx.beginPath(); ctx.arc(0, 0, 9, 0, TAU); ctx.fill();
+  ctx.fillStyle = INK;      ctx.beginPath(); ctx.arc(4.5, 0.5, 4.2, 0, TAU); ctx.fill();
+  ctx.fillStyle = GLOW;     ctx.beginPath(); ctx.arc(6, -1.4, 1.5, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+
+// ---------- la créature ----------
+const BACK = [   // nouilles arrière : angle, longueur, amplitude, retard de phase, épaisseur, courbure
+  [ 2.95, 210, 26, 0.00, 11, -0.10],
+  [ 3.25, 196, 22, 0.12,  9,  0.14],
+  [ 2.68, 178, 20, 0.24,  8, -0.22],
+  [ 3.52, 164, 18, 0.36,  8,  0.26],
+  [ 3.05, 148, 16, 0.48,  7,  0.02],
+  [ 2.45, 132, 14, 0.60,  6, -0.30]
+];
+const FRONT = [
+  [ 0.34, 128, 18, 0.05,  9,  0.22],
+  [-0.24, 112, 16, 0.30,  8, -0.26]
+];
+
+function fsm(ctx, p) {
+  const t = p * TAU;
+  const bob = -9 * Math.cos(TAU * (p - 0.15));
+  const roll = 0.05 * Math.sin(TAU * (p - 0.05));
+
+  ctx.save();
+  ctx.translate(50, bob);
+  ctx.rotate(roll);
+
+  // appendages arrière, dans l'ombre
+  for (const [a, len, amp, ph, w, curl] of BACK)
+    appendage(ctx, -14, 4, a, len, amp, 1.15, p - ph, w, curl, PASTA_D, null);
+
+  // amas de spaghettis du corps
+  ctx.strokeStyle = PASTA; ctx.lineCap = 'round';
+  for (let i = 0; i < 9; i++) {
+    const a0 = i * 0.7 + t * 0.08, r = 30 + (i % 3) * 7;
+    ctx.lineWidth = 5 - (i % 3);
+    ctx.beginPath();
+    ctx.arc(-2 + Math.cos(a0) * 8, 2 + Math.sin(a0) * 6, r, a0, a0 + 2.1 + 0.2 * Math.sin(t + i));
+    ctx.stroke();
+  }
+
+  meatball(ctx, -30, 2, 33);
+  meatball(ctx, 24, 6, 29);
+
+  // pédoncules oculaires
+  eye(ctx, appendage(ctx, 6, -22, -1.45 + 0.10 * Math.sin(t), 58, 9, 0.55, p, 7, 0.10, PASTA, PASTA_L));
+  eye(ctx, appendage(ctx, 32, -18, -1.15 - 0.10 * Math.sin(t), 48, 8, 0.55, p - 0.18, 6, 0.14, PASTA, PASTA_L));
+
+  // appendages nouilleux tendus vers l'avant
+  for (const [a, len, amp, ph, w, curl] of FRONT)
+    appendage(ctx, 34, 12, a, len, amp, 1.1, p - ph, w, curl, PASTA, PASTA_L);
+
+  ctx.restore();
+}
+
+// ---------- géométrie de la scène ----------
+const SCALE = 1.0, GROUND = 470, HOVER = 152, GHOSTS = 3;
+const STRIDE_LEN = 300;                  // avance du corps par cycle d'ondulation
+const SPAD = 40, SCOLS = 8, SROWS = 2, STOP = 552;
+const SCW = (S - SPAD * 2) / SCOLS, SCH = (S - 20 - STOP) / SROWS, TSC = 0.22;
+
+// anneau de silhouettes : une seule produite par image de pellicule
+const OW = 620, OH = 460, OX = 320, OY = 230;
+const RING = GHOSTS + 1, ring = [];
+for (let i = 0; i < RING; i++) {
+  const c = document.createElement('canvas');
+  c.width = OW; c.height = OH; ring.push(c);
+}
+const slot = i => ring[((i % RING) + RING) % RING];
+
+function silhouette(canvas, phase, color) {
+  const g = canvas.getContext('2d');
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.clearRect(0, 0, OW, OH);
+  g.save();
+  g.translate(OX, OY); g.scale(SCALE, SCALE);
+  fsm(g, phase);
+  g.restore();
+  g.globalCompositeOperation = 'source-in';
+  g.fillStyle = color;
+  g.fillRect(0, 0, OW, OH);
+  g.globalCompositeOperation = 'source-over';
+}
+
+const srand = n => { const v = Math.sin(n * 127.1 + 311.7) * 43758.5453; return v - Math.floor(v); };
+
+const stains = document.createElement('canvas');
+stains.width = stains.height = S;
+(() => {
+  const c = stains.getContext('2d');
+
+  // fibres du papier : orientées, pas concentriques
+  for (let i = 0; i < 1400; i++) {
+    const px = Math.random() * S, py = Math.random() * S;
+    const a = (Math.random() < 0.75 ? 0.12 : 1.4) + (Math.random() - 0.5) * 0.5;
+    const len = 6 + Math.random() * 34;
+    c.strokeStyle = Math.random() < 0.5
+      ? 'rgba(96,74,44,' + (0.02 + Math.random() * 0.05) + ')'
+      : 'rgba(236,226,196,' + (0.02 + Math.random() * 0.06) + ')';
+    c.lineWidth = 0.4 + Math.random() * 0.9;
+    c.beginPath(); c.moveTo(px, py);
+    c.lineTo(px + Math.cos(a) * len, py + Math.sin(a) * len);
+    c.stroke();
+  }
+
+  // auréoles chimiques : contours irréguliers, jamais des cercles
+  for (let i = 0; i < 6; i++) {
+    const cx = Math.random() * S, cy = Math.random() * S;
+    const r = 40 + Math.random() * 90, sq = 0.5 + Math.random() * 0.7;
+    c.save();
+    c.translate(cx, cy); c.rotate(Math.random() * TAU); c.scale(1, sq);
+    c.beginPath();
+    const pts = [];
+    for (let k = 0; k < 40; k++) {
+      const a = k / 40 * TAU;
+      const rr = r * (0.94 + 0.06 * Math.sin(a * 2 + i) + 0.04 * Math.sin(a * 3 + i * 2));
+      pts.push([Math.cos(a) * rr, Math.sin(a) * rr]);
+    }
+    c.moveTo((pts[0][0] + pts[39][0]) / 2, (pts[0][1] + pts[39][1]) / 2);
+    for (let k = 0; k < 40; k++) {          // lissage : le contour passe par les milieux
+      const q = pts[k], n = pts[(k + 1) % 40];
+      c.quadraticCurveTo(q[0], q[1], (q[0] + n[0]) / 2, (q[1] + n[1]) / 2);
+    }
+    c.closePath();
+    const g = c.createRadialGradient(0, 0, r * 0.2, 0, 0, r);
+    g.addColorStop(0, 'rgba(0,0,0,0)');
+    g.addColorStop(0.72, Math.random() < 0.6 ? 'rgba(122,80,32,0.05)' : 'rgba(48,36,22,0.04)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    c.fillStyle = g; c.fill();
+    c.restore();
+  }
+
+  // plis : une arête claire doublée d'une ombre
+  for (let i = 0; i < 3; i++) {
+    const vert = Math.random() < 0.5, u = 120 + Math.random() * (S - 240), drift = (Math.random() - 0.5) * 90;
+    c.lineWidth = 1.4;
+    for (const [off, col] of [[0, 'rgba(240,232,206,0.11)'], [2.5, 'rgba(60,44,26,0.07)']]) {
+      c.strokeStyle = col;
+      c.beginPath();
+      if (vert) { c.moveTo(u + off, 0); c.quadraticCurveTo(u + drift + off, S / 2, u + off, S); }
+      else      { c.moveTo(0, u + off); c.quadraticCurveTo(S / 2, u + drift + off, S, u + off); }
+      c.stroke();
+    }
+  }
+
+  for (let i = 0; i < 80; i++) {          // piqûres d'émulsion
+    c.fillStyle = 'rgba(232,222,190,' + (0.1 + Math.random() * 0.3) + ')';
+    c.beginPath(); c.arc(Math.random() * S, Math.random() * S, Math.random() * 2.2, 0, TAU); c.fill();
+  }
+
+  for (let i = 0; i < 70; i++) {          // poussières collées à la plaque
+    const r = Math.random();
+    c.fillStyle = r > 0.45 ? 'rgba(30,20,10,0.45)' : 'rgba(245,238,215,0.5)';
+    c.beginPath();
+    c.ellipse(Math.random() * S, Math.random() * S, 0.7 + r * 2.4, 0.7 + r, r * 6, 0, TAU);
+    c.fill();
+  }
+
+  for (let i = 0; i < 5; i++) {           // cheveux pris dans l'émulsion
+    const dx = Math.random() * S, dy = Math.random() * S;
+    const len = 14 + Math.random() * 34, a = Math.random() * Math.PI;
+    c.strokeStyle = 'rgba(24,16,8,0.22)'; c.lineWidth = 0.6;
+    c.beginPath(); c.moveTo(dx, dy);
+    c.quadraticCurveTo(dx + Math.cos(a) * len * 0.6 + 6, dy + Math.sin(a) * len * 0.6,
+                       dx + Math.cos(a) * len, dy + Math.sin(a) * len);
+    c.stroke();
+  }
+
+  for (let i = 0; i < 4; i++) {           // rayures : elles ont été faites une fois pour toutes
+    const sx = Math.random() * S;
+    c.strokeStyle = Math.random() > 0.5 ? 'rgba(248,240,215,0.16)' : 'rgba(40,28,14,0.14)';
+    c.lineWidth = 0.5 + Math.random();
+    c.beginPath(); c.moveTo(sx, 0); c.lineTo(sx + (Math.random() - 0.5) * 12, S); c.stroke();
+  }
+})();
+
+// grain d'émulsion : figé lui aussi, c'est de l'argent déposé, pas du bruit
+const grainTex = document.createElement('canvas');
+grainTex.width = grainTex.height = S;
+(() => {
+  const g = grainTex.getContext('2d'), img = g.createImageData(S, S), d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const dark = Math.random() < 0.55;
+    d[i] = dark ? 26 : 236; d[i + 1] = dark ? 22 : 226; d[i + 2] = dark ? 16 : 198;
+    d[i + 3] = Math.pow(Math.random(), 2.4) * 120;
+  }
+  g.putImageData(img, 0, 0);
+})();
+
+// ---------- scène vivante ----------
+function backdrop(travel) {
+  x.strokeStyle = 'rgba(36,31,25,0.09)'; x.lineWidth = 1;
+  const step = 90, o = -(travel * 0.5) % step;
+  for (let i = -1; i < S / step + 1; i++) {
+    const px = o + i * step;
+    x.beginPath(); x.moveTo(px, 150); x.lineTo(px, GROUND); x.stroke();
+  }
+  x.fillStyle = 'rgba(36,31,25,0.2)'; x.font = '12px Georgia, serif';
+  for (let i = -1; i < S / step + 1; i++)
+    x.fillText(String(((i * 21) % 60 + 60) % 60).padStart(2, '0'), o + i * step + 6, 168);
+
+  // ligne d'altitude : la créature ne touche jamais le sol
+  x.strokeStyle = 'rgba(36,31,25,0.16)'; x.lineWidth = 1;
+  x.setLineDash([7, 9]);
+  x.beginPath(); x.moveTo(0, GROUND - HOVER); x.lineTo(S, GROUND - HOVER); x.stroke();
+  x.setLineDash([]);
+
+  x.strokeStyle = INK; x.lineWidth = 3;
+  x.beginPath(); x.moveTo(0, GROUND); x.lineTo(S, GROUND); x.stroke();
+
+  x.strokeStyle = 'rgba(36,31,25,0.17)'; x.lineWidth = 1.5;
+  for (let i = -1; i < 26; i++) {
+    const px = (-travel % 60) + i * 60;
+    x.beginPath(); x.moveTo(px, GROUND + 10); x.lineTo(px - 20, GROUND + 56); x.stroke();
+  }
+}
+
+// ---------- bande de phases, sous la scène ----------
+function strip(active) {
+  x.strokeStyle = 'rgba(36,31,25,0.22)'; x.lineWidth = 1;
+  for (let c = 0; c <= SCOLS; c++) {
+    const px = SPAD + c * SCW;
+    x.beginPath(); x.moveTo(px, STOP); x.lineTo(px, STOP + SROWS * SCH); x.stroke();
+  }
+  for (let r = 0; r <= SROWS; r++) {
+    const py = STOP + r * SCH;
+    x.beginPath(); x.moveTo(SPAD, py); x.lineTo(S - SPAD, py); x.stroke();
+  }
+
+  for (let i = 0; i < STEPS; i++) {
+    const cx = SPAD + (i % SCOLS) * SCW, cy = STOP + Math.floor(i / SCOLS) * SCH;
+    const bx = cx + SCW / 2 - 10, by = cy + SCH * 0.46, on = i === active;
+
+    if (on) {
+      const g = x.createRadialGradient(bx, by - 6, 5, bx, by - 6, SCW * 0.8);
+      g.addColorStop(0, 'rgba(240,228,198,0.6)');
+      g.addColorStop(1, 'rgba(240,228,198,0)');
+      x.fillStyle = g; x.fillRect(cx + 1, cy + 1, SCW - 2, SCH - 2);
+    }
+
+    x.strokeStyle = 'rgba(36,31,25,0.28)'; x.lineWidth = 1;
+    x.beginPath();
+    x.moveTo(cx + 8, by + HOVER * TSC); x.lineTo(cx + SCW - 8, by + HOVER * TSC); x.stroke();
+
+    x.save();
+    x.globalAlpha = on ? 1 : 0.25;
+    x.translate(bx, by); x.scale(TSC, TSC);
+    fsm(x, i / STEPS);
+    x.restore();
+
+    x.globalAlpha = 1;
+    x.fillStyle = on ? INK : 'rgba(36,31,25,0.45)';
+    x.font = '600 11px Georgia, serif';
+    x.fillText(String(i + 1).padStart(2, '0'), cx + 7, cy + SCH - 8);
+  }
+}
+
+// ---------- usure, appliquée en dernier sur toute la plaque ----------
+function wear(fi) {
+  // seule la densité change d'une image à l'autre ; tout le reste appartient à la plaque
+  const flick = srand(fi * 5) - 0.5;
+  const heavy = srand(fi * 5 + 41) > 0.88 ? 2.4 : 1;
+  x.fillStyle = flick > 0 ? 'rgba(255,240,208,' + (flick * 0.17 * heavy) + ')'
+                          : 'rgba(24,16,6,' + (-flick * 0.17 * heavy) + ')';
+  x.fillRect(0, 0, S, S);
+
+  x.drawImage(stains, 0, 0);
+  x.save(); x.globalAlpha = 0.5; x.drawImage(grainTex, 0, 0); x.restore();
+
+  const g = x.createRadialGradient(S / 2, S / 2, S * 0.3, S / 2, S / 2, S * 0.74);
+  g.addColorStop(0, 'rgba(0,0,0,0)');
+  g.addColorStop(1, 'rgba(26,18,6,0.42)');
+  x.fillStyle = g; x.fillRect(0, 0, S, S);
+}
+
+function counterBox(fi) {
+  const w = 88, h = 54, bx = S - SPAD - w, by = 26;
+  const j = Math.floor(fi / 3);                  // il ne bouge pas à chaque image
+  x.save();
+  x.translate(bx + w / 2 + (srand(j) - 0.5) * 2.5, by + h / 2 + (srand(j + 7) - 0.5) * 2);
+  x.rotate((srand(j + 13) - 0.5) * 0.006);
+  x.fillStyle = '#2a2a2a'; x.fillRect(-w / 2 - 5, -h / 2 - 5, w + 10, h + 10);
+  x.fillStyle = PAPER;     x.fillRect(-w / 2, -h / 2, w, h);
+  x.fillStyle = 'rgba(28,20,8,0.18)'; x.fillRect(-w / 2, -h / 2, w, 3);
+  x.fillStyle = '#17140f';
+  x.font = "bold 34px 'Courier New', monospace";
+  x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillText(String((fi % STEPS) + 1).padStart(2, '0'), 0, 2);
+  x.textAlign = 'left'; x.textBaseline = 'alphabetic';
+  x.restore();
+}
+
+function frame(now) {
+  if (last === null) last = now;
+  const dt = Math.min(60, now - last); last = now;
+  if (running) clock += dt;
+
+  const fi = Math.floor(clock / (STRIDE * 1000) * STEPS);
+  if (fi === lastFi) { requestAnimationFrame(frame); return; }   // pellicule immobile : rien à refaire
+
+  // la pellicule saute de temps en temps : l'image précédente repasse
+  const skip = srand(fi * 11 + 3) > 0.955;
+  const df = skip ? fi - 1 : fi;
+  const p = df / STEPS, travel = p * STRIDE_LEN * SCALE;
+
+  if (lastFi === null) for (let k = GHOSTS; k >= 1; k--) silhouette(slot(fi - k), p - k / STEPS, GHOST_INK);
+  silhouette(slot(fi), p, GHOST_INK);
+  lastFi = fi;
+
+  x.fillStyle = PAPER; x.fillRect(0, 0, S, S);
+
+  x.save();
+  // tremblement d'enregistrement : le châssis de prise de vue n'était jamais parfaitement calé
+  x.translate(S / 2 + (srand(fi) - 0.5) * 5, S / 2 + (srand(fi + 99) - 0.5) * 2.4);
+  x.rotate((srand(fi + 41) - 0.5) * 0.007);
+  x.translate(-S / 2, -S / 2);
+
+  backdrop(travel);
+
+  const dx = STRIDE_LEN * SCALE / STEPS;
+  const GA = [0, 0.35, 0.15, 0.05];              // la trace s'efface vite, comme une rémanence
+  for (let k = GHOSTS; k >= 1; k--) {
+    x.globalAlpha = GA[k];
+    x.filter = k === GHOSTS ? 'blur(1.8px)' : (k === 2 ? 'blur(0.7px)' : 'none');
+    x.drawImage(slot(fi - k), S / 2 - k * dx - OX, GROUND - HOVER - OY);
+  }
+  x.filter = 'none';
+  x.globalAlpha = 1;
+
+  x.save();
+  x.translate(S / 2, GROUND - HOVER); x.scale(SCALE, SCALE);
+  fsm(x, p);
+  x.restore();
+
+  x.fillStyle = INK;
+  x.font = '600 27px "Times New Roman", Georgia, serif';
+  x.fillText('PASTAFARIUS VOLANS — NOODLY FLIGHT', SPAD, 46);
+  x.font = 'italic 14px Georgia, serif';
+  x.fillText(Math.round(STEPS / STRIDE) + ' frames per second · Sacred Locomotion Laboratory No. 3 · R\u2019Amen', SPAD, 68);
+  x.fillText(running ? 'click to stop the film' : 'film stopped', SPAD, STOP - 14);
+
+  strip(((df % STEPS) + STEPS) % STEPS);
+  x.restore();
+
+  counterBox(df);
+  wear(fi);
+
+  requestAnimationFrame(frame);
+}
+
+cv.addEventListener('click', () => { running = !running; lastFi = null; });
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

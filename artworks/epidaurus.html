@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Theatre of Epidaurus</title>
+<style>
+  html,body{margin:0;height:100%;background:#111;display:grid;place-items:center;overflow:hidden}
+  canvas{width:min(100vw,100vh);aspect-ratio:1}
+</style>
+<canvas id="c"></canvas>
+<script>
+const cv = document.getElementById('c'), ctx = cv.getContext('2d', { alpha: false });
+const S = cv.width = cv.height = 1000, H = S / 2, F = 1150, NEAR = 1;
+const TAU = Math.PI * 2, clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+let seed = 7;
+const rnd = () => (seed = seed * 16807 % 2147483647) / 2147483647;
+
+const LIGHT = [-.6, .55, -.45];
+{ const l = Math.hypot(...LIGHT); LIGHT.forEach((v, i) => LIGHT[i] = v / l); }
+
+const P = [], TREES = [];
+
+function shadeRGB(c, n, j = 0) {
+  const l = Math.max(0, n[0] * LIGHT[0] + n[1] * LIGHT[1] + n[2] * LIGHT[2]), b = (.4 + .6 * l) * (1 + j);
+  return [Math.min(255, c[0] * b * (.9 + .18 * l)), Math.min(255, c[1] * b * (.95 + .05 * l)), Math.min(255, c[2] * b * (1.08 - .2 * l))];
+}
+const rgbStr = c => `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`;
+const shade = (c, n, j) => rgbStr(shadeRGB(c, n, j));
+
+/* Two colours only: hard light/shadow threshold, dark materials stay black */
+const bw = (c, l) => typeof c === 'string' || (c[0] + c[1] + c[2]) / 3 < 100 ? '#000' : l > .3 ? '#fff' : '#000';
+
+function poly(v, n, c, o = {}) {
+  let x = 0, y = 0, z = 0;
+  for (const p of v) { x += p[0]; y += p[1]; z += p[2]; }
+  const l = Math.max(0, n[0] * LIGHT[0] + n[1] * LIGHT[1] + n[2] * LIGHT[2]);
+  P.push({ v, n, x: x / 4, y: y / 4, z: z / 4, col: bw(c, l), bias: o.bias || 0, two: !!o.two,
+    row: o.row ?? -1, st: !!o.st, edge: !!o.edge, j: o.j || 0, l });
+}
+
+const pt = (r, a, y) => [r * Math.sin(a), y, r * Math.cos(a)];
+
+function box(x0, y0, z0, x1, y1, z1, c, parts = 1) {
+  const dx = (x1 - x0) / parts;
+  for (let i = 0; i < parts; i++) {
+    const a = x0 + i * dx, b = a + dx;
+    poly([[a, y1, z0], [b, y1, z0], [b, y1, z1], [a, y1, z1]], [0, 1, 0], c);
+    poly([[a, y0, z1], [b, y0, z1], [b, y1, z1], [a, y1, z1]], [0, 0, 1], c);
+    poly([[a, y0, z0], [b, y0, z0], [b, y1, z0], [a, y1, z0]], [0, 0, -1], c);
+    if (i == 0) poly([[a, y0, z0], [a, y0, z1], [a, y1, z1], [a, y1, z0]], [-1, 0, 0], c);
+    if (i == parts - 1) poly([[b, y0, z0], [b, y0, z1], [b, y1, z1], [b, y1, z0]], [1, 0, 0], c);
+  }
+}
+
+/* ---------- Cavea ---------- */
+const SPAN = Math.PI * 1.17, HALF = SPAN / 2, N = 72, DA = SPAN / N;
+
+let ROWI = 0;
+function row(rIn, w, h, rise, stairMod, col) {
+  const rOut = rIn + w, R = ROWI++;
+  for (let j = 0; j < N; j++) {
+    const a0 = -HALF + j * DA, a1 = a0 + DA, am = a0 + DA / 2;
+    const st = stairMod && (j % stairMod == 0 || j == N - 1);
+    const c = st ? [236, 226, 204] : col, jit = (rnd() - .5) * .03;
+    const ae = a1 + .2 / rIn, ro = rOut + .12;
+    poly([pt(rIn, a0, h), pt(rIn, ae, h), pt(ro, ae, h), pt(ro, a0, h)], [0, 1, 0], c, { j: jit, row: R, st, edge: R === 55 });
+    if (rise > 0) poly([pt(rIn, a0, h - rise), pt(rIn, ae, h - rise), pt(rIn, ae, h), pt(rIn, a0, h)],
+      [-Math.sin(am), 0, -Math.cos(am)], c, { j: jit, row: R, st, edge: R === 55 });
+    if (j == 0) poly([pt(rIn, a0, 0), pt(rOut, a0, 0), pt(rOut, a0, h), pt(rIn, a0, h)],
+      [-Math.cos(a0), 0, Math.sin(a0)], c, { row: R, st, edge: true });
+    if (j == N - 1) poly([pt(rIn, a1, 0), pt(rOut, a1, 0), pt(rOut, a1, h), pt(rIn, a1, h)],
+      [Math.cos(a1), 0, -Math.sin(a1)], c, { row: R, st, edge: true });
+  }
+}
+
+let r = 10.8, h = 0;
+for (let i = 0; i < 34; i++) { h += .4; row(r, .85, h, .4, 6, i ? [214, 198, 166] : [240, 230, 208]); r += .85; }
+row(r, 4, h, 0, 0, [206, 191, 161]); r += 4;
+for (let i = 0; i < 21; i++) { const rs = i ? .52 : 1; h += rs; row(r, .8, h, rs, 3, [203, 188, 159]); r += .8; }
+const CAV_OUT = r;
+for (let j = 0; j < N; j++) {
+  const a0 = -HALF + j * DA, a1 = a0 + DA, am = a0 + DA / 2;
+  poly([pt(r, a0, 0), pt(r, a1, 0), pt(r, a1, h), pt(r, a0, h)], [Math.sin(am), 0, Math.cos(am)], [190, 176, 148]);
+}
+
+/* ---------- Skene & proskenion ---------- */
+const STONE = [222, 208, 178], DARK = [60, 52, 44];
+box(-14, 0, -22, 14, 4.6, -15, [210, 196, 166], 4);
+box(-12.5, 4.6, -21, 12.5, 8.6, -16.5, [218, 204, 174], 4);
+box(-13, 0, -15, 13, .4, -12.6, STONE, 4);
+box(-13.4, 4, -13.7, 13.4, 4.7, -12.7, [232, 220, 192], 4);
+box(-13, 4.6, -15, 13, 4.8, -13.7, [200, 186, 156], 4);
+for (let i = 0; i < 12; i++) box(-12.8 + i * 2.33, .4, -13.5, -12.3 + i * 2.33, 4, -13, [236, 226, 200]);
+for (const x of [-7, 0, 7]) {
+  poly([[x - 1.1, 5.2, -16.49], [x + 1.1, 5.2, -16.49], [x + 1.1, 7.6, -16.49], [x - 1.1, 7.6, -16.49]], [0, 0, 1], DARK, { bias: 8 });
+  poly([[x - 1.2, .4, -14.99], [x + 1.2, .4, -14.99], [x + 1.2, 4.1, -14.99], [x - 1.2, 4.1, -14.99]], [0, 0, 1], DARK, { bias: 8 });
+}
+box(-15.5, 0, -22, -13.6, 5, -6, [200, 186, 156]);
+box(13.6, 0, -22, 15.5, 5, -6, [200, 186, 156]);
+box(-.9, 0, -.9, .9, .45, .9, [190, 180, 160]);
+
+/* ---------- Hills ---------- */
+const hh = a => 10 + 20 * (1 + Math.cos(a)) / 2 + 6 * Math.sin(5 * a + 1) + 4 * Math.sin(11 * a + 2);
+function hills(R, k, base) {
+  const n = 90;
+  for (let i = 0; i < n; i++) {
+    const a0 = i / n * TAU, a1 = (i + 1) / n * TAU, t = .88 + .2 * Math.sin(i * .7) * Math.cos(i * .23);
+    const col = `rgb(${base[0] * t | 0},${base[1] * t | 0},${base[2] * t | 0})`;
+    poly([pt(R + 28, a0, -1), pt(R + 28, a1, -1), pt(R, a1, hh(a1) * k), pt(R, a0, hh(a0) * k)], [0, 1, 0], col, { raw: 1, two: 1, bias: 400 });
+  }
+}
+
+/* ---------- Ground patches & trees ---------- */
+const PATCHES = [], PCOL = ['rgba(120,120,70,.35)', 'rgba(190,165,105,.3)', 'rgba(90,105,60,.3)', 'rgba(170,140,95,.25)'];
+for (let i = 0; i < 60; i++) {
+  const a = rnd() * TAU, d = 12 + rnd() * 110, rad = 6 + rnd() * 18, cx = d * Math.sin(a), cz = d * Math.cos(a);
+  PATCHES.push({
+    col: PCOL[i % 4],
+    pts: Array.from({ length: 14 }, (_, k) => { const q = k / 14 * TAU, e = rad * (1 + .3 * (rnd() - .5)); return [cx + e * Math.cos(q), .005, cz + e * Math.sin(q) * .7]; })
+  });
+}
+for (let i = 0; i < 0; i++) {
+  let a = rnd() * TAU; const rr = 30 + rnd() * 82, cyp = rnd() < .6, hgt = cyp ? 7 + rnd() * 5 : 3 + rnd() * 1.5;
+  const an = a > Math.PI ? a - TAU : a, x = rr * Math.sin(a), z = rr * Math.cos(a);
+  if (Math.abs(an) < HALF + .25 && rr < CAV_OUT + 5) continue;
+  if (Math.abs(x) < 22 && z < 16 && z > -32) continue;
+  const tt = .85 + rnd() * .3, k = hgt / LIGHT[1], ox = -LIGHT[0] * k, oz = -LIGHT[2] * k, l = Math.hypot(ox, oz), nx = -oz / l, nz = ox / l;
+  let sh;
+  if (cyp) {
+    sh = [[x - nx * .9, .01, z - nz * .9], [x + nx * .9, .01, z + nz * .9], [x + ox * .8, .01, z + oz * .8]];
+  } else {
+    const cx = x + ox * .5, cz = z + oz * .5;
+    sh = Array.from({ length: 10 }, (_, q) => { const b = q / 10 * TAU; return [cx + 3 * Math.cos(b), .01, cz + 3 * Math.sin(b)]; });
+  }
+  TREES.push({ x, z, h: hgt, cyp, sh,
+    c: cyp ? `rgb(${38 * tt | 0},${72 * tt | 0},${40 * tt | 0})` : `rgb(${110 * tt | 0},${128 * tt | 0},${84 * tt | 0})` });
+}
+
+/* ---------- Checkerboard ground ---------- */
+const TILE = 12, CK = [];
+const MLIGHT = [[242, 239, 233], [233, 229, 220], [224, 219, 208], [238, 232, 222], [228, 230, 229]];
+const MDARK = [[44, 48, 50], [58, 62, 62], [72, 80, 76], [34, 38, 42], [64, 58, 56]];
+for (let i = -17; i < 17; i++) for (let j = -17; j < 17; j++) {
+  const cx = (i + .5) * TILE, cz = (j + .5) * TILE, d = Math.hypot(cx, cz);
+  if (d > 200) continue;
+  const dark = !((i + j) & 1), base = (dark ? MDARK : MLIGHT)[rnd() * 5 | 0], k = .94 + rnd() * .12;
+  const x0 = i * TILE, z0 = j * TILE, veins = [];
+  for (let v = 0; v > 0; v--) {
+    const horiz = rnd() < .5, t0 = rnd() * TILE, t1 = rnd() * TILE;
+    const p0 = horiz ? [x0 + t0, z0] : [x0, z0 + t0], p1 = horiz ? [x0 + t1, z0 + TILE] : [x0 + TILE, z0 + t1];
+    const dx = p1[0] - p0[0], dz = p1[1] - p0[1], l = Math.hypot(dx, dz), nx = -dz / l, nz = dx / l;
+    const off = (rnd() - .5) * 3, w = .12 + rnd() * .12;
+    const mx = (p0[0] + p1[0]) / 2 + nx * off, mz = (p0[1] + p1[1]) / 2 + nz * off;
+    veins.push([[p0[0], .01, p0[1]], [mx + nx * w, .01, mz + nz * w], [p1[0], .01, p1[1]], [mx - nx * w, .01, mz - nz * w]]);
+  }
+  CK.push({
+    pts: [[x0, 0, z0], [x0 + TILE, 0, z0], [x0 + TILE, 0, z0 + TILE], [x0, 0, z0 + TILE]],
+    col: `rgb(${base[0] * k | 0},${base[1] * k | 0},${base[2] * k | 0})`, veins,
+    vcol: dark ? 'rgba(225,225,220,.32)' : 'rgba(110,116,122,.42)'
+  });
+}
+
+/* Black halo under the theatre so the white shape reads on white tiles */
+const HALO = [];
+{
+  const n = 72, ro = CAV_OUT + 1.3, a0 = -HALF - .03, sp = SPAN + .06, pts = [];
+  for (let i = 0; i <= n; i++) pts.push(pt(ro, a0 + i / n * sp, 0));
+  for (let i = n; i >= 0; i--) pts.push(pt(10.8, a0 + i / n * sp, 0));
+  HALO.push(pts,
+    [[-16.5, 0, -23.5], [16.5, 0, -23.5], [16.5, 0, -11.4], [-16.5, 0, -11.4]],
+    [[-16.5, 0, -11.4], [-12.7, 0, -11.4], [-12.7, 0, -4.5], [-16.5, 0, -4.5]],
+    [[12.7, 0, -11.4], [16.5, 0, -11.4], [16.5, 0, -4.5], [12.7, 0, -4.5]]);
+}
+
+/* ---------- Flat typed arrays (hot loop) ---------- */
+const NP = P.length, NT = TREES.length, NI = NP + NT;
+const PV = new Float32Array(NP * 12), PN = new Float32Array(NP * 3), PC = new Float32Array(NP * 3);
+const PB = new Float32Array(NP), P2 = new Uint8Array(NP), PR = new Int16Array(NP), PA = new Float32Array(NP);
+const PL = new Float32Array(NP), PJ = new Float32Array(NP), PS = new Uint8Array(NP), PE = new Uint8Array(NP), PQ = new Uint8Array(NP), COL = new Array(NP);
+/* Light radial gradient on the theatre: 16 steps from the orchestra outwards */
+const NQ = 16, GW = [], GB = [];
+for (let q = 0; q < NQ; q++) {
+  const t = q / (NQ - 1);
+  GW.push(`rgb(${255 - 50 * t | 0},${255 - 47 * t | 0},${255 - 40 * t | 0})`);
+  GB.push(`rgb(${50 * t | 0},${52 * t | 0},${58 * t | 0})`);
+}
+P.forEach((p, i) => {
+  p.v.forEach((v, k) => PV.set(v, i * 12 + k * 3));
+  PN.set(p.n, i * 3); PC.set([p.x, p.y, p.z], i * 3);
+  PB[i] = p.bias; P2[i] = p.two; PR[i] = p.row; PA[i] = Math.atan2(p.x, p.z);
+  PL[i] = p.l; PJ[i] = p.j; PS[i] = p.st; PE[i] = p.edge;
+  const q = PQ[i] = Math.min(NQ - 1, Math.hypot(p.x, p.z) / 62 * (NQ - 1) | 0);
+  COL[i] = p.col === '#fff' ? GW[q] : p.col === '#000' ? GB[q] : p.col;
+});
+const VIS = new Int32Array(NI), QK = new Int32Array(NI), ORD = new Int32Array(NI);
+const NB = 8192, CNT = new Int32Array(NB), OFF = 450, SC = 8;
+const PX = new Float64Array(4), PY = new Float64Array(4);
+
+/* ---------- Camera ---------- */
+let yaw = Math.PI, pitch = 1.25, dist = 140;
+const TG = [0, 0, 18];
+let pos, fw, rt, up;
+
+function setCamera() {
+  const cp = Math.cos(pitch);
+  pos = [TG[0] + dist * cp * Math.sin(yaw), TG[1] + dist * Math.sin(pitch), TG[2] + dist * cp * Math.cos(yaw)];
+  fw = TG.map((v, i) => v - pos[i]);
+  const l = Math.hypot(...fw); fw = fw.map(v => v / l);
+  rt = [-fw[2], 0, fw[0]];
+  const m = Math.hypot(rt[0], rt[2]); rt = [rt[0] / m, 0, rt[2] / m];
+  up = [rt[1] * fw[2] - rt[2] * fw[1], rt[2] * fw[0] - rt[0] * fw[2], rt[0] * fw[1] - rt[1] * fw[0]];
+}
+
+const proj3 = (x, y, z, o) => {
+  const dx = x - pos[0], dy = y - pos[1], dz = z - pos[2];
+  o[0] = dx * rt[0] + dz * rt[2]; o[1] = dx * up[0] + dy * up[1] + dz * up[2]; o[2] = dx * fw[0] + dy * fw[1] + dz * fw[2];
+  return o;
+};
+const B3 = [0, 0, 0], T3 = [0, 0, 0];
+
+let GRc = 1, GRs = 0;
+const GS = new Float64Array(3 * 400);
+function ground(pts, col, clip) {
+  const n = pts.length; let zmin = 1e9;
+  for (let i = 0; i < n; i++) {
+    const p = pts[i], dx = p[0] * GRc - p[2] * GRs - pos[0], dy = p[1] - pos[1], dz = p[2] * GRc + p[0] * GRs - pos[2], z = dx * fw[0] + dy * fw[1] + dz * fw[2];
+    GS[3 * i] = dx * rt[0] + dz * rt[2]; GS[3 * i + 1] = dx * up[0] + dy * up[1] + dz * up[2]; GS[3 * i + 2] = z;
+    if (z < zmin) zmin = z;
+  }
+  ctx.fillStyle = col; ctx.beginPath();
+  if (zmin >= NEAR) {
+    ctx.moveTo(H + F * GS[0] / GS[2], H - F * GS[1] / GS[2]);
+    for (let i = 1; i < n; i++) ctx.lineTo(H + F * GS[3 * i] / GS[3 * i + 2], H - F * GS[3 * i + 1] / GS[3 * i + 2]);
+  } else {
+    const o = [];
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n, az = GS[3 * i + 2], bz = GS[3 * j + 2], ai = az >= NEAR, bi = bz >= NEAR;
+      if (ai) o.push(GS[3 * i], GS[3 * i + 1], az);
+      if (ai != bi) { const t = (NEAR - az) / (bz - az); o.push(GS[3 * i] + t * (GS[3 * j] - GS[3 * i]), GS[3 * i + 1] + t * (GS[3 * j + 1] - GS[3 * i + 1]), NEAR); }
+    }
+    if (o.length < 9) return;
+    ctx.moveTo(H + F * o[0] / o[2], H - F * o[1] / o[2]);
+    for (let i = 3; i < o.length; i += 3) ctx.lineTo(H + F * o[i] / o[i + 2], H - F * o[i + 1] / o[i + 2]);
+  }
+  clip ? ctx.clip() : ctx.fill();
+}
+const circle =(rad, y, n = 80) => Array.from({ length: n }, (_, i) => pt(rad, i / n * TAU, y));
+const C190 = circle(190, 0), C108 = circle(10.8, .01), C10 = circle(10, .02);
+
+function drawTree(t) {
+  const b = proj3(t.x, 0, t.z, B3), tp = proj3(t.x, t.h, t.z, T3);
+  if (b[2] < 3 || tp[2] < 3) return;
+  const sb = F / b[2], bx = H + sb * b[0], by = H - sb * b[1];
+  const st = F / tp[2], tx = H + st * tp[0], ty = H - st * tp[1];
+  ctx.fillStyle = t.c; ctx.beginPath();
+  if (t.cyp) {
+    const dx = tx - bx, dy = ty - by;
+    ctx.ellipse((bx + tx) / 2, (by + ty) / 2, Math.max(Math.hypot(dx, dy) / 2, 1.1 * sb), 1.1 * sb, Math.atan2(dy, dx), 0, TAU); ctx.fill();
+  } else {
+    ctx.ellipse(tx, ty, 3 * st, 3 * st * (.6 + .4 * Math.sin(pitch)), 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = 'rgba(190,200,130,.45)'; ctx.beginPath();
+    ctx.ellipse(tx - .6 * st, ty - .6 * st, 1.8 * st, 1.5 * st, 0, 0, TAU); ctx.fill();
+  }
+}
+
+function spiral(rot, off, col) {
+  const n = 140, T = TAU * 3.5, w = .85, o = [], i2 = [];
+  for (let i = 0; i <= n; i++) {
+    const th = i / n * T, r = 9.4 * th / T, a = th + rot + off;
+    o.push(pt(r + w, a, .03)); i2.push(pt(Math.max(0, r - w), a, .03));
+  }
+  ground(o.concat(i2.reverse()), col);
+}
+
+/* Odd rows: hard black/white wave; stairs inverted. Even rows keep toon shading. */
+function rowColor(i, t) {
+  if (!(PR[i] & 1)) return COL[i];
+  return (Math.sin(PR[i] * .45 - t * 1.6 + PA[i] * 2) > 0) !== !!PS[i] ? GW[PQ[i]] : GB[PQ[i]];
+}
+
+const sky = ctx.createLinearGradient(0, 0, 0, S);
+sky.addColorStop(0, '#6fa8dc'); sky.addColorStop(.5, '#dbe9f3'); sky.addColorStop(1, '#f2ede0');
+const vig = ctx.createRadialGradient(H, H, S * .2, H, H, S * .72);
+vig.addColorStop(0, 'rgba(0,0,0,0)'); vig.addColorStop(.6, 'rgba(0,0,0,.3)'); vig.addColorStop(1, 'rgba(0,0,0,.85)');
+
+function frame() {
+  const time = performance.now() / 1000;
+  const th = time * .25;
+  yaw = Math.PI + .7 * Math.sin(time * .12) - th;
+  pitch = 1.08 + .22 * Math.sin(time * .35);
+  dist = 175 + 8 * Math.sin(time * .09);
+  setCamera();
+
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, S, S);
+  ctx.save();
+  ground(C190, null, true);
+  ctx.fillStyle = '#777'; ctx.fillRect(0, 0, S, S);
+  GRc = Math.cos(th); GRs = Math.sin(th);
+  for (const q of CK) { ground(q.pts, q.col); for (const v of q.veins) ground(v, q.vcol); }
+  GRc = 1; GRs = 0;
+  ctx.restore();
+  for (const q of HALO) ground(q, '#000');
+  ground(C108, '#000');
+  ground(C10, '#fff');
+  spiral(time * .5, 0, '#000');
+
+  /* cull + bucket depth keys (far to near, horizontal distance) */
+  const px = pos[0], py = pos[1], pz = pos[2], f0 = fw[0], f1 = fw[1], f2 = fw[2];
+  const r0 = rt[0], r2 = rt[2], u0 = up[0], u1 = up[1], u2 = up[2];
+  let nv = 0;
+  for (let i = 0; i < NP; i++) {
+    const i3 = i * 3, cx = PC[i3] - px, cy = PC[i3 + 1] - py, cz = PC[i3 + 2] - pz;
+    if (!P2[i] && PN[i3] * cx + PN[i3 + 1] * cy + PN[i3 + 2] * cz >= 0) continue;
+    if (cx * f0 + cy * f1 + cz * f2 < NEAR) continue;
+    const q = ((Math.sqrt(cx * cx + cz * cz) - PB[i] + OFF) * SC) | 0;
+    VIS[nv] = i; QK[nv++] = q < 0 ? 0 : q >= NB ? NB - 1 : q;
+  }
+  for (let i = 0; i < NT; i++) {
+    const t = TREES[i], cx = t.x - px, cz = t.z - pz, q = ((Math.sqrt(cx * cx + cz * cz) + OFF) * SC) | 0;
+    VIS[nv] = NP + i; QK[nv++] = q < 0 ? 0 : q >= NB ? NB - 1 : q;
+  }
+  CNT.fill(0);
+  for (let j = 0; j < nv; j++) CNT[QK[j]]++;
+  for (let b = NB - 1, run = 0; b >= 0; b--) { const c = CNT[b]; CNT[b] = run; run += c; }
+  for (let j = 0; j < nv; j++) ORD[CNT[QK[j]]++] = VIS[j];
+
+  ctx.lineWidth = 1.6; ctx.lineJoin = 'round'; ctx.strokeStyle = '#000';
+  let last = '';
+  for (let n = 0; n < nv; n++) {
+    const i = ORD[n];
+    if (i >= NP) { drawTree(TREES[i - NP]); last = ''; continue; }
+    const b = i * 12;
+    let ok = true;
+    for (let k = 0; k < 4; k++) {
+      const dx = PV[b + 3 * k] - px, dy = PV[b + 3 * k + 1] - py, dz = PV[b + 3 * k + 2] - pz;
+      const z = dx * f0 + dy * f1 + dz * f2;
+      if (z < NEAR) { ok = false; break; }
+      const s = F / z;
+      PX[k] = H + s * (dx * r0 + dz * r2); PY[k] = H - s * (dx * u0 + dy * u1 + dz * u2);
+    }
+    if (!ok) continue;
+    if ((PX[0] < 0 && PX[1] < 0 && PX[2] < 0 && PX[3] < 0) || (PX[0] > S && PX[1] > S && PX[2] > S && PX[3] > S) ||
+        (PY[0] < 0 && PY[1] < 0 && PY[2] < 0 && PY[3] < 0) || (PY[0] > S && PY[1] > S && PY[2] > S && PY[3] > S)) continue;
+    const col = PR[i] >= 0 ? rowColor(i, time) : COL[i];
+    if (col !== last) { ctx.fillStyle = col; last = col; }
+    ctx.beginPath(); ctx.moveTo(PX[0], PY[0]); ctx.lineTo(PX[1], PY[1]); ctx.lineTo(PX[2], PY[2]); ctx.lineTo(PX[3], PY[3]);
+    ctx.closePath(); ctx.fill();
+    if (PR[i] < 0 || PE[i]) ctx.stroke();
+  }
+
+
+  ctx.fillStyle = vig; ctx.fillRect(0, 0, S, S);
+  requestAnimationFrame(frame);
+}
+
+frame();
+</script>
+</html>

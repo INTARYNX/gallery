@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; height: 100%; display: flex; align-items: center; justify-content: center; }
+  #wrap { width: min(100vw, 100vh); height: min(100vw, 100vh); position: relative; }
+  canvas { display: block; width: 100%; height: 100%; background: #000; }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c"></canvas></div>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d', { alpha: false });
+
+// offscreen buffer for smoke (transparent so we can use its alpha as a mask)
+const smokeCanvas = document.createElement('canvas');
+const sctx = smokeCanvas.getContext('2d');
+
+// offscreen buffer for glyphs so we can mask them with the smoke
+const glyphCanvas = document.createElement('canvas');
+const gctx = glyphCanvas.getContext('2d');
+
+// offscreen accumulation buffer (black-backed) so the tiled wall stays behind the steam
+const fxCanvas = document.createElement('canvas');
+const fctx = fxCanvas.getContext('2d', { alpha: false });
+
+// static vintage kitchen tiling, rebuilt on resize
+const tileCanvas = document.createElement('canvas');
+const tctx = tileCanvas.getContext('2d');
+const OVERSCAN = 30;
+
+let W, H, sourceX, sourceY;
+function resize() {
+  const wrap = document.getElementById('wrap');
+  const size = wrap.clientWidth;
+  W = canvas.width = size;
+  H = canvas.height = size;
+  smokeCanvas.width = size;
+  smokeCanvas.height = size;
+  glyphCanvas.width = size;
+  glyphCanvas.height = size;
+  fxCanvas.width = size;
+  fxCanvas.height = size;
+  tileCanvas.width = size + OVERSCAN * 2;
+  tileCanvas.height = size + OVERSCAN * 2;
+  sourceX = W * 0.5;
+  sourceY = H * 0.85;
+  buildTiles();
+}
+resize();
+window.addEventListener('resize', resize);
+
+// Simplex-ish noise (value noise with smoothing) — fast and good enough for curl
+const PERM = new Uint8Array(512);
+(() => {
+  const p = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) p[i] = i;
+  for (let i = 255; i > 0; i--) {
+    const j = (Math.random() * (i + 1)) | 0;
+    [p[i], p[j]] = [p[j], p[i]];
+  }
+  for (let i = 0; i < 512; i++) PERM[i] = p[i & 255];
+})();
+
+function fade(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function grad(h, x, y) {
+  const g = h & 7;
+  const u = g < 4 ? x : y;
+  const v = g < 4 ? y : x;
+  return ((g & 1) ? -u : u) + ((g & 2) ? -2 * v : 2 * v);
+}
+function noise2D(x, y) {
+  const X = Math.floor(x) & 255, Y = Math.floor(y) & 255;
+  x -= Math.floor(x); y -= Math.floor(y);
+  const u = fade(x), v = fade(y);
+  const A = PERM[X] + Y, B = PERM[X + 1] + Y;
+  return lerp(
+    lerp(grad(PERM[A], x, y), grad(PERM[B], x - 1, y), u),
+    lerp(grad(PERM[A + 1], x, y - 1), grad(PERM[B + 1], x - 1, y - 1), u),
+    v
+  );
+}
+
+// Curl noise — divergence-free flow field
+function curl(x, y, t) {
+  const eps = 0.6;
+  const n1 = noise2D(x, y + eps + t);
+  const n2 = noise2D(x, y - eps + t);
+  const n3 = noise2D(x + eps, y + t);
+  const n4 = noise2D(x - eps, y + t);
+  return { x: (n1 - n2) / (2 * eps), y: -(n3 - n4) / (2 * eps) };
+}
+
+class Particle {
+  constructor() { this.reset(true); }
+  reset(initial) {
+    // steam rises off the whole mouth of the pot, not a single point
+    const spread = W * 0.16;
+    const u = Math.random() * 2 - 1;
+    this.x = sourceX + u * spread * 0.5;
+    this.y = sourceY + (Math.random() - 0.5) * 4 + Math.abs(u) * 6;
+    this.vx = (Math.random() - 0.5) * 0.05;
+    this.vy = -0.25 - Math.random() * 0.25;
+    this.life = 0;
+    this.maxLife = 260 + Math.random() * 220;
+    this.size = 8 + Math.random() * 16;
+    this.growth = 0.12 + Math.random() * 0.12;
+    this.rot = Math.random() * Math.PI * 2;
+    this.rotSpeed = (Math.random() - 0.5) * 0.01;
+    this.seed = Math.random() * 1000;
+    this.hueOffset = Math.random() * 360;
+    if (initial) this.life = Math.random() * this.maxLife * 0.5;
+  }
+  update(t) {
+    const ageRatio = this.life / this.maxLife;
+    // curl-noise field — scale & time evolve
+    const nScale = 0.0035;
+    const c = curl(this.x * nScale + this.seed, this.y * nScale, t * 0.025);
+    const turbulence = 0.25 + ageRatio * 0.75;
+    this.vx += c.x * turbulence * 0.22;
+    this.vy += c.y * turbulence * 0.18;
+    // buoyancy — hot vapour shoots up, then cools and loses lift
+    this.vy -= 0.05 * (1 - ageRatio) * (1 - ageRatio);
+    // damping
+    this.vx *= 0.985;
+    this.vy *= 0.985;
+    // horizontal drift narrowing near source (simulates the column shape)
+    const distFromSource = this.y - sourceY;
+    if (distFromSource > -50 && distFromSource < 0) {
+      this.vx *= 0.7;
+    }
+    this.x += this.vx;
+    this.y += this.vy;
+    this.size += this.growth;
+    this.rot += this.rotSpeed;
+    this.life++;
+  }
+  draw(ctx, t) {
+    const ageRatio = this.life / this.maxLife;
+    if (ageRatio >= 1) return;
+    // alpha curve — fade in fast, fade out slow
+    let alpha;
+    if (ageRatio < 0.08) alpha = ageRatio / 0.08;
+    else alpha = Math.pow(1 - (ageRatio - 0.08) / 0.92, 1.6);
+    alpha *= 0.055;
+    // Cooking-steam palette — warm white vapour, faint semolina tint at the base
+    const hue = 34 + Math.sin(t * 0.003) * 8;
+    const hue2 = hue + 8;
+    const sat = 18 - ageRatio * 12;
+    const light = 88 - ageRatio * 18;
+    const grad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.size);
+    grad.addColorStop(0, `hsla(${hue}, ${sat}%, ${light}%, ${alpha})`);
+    grad.addColorStop(0.5, `hsla(${hue2}, ${sat}%, ${light - 10}%, ${alpha * 0.6})`);
+    grad.addColorStop(1, `hsla(${hue}, ${sat}%, ${light}%, 0)`);
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+const particles = [];
+const MAX_PARTICLES = 600;
+for (let i = 0; i < MAX_PARTICLES; i++) particles.push(new Particle());
+
+// ---- Generative Pastafarian iconography (His Noodly Appendage) ----
+// Vocabulary: the Flying Spaghetti Monster Himself (two meatballs, two eyestalks,
+// dangling noodly appendages), the Holy Colander, spaghetti nests, noodle bursts.
+// Everything is wavy — no straight lines, boiled al dente.
+function makeTribal() {
+  const choice = (Math.random() * 5) | 0;
+
+  // helper — log spiral from center, returns end point
+  const drawSpiral = (ctx, cx, cy, startR, growth, turns, dir) => {
+    ctx.beginPath();
+    let r = startR;
+    let a = 0;
+    ctx.moveTo(cx + r, cy);
+    const step = 0.15;
+    const total = Math.PI * 2 * turns;
+    for (a = 0; a <= total; a += step) {
+      r = startR + a * growth;
+      const sa = dir * a;
+      ctx.lineTo(cx + Math.cos(sa) * r, cy + Math.sin(sa) * r);
+    }
+    ctx.stroke();
+    return { x: cx + Math.cos(dir * a) * r, y: cy + Math.sin(dir * a) * r };
+  };
+
+  // helper — a strand of spaghetti waving from A to B
+  const drawNoodle = (ctx, x1, y1, x2, y2, amp, waves, phase) => {
+    const dx = x2 - x1, dy = y2 - y1;
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = -dy / len, ny = dx / len;
+    const steps = 44;
+    ctx.beginPath();
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const w = Math.sin(t * Math.PI * waves + phase) * amp * Math.sin(t * Math.PI);
+      const px = x1 + dx * t + nx * w;
+      const py = y1 + dy * t + ny * w;
+      if (i) ctx.lineTo(px, py); else ctx.moveTo(px, py);
+    }
+    ctx.stroke();
+  };
+
+  // helper — a meatball: filled sphere with a couple of scorch arcs
+  const drawMeatball = (ctx, cx, cy, r) => {
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(cx - r * 0.25, cy - r * 0.2, r * 0.45, 0.6, 2.6);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx + r * 0.2, cy + r * 0.15, r * 0.3, 3.4, 5.4);
+    ctx.stroke();
+  };
+
+  // ---- Variant 1: His Noodliness — meatballs, eyestalks, noodly appendages ----
+  if (choice === 0) {
+    const stalkFlip = Math.random() < 0.5 ? 1 : -1;
+    const legs = 4 + ((Math.random() * 3) | 0);
+    const phase = Math.random() * Math.PI * 2;
+    return (ctx) => {
+      // eyestalks
+      for (let s = -1; s <= 1; s += 2) {
+        const bx = 0.16 * s, by = -0.12;
+        const ex = 0.34 * s + 0.04 * stalkFlip, ey = -0.78;
+        ctx.beginPath();
+        ctx.moveTo(bx, by);
+        ctx.bezierCurveTo(bx + 0.05 * s, by - 0.3, ex - 0.16 * s, ey + 0.25, ex, ey);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(ex, ey - 0.09, 0.11, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(ex + 0.02 * s, ey - 0.09, 0.045, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // the two holy meatballs
+      drawMeatball(ctx, -0.28, 0.02, 0.24);
+      drawMeatball(ctx, 0.28, 0.02, 0.24);
+      // noodle mass binding them
+      for (let i = 0; i < 3; i++) {
+        drawNoodle(ctx, -0.5, -0.05 + i * 0.09, 0.5, -0.02 + i * 0.09, 0.1, 3, phase + i);
+      }
+      // noodly appendages
+      for (let i = 0; i < legs; i++) {
+        const t = legs === 1 ? 0.5 : i / (legs - 1);
+        const x1 = -0.42 + t * 0.84;
+        const x2 = x1 * 1.9 + (Math.random() - 0.5) * 0.1;
+        drawNoodle(ctx, x1, 0.22, x2, 0.95, 0.16, 3.5, phase + i * 1.7);
+      }
+    };
+  }
+
+  // ---- Variant 2: a single noodly appendage, curling at the tip ----
+  if (choice === 1) {
+    const flip = Math.random() < 0.5 ? 1 : -1;
+    const phase = Math.random() * Math.PI * 2;
+    const extra = Math.random() < 0.6;
+    return (ctx) => {
+      drawNoodle(ctx, -0.95, 0.45 * flip, 0.75, -0.35 * flip, 0.34, 3, phase);
+      drawSpiral(ctx, 0.75, -0.35 * flip, 0.02, 0.045, 1.6, flip);
+      if (extra) {
+        drawNoodle(ctx, -0.8, 0.62 * flip, 0.5, 0.1 * flip, 0.22, 4, phase + 2);
+        drawSpiral(ctx, 0.5, 0.1 * flip, 0.015, 0.03, 1.2, -flip);
+      }
+      // stray meatball riding the noodle
+      drawMeatball(ctx, -0.15, 0.08 * flip, 0.14);
+    };
+  }
+
+  // ---- Variant 3: spaghetti nest crowned with a meatball ----
+  if (choice === 2) {
+    const rings = 3 + ((Math.random() * 3) | 0);
+    const wob = 0.05 + Math.random() * 0.05;
+    const lobes = 5 + ((Math.random() * 4) | 0);
+    const phase = Math.random() * Math.PI * 2;
+    return (ctx) => {
+      for (let k = 0; k < rings; k++) {
+        const base = 0.35 + k * 0.16;
+        ctx.beginPath();
+        for (let i = 0; i <= 90; i++) {
+          const a = (i / 90) * Math.PI * 2;
+          const r = base + Math.sin(a * lobes + phase + k) * wob;
+          const x = Math.cos(a) * r, y = Math.sin(a) * r * 0.9;
+          if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+        }
+        ctx.stroke();
+      }
+      drawMeatball(ctx, 0, -0.05, 0.2);
+      // steam curls off the nest
+      for (let s = -1; s <= 1; s += 2) {
+        drawNoodle(ctx, 0.3 * s, -0.3, 0.5 * s, -0.9, 0.12, 3, phase);
+      }
+    };
+  }
+
+  // ---- Variant 4: the Holy Colander ----
+  if (choice === 3) {
+    const holes = 9 + ((Math.random() * 5) | 0);
+    const hasSteam = Math.random() < 0.7;
+    return (ctx) => {
+      // dome
+      ctx.beginPath();
+      ctx.arc(0, 0.1, 0.78, Math.PI, 0);
+      ctx.stroke();
+      // rim
+      ctx.beginPath();
+      ctx.moveTo(-0.88, 0.1);
+      ctx.bezierCurveTo(-0.4, 0.3, 0.4, 0.3, 0.88, 0.1);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(-0.88, 0.1);
+      ctx.lineTo(-0.78, 0.1);
+      ctx.moveTo(0.78, 0.1);
+      ctx.lineTo(0.88, 0.1);
+      ctx.stroke();
+      // handles
+      for (let s = -1; s <= 1; s += 2) {
+        ctx.beginPath();
+        ctx.moveTo(0.86 * s, 0.08);
+        ctx.bezierCurveTo(1.1 * s, 0.0, 1.1 * s, -0.2, 0.9 * s, -0.22);
+        ctx.stroke();
+      }
+      // perforations
+      for (let i = 0; i < holes; i++) {
+        const a = Math.PI + Math.PI * ((i + 0.5) / holes);
+        for (let ring = 0; ring < 2; ring++) {
+          const r = 0.34 + ring * 0.3;
+          ctx.beginPath();
+          ctx.arc(Math.cos(a) * r, 0.1 + Math.sin(a) * r, 0.03, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      // noodles escaping through the holes
+      if (hasSteam) {
+        for (let s = -1; s <= 1; s += 2) {
+          drawNoodle(ctx, 0.25 * s, -0.5, 0.45 * s, -1.0, 0.1, 3, s);
+        }
+      }
+    };
+  }
+
+  // ---- Variant 5: pasta burst — radiating strands from a meatball core ----
+  {
+    const strands = 6 + ((Math.random() * 5) | 0);
+    const dir = Math.random() < 0.5 ? 1 : -1;
+    const phase = Math.random() * Math.PI * 2;
+    const hasHalo = Math.random() < 0.6;
+    return (ctx) => {
+      for (let i = 0; i < strands; i++) {
+        const a = (i / strands) * Math.PI * 2;
+        ctx.save();
+        ctx.rotate(a);
+        drawNoodle(ctx, 0.2, 0, 0.92, 0, 0.16 * dir, 2.5, phase + i);
+        drawSpiral(ctx, 0.92, 0, 0.014, 0.024, 1.0, dir);
+        ctx.restore();
+      }
+      drawMeatball(ctx, 0, 0, 0.18);
+      if (hasHalo) {
+        ctx.beginPath();
+        for (let i = 0; i <= 90; i++) {
+          const a = (i / 90) * Math.PI * 2;
+          const r = 0.62 + Math.sin(a * 7 + phase) * 0.04;
+          const x = Math.cos(a) * r, y = Math.sin(a) * r;
+          if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+        }
+        ctx.stroke();
+      }
+    };
+  }
+}
+
+class Glyph {
+  constructor() { this.reset(true); }
+  reset(initial) {
+    this.shape = makeTribal();
+    this.x = sourceX + (Math.random() - 0.5) * W * 0.25;
+    this.y = sourceY - 60 - Math.random() * (H * 0.55);
+    this.size = 18 + Math.random() * 30;
+    this.rot = (Math.random() - 0.5) * 0.6;
+    this.life = 0;
+    this.maxLife = 380 + Math.random() * 320;
+    this.vy = -0.06 - Math.random() * 0.08;
+    this.vx = (Math.random() - 0.5) * 0.04;
+    this.seed = Math.random() * 1000;
+    this.hueOffset = Math.random() * 360;
+    if (initial) this.life = Math.random() * this.maxLife;
+  }
+  update() {
+    this.x += this.vx;
+    this.y += this.vy;
+    this.rot += 0.003;
+    this.life++;
+  }
+  draw(ctx, t) {
+    const tr = this.life / this.maxLife;
+    if (tr >= 1) return;
+    // smooth fade in & out — peak around middle
+    const alpha = Math.sin(tr * Math.PI) * 0.85;
+    if (alpha <= 0.001) return;
+    // Semolina palette — pale durum wheat / parmesan, warm against the marinara steam
+    const hue = 44 + Math.sin(t * 0.003 + this.seed * 0.001) * 10;
+    // pulsing size — the noodly appendage breathes
+    const pulse = 1 + Math.sin(t * 0.008 + this.seed) * 0.4;
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.rot);
+    ctx.scale(this.size * pulse, this.size * pulse);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    // chalk effect: multiple slightly offset, jittered, semi-transparent strokes — same hue
+    const passes = 4;
+    for (let p = 0; p < passes; p++) {
+      const jitterAlpha = alpha * (0.25 + Math.random() * 0.35);
+      const lightVar = 78 + (Math.random() - 0.5) * 15;
+      ctx.strokeStyle = `hsla(${hue}, 60%, ${lightVar}%, ${jitterAlpha})`;
+      ctx.fillStyle = `hsla(${hue}, 60%, ${lightVar}%, ${jitterAlpha})`;
+      ctx.lineWidth = 0.012 + Math.random() * 0.015;
+      ctx.shadowBlur = 0;
+      ctx.save();
+      // tiny offset per pass for chalky scatter
+      ctx.translate((Math.random() - 0.5) * 0.04, (Math.random() - 0.5) * 0.04);
+      this.shape(ctx);
+      ctx.restore();
+    }
+
+    // sparse semolina dust around the motif — same hue
+    const dustCount = 30;
+    for (let d = 0; d < dustCount; d++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = 0.3 + Math.random() * 0.9;
+      const x = Math.cos(a) * r;
+      const y = Math.sin(a) * r;
+      const dotAlpha = alpha * Math.random() * 0.4;
+      ctx.fillStyle = `hsla(${hue}, 55%, 82%, ${dotAlpha})`;
+      ctx.beginPath();
+      ctx.arc(x, y, 0.008 + Math.random() * 0.018, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
+}
+
+// offscreen buffer for glyphs so we can mask them with the smoke
+const glyphs = [];
+const MAX_GLYPHS = 6;
+for (let i = 0; i < MAX_GLYPHS; i++) glyphs.push(new Glyph());
+
+// ---- Vintage kitchen tiling: crackle-glazed squares, dark grout, a few painted ones ----
+function buildTiles() {
+  const w = tileCanvas.width, h = tileCanvas.height;
+  const cell = Math.max(28, Math.round(W / 8));
+  tctx.setTransform(1, 0, 0, 1, 0, 0);
+  tctx.clearRect(0, 0, w, h);
+
+  // grout
+  tctx.fillStyle = '#171009';
+  tctx.fillRect(0, 0, w, h);
+
+  const gap = Math.max(2, cell * 0.06);
+  const cols = Math.ceil(w / cell), rows = Math.ceil(h / cell);
+
+  for (let j = 0; j < rows; j++) {
+    for (let i = 0; i < cols; i++) {
+      const x = i * cell + gap * 0.5;
+      const y = j * cell + gap * 0.5;
+      const s = cell - gap;
+      const v = (Math.random() - 0.5) * 6;
+      const hue = 36 + (Math.random() - 0.5) * 6;
+      const base = 20 + v;
+
+      const g = tctx.createLinearGradient(x, y, x + s, y + s);
+      g.addColorStop(0, `hsl(${hue}, 22%, ${base + 5}%)`);
+      g.addColorStop(1, `hsl(${hue}, 20%, ${base - 3}%)`);
+      tctx.fillStyle = g;
+      tctx.fillRect(x, y, s, s);
+
+      // glaze highlight along the top-left bevel
+      tctx.strokeStyle = `hsla(${hue}, 30%, ${base + 16}%, 0.5)`;
+      tctx.lineWidth = Math.max(1, s * 0.02);
+      tctx.beginPath();
+      tctx.moveTo(x + s * 0.04, y + s * 0.96);
+      tctx.lineTo(x + s * 0.04, y + s * 0.04);
+      tctx.lineTo(x + s * 0.96, y + s * 0.04);
+      tctx.stroke();
+      // shadow on the bottom-right
+      tctx.strokeStyle = `hsla(20, 30%, 6%, 0.45)`;
+      tctx.beginPath();
+      tctx.moveTo(x + s * 0.96, y + s * 0.05);
+      tctx.lineTo(x + s * 0.96, y + s * 0.96);
+      tctx.lineTo(x + s * 0.05, y + s * 0.96);
+      tctx.stroke();
+
+      // crackle craquelure
+      tctx.strokeStyle = `hsla(${hue}, 25%, ${base + 10}%, 0.25)`;
+      tctx.lineWidth = 1;
+      const cracks = 2 + ((Math.random() * 3) | 0);
+      for (let c = 0; c < cracks; c++) {
+        let px = x + Math.random() * s, py = y + Math.random() * s;
+        tctx.beginPath();
+        tctx.moveTo(px, py);
+        for (let k = 0; k < 3; k++) {
+          px += (Math.random() - 0.5) * s * 0.5;
+          py += (Math.random() - 0.5) * s * 0.5;
+          tctx.lineTo(px, py);
+        }
+        tctx.stroke();
+      }
+
+    }
+  }
+
+  // grease, age and lamplight falloff
+  const vig = tctx.createRadialGradient(w / 2, h * 0.72, w * 0.12, w / 2, h * 0.6, w * 0.72);
+  vig.addColorStop(0, 'rgba(0,0,0,0)');
+  vig.addColorStop(1, 'rgba(0,0,0,0.82)');
+  tctx.fillStyle = vig;
+  tctx.fillRect(0, 0, w, h);
+}
+
+// ---- The worktop the pot stands on ----
+function drawCounter(ctx, t) {
+  const yTop = H * 0.90, yLip = H * 0.972;
+  const depth = yLip - yTop;
+
+  // surface, lit from the pot outwards
+  const g = ctx.createLinearGradient(0, yTop, 0, yLip);
+  g.addColorStop(0, '#0d0906');
+  g.addColorStop(0.25, '#2a1d12');
+  g.addColorStop(1, '#3a2818');
+  ctx.fillStyle = g;
+  ctx.fillRect(-40, yTop, W + 80, depth);
+
+  // lamp pool on the worktop
+  const pool = ctx.createRadialGradient(sourceX, yLip, W * 0.02, sourceX, yLip, W * 0.45);
+  pool.addColorStop(0, 'rgba(255, 205, 130, 0.16)');
+  pool.addColorStop(1, 'rgba(255, 205, 130, 0)');
+  ctx.fillStyle = pool;
+  ctx.fillRect(-40, yTop, W + 80, depth);
+
+  // seam where the worktop meets the tiles
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.75)';
+  ctx.lineWidth = Math.max(2, H * 0.006);
+  ctx.beginPath();
+  ctx.moveTo(-40, yTop);
+  ctx.lineTo(W + 40, yTop);
+  ctx.stroke();
+
+  // worn grain running across the surface
+  for (let i = 0; i < 26; i++) {
+    const y = yTop + depth * (0.12 + Math.random() * 0.85);
+    const x0 = Math.random() * W;
+    const len = W * (0.08 + Math.random() * 0.3);
+    ctx.strokeStyle = `hsla(30, 35%, ${Math.random() < 0.5 ? 30 : 12}%, ${0.06 + Math.random() * 0.1})`;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x0, y);
+    ctx.bezierCurveTo(x0 + len * 0.3, y - 1.5, x0 + len * 0.7, y + 1.5, x0 + len, y);
+    ctx.stroke();
+  }
+
+  // front lip
+  ctx.fillStyle = '#12100c';
+  ctx.fillRect(-40, yLip, W + 80, H - yLip + 40);
+  ctx.strokeStyle = 'hsla(38, 45%, 62%, 0.35)';
+  ctx.lineWidth = Math.max(1, H * 0.0025);
+  ctx.beginPath();
+  ctx.moveTo(-40, yLip);
+  ctx.lineTo(W + 40, yLip);
+  ctx.stroke();
+
+  // pot shadow
+  const potBase = sourceY + H * 0.115;
+  const sh = ctx.createRadialGradient(sourceX, potBase, 0, sourceX, potBase, W * 0.2);
+  sh.addColorStop(0, 'rgba(0, 0, 0, 0.7)');
+  sh.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ctx.save();
+  ctx.translate(sourceX, potBase);
+  ctx.scale(1, 0.26);
+  ctx.translate(-sourceX, -potBase);
+  ctx.fillStyle = sh;
+  ctx.beginPath();
+  ctx.arc(sourceX, potBase, W * 0.2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  // stray dry spaghetti and a dusting of flour
+  ctx.strokeStyle = 'hsla(44, 55%, 72%, 0.5)';
+  ctx.lineWidth = Math.max(1, W * 0.0022);
+  const sticks = [[-0.34, 0.955, -0.22, 0.968], [-0.3, 0.972, -0.16, 0.962], [0.26, 0.958, 0.4, 0.966]];
+  for (const [ax, ay, bx, by] of sticks) {
+    ctx.beginPath();
+    ctx.moveTo(sourceX + ax * W, ay * H);
+    ctx.lineTo(sourceX + bx * W, by * H);
+    ctx.stroke();
+  }
+}
+
+// ---- The pot: source of the steam, drawn in the same chalk hand as the motifs ----
+function drawPot(ctx, t) {
+  const rx = W * 0.115, ry = rx * 0.3;
+  const cx = sourceX, cy = sourceY;
+  const bodyH = H * 0.115, bw = rx * 0.84;
+  const hue = 44;
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  for (let p = 0; p < 3; p++) {
+    const a = 0.45 + Math.random() * 0.3;
+    const l = 80 + (Math.random() - 0.5) * 14;
+    ctx.strokeStyle = `hsla(${hue}, 60%, ${l}%, ${a})`;
+    ctx.fillStyle = `hsla(${hue}, 60%, ${l}%, ${a})`;
+    ctx.lineWidth = Math.max(1, W * 0.003) + Math.random() * 1.2;
+    ctx.save();
+    ctx.translate((Math.random() - 0.5) * 2.2, (Math.random() - 0.5) * 2.2);
+
+    // rim
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // body
+    ctx.beginPath();
+    ctx.moveTo(cx - rx, cy);
+    ctx.bezierCurveTo(cx - rx * 0.99, cy + bodyH * 0.6, cx - bw, cy + bodyH * 0.85, cx - bw * 0.86, cy + bodyH);
+    ctx.quadraticCurveTo(cx, cy + bodyH + ry * 0.9, cx + bw * 0.86, cy + bodyH);
+    ctx.bezierCurveTo(cx + bw, cy + bodyH * 0.85, cx + rx * 0.99, cy + bodyH * 0.6, cx + rx, cy);
+    ctx.stroke();
+
+    // handles
+    for (let s = -1; s <= 1; s += 2) {
+      ctx.beginPath();
+      ctx.moveTo(cx + s * rx * 0.98, cy + bodyH * 0.14);
+      ctx.bezierCurveTo(cx + s * rx * 1.5, cy + bodyH * 0.12, cx + s * rx * 1.5, cy - bodyH * 0.12, cx + s * rx * 1.02, cy - bodyH * 0.08);
+      ctx.stroke();
+    }
+
+    // boiling surface
+    ctx.beginPath();
+    for (let i = 0; i <= 44; i++) {
+      const u = i / 44;
+      const x = cx - rx * 0.92 + rx * 1.84 * u;
+      const y = cy + Math.sin(u * Math.PI) * ry * 0.5 + Math.sin(u * 9 + t * 0.07) * ry * 0.16;
+      if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // bubbles breaking the surface
+  for (let i = 0; i < 7; i++) {
+    const ph = (t * 0.012 + i * 0.37) % 1;
+    const u = 0.15 + ((i * 0.19 + Math.floor(t * 0.012 + i * 0.37) * 0.31) % 0.7);
+    const x = cx - rx * 0.8 + rx * 1.6 * u;
+    const y = cy + Math.sin(u * Math.PI) * ry * 0.45 - ph * ry * 0.5;
+    ctx.strokeStyle = `hsla(${hue}, 60%, 88%, ${(1 - ph) * 0.5})`;
+    ctx.lineWidth = Math.max(1, W * 0.002);
+    ctx.beginPath();
+    ctx.arc(x, y, ry * (0.06 + ph * 0.16), 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  // spaghetti draped over the rim
+  for (let s = -1; s <= 1; s += 2) {
+    ctx.strokeStyle = `hsla(${hue}, 60%, 84%, 0.65)`;
+    ctx.lineWidth = Math.max(1, W * 0.0026);
+    ctx.beginPath();
+    const x0 = cx + s * rx * 0.55, y0 = cy + ry * 0.2;
+    for (let i = 0; i <= 30; i++) {
+      const u = i / 30;
+      const x = x0 + s * u * rx * 0.75;
+      const y = y0 - Math.sin(u * Math.PI * 0.9) * ry * 1.6 + u * u * ry * 3.2 + Math.sin(u * 6 + t * 0.05 + s) * ry * 0.12;
+      if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+let time = 0;
+function frame() {
+  // camera shake
+  const shakeX = (noise2D(time * 0.005, 0) * 8) + (Math.random() - 0.5) * 0.6;
+  const shakeY = (noise2D(0, time * 0.005) * 8) + (Math.random() - 0.5) * 0.6;
+  const shakeRot = noise2D(time * 0.003, 100) * 0.012;
+
+  // ---- 1) accumulation buffer: steam trails ----
+  fctx.setTransform(1, 0, 0, 1, 0, 0);
+  fctx.fillStyle = 'rgba(0, 0, 0, 0.12)';
+  fctx.fillRect(0, 0, W, H);
+
+  fctx.translate(W / 2 + shakeX, H / 2 + shakeY);
+  fctx.rotate(shakeRot);
+  fctx.translate(-W / 2, -H / 2);
+
+  fctx.globalCompositeOperation = 'screen';
+  for (let i = 0; i < particles.length; i++) {
+    const p = particles[i];
+    p.update(time);
+    p.draw(fctx, time);
+    if (p.life >= p.maxLife || p.y < -50 || p.x < -100 || p.x > W + 100) {
+      p.reset(false);
+    }
+  }
+
+  // ---- 2) build smoke mask: redraw current particles to transparent buffer ----
+  sctx.setTransform(1, 0, 0, 1, 0, 0);
+  sctx.clearRect(0, 0, W, H);
+  sctx.translate(W / 2 + shakeX, H / 2 + shakeY);
+  sctx.rotate(shakeRot);
+  sctx.translate(-W / 2, -H / 2);
+  sctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < particles.length; i++) {
+    particles[i].draw(sctx, time);
+  }
+
+  // ---- 3) draw glyphs offscreen, mask them by the smoke buffer ----
+  gctx.setTransform(1, 0, 0, 1, 0, 0);
+  gctx.clearRect(0, 0, W, H);
+  gctx.translate(W / 2 + shakeX, H / 2 + shakeY);
+  gctx.rotate(shakeRot);
+  gctx.translate(-W / 2, -H / 2);
+  for (let i = 0; i < glyphs.length; i++) {
+    const g = glyphs[i];
+    g.update();
+    g.draw(gctx, time);
+    if (g.life >= g.maxLife || g.y < -100) g.reset(false);
+  }
+  gctx.setTransform(1, 0, 0, 1, 0, 0);
+  gctx.globalCompositeOperation = 'destination-in';
+  gctx.drawImage(smokeCanvas, 0, 0);
+  gctx.globalCompositeOperation = 'source-over';
+
+  // ---- 4) masked glyphs into the accumulation buffer ----
+  fctx.setTransform(1, 0, 0, 1, 0, 0);
+  fctx.globalCompositeOperation = 'screen';
+  fctx.drawImage(glyphCanvas, 0, 0);
+  fctx.globalCompositeOperation = 'source-over';
+
+  // ---- 5) visible canvas: tiled wall, then steam screened over it ----
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.translate(W / 2 + shakeX, H / 2 + shakeY);
+  ctx.rotate(shakeRot);
+  ctx.translate(-W / 2, -H / 2);
+  ctx.drawImage(tileCanvas, -OVERSCAN, -OVERSCAN);
+  drawCounter(ctx, time);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalCompositeOperation = 'screen';
+  ctx.drawImage(fxCanvas, 0, 0);
+  ctx.globalCompositeOperation = 'source-over';
+
+  // ---- 6) the pot itself, on top, sharing the camera shake ----
+  ctx.translate(W / 2 + shakeX, H / 2 + shakeY);
+  ctx.rotate(shakeRot);
+  ctx.translate(-W / 2, -H / 2);
+  drawPot(ctx, time);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+  time += 1;
+  requestAnimationFrame(frame);
+}
+frame();
+</script>
+</body>
+</html>

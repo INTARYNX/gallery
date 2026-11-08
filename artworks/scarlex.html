@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>mandala</title>
+<style>
+html,body{margin:0;padding:0;width:100%;height:100%;background:#050507;overflow:hidden}
+canvas{display:block;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const c=document.getElementById('c'),x=c.getContext('2d');
+let S,t=0;
+function size(){
+  const w=window.innerWidth,h=window.innerHeight;
+  S=Math.floor(Math.min(w,h));
+  const dpr=Math.min(devicePixelRatio||1,2);
+  c.width=S*dpr;c.height=S*dpr;
+  c.style.width=S+'px';c.style.height=S+'px';
+  x.setTransform(dpr,0,0,dpr,0,0);
+}
+
+// symétrie diédrale : applique une fonction de dessin n fois en rotation + réflexion
+function dihedral(n, fn){
+  for(let i=0;i<n;i++){
+    const a=i/n*Math.PI*2;
+    x.save(); x.rotate(a); fn(); x.restore();
+    x.save(); x.rotate(a); x.scale(1,-1); fn(); x.restore();
+  }
+}
+
+// arbre fractal récursif (L-system implicite) tracé le long d'un rayon
+function fractalBranch(len, depth, angle, w){
+  if(depth<=0||len<2) return;
+  x.lineWidth=w;
+  x.beginPath();x.moveTo(0,0);x.lineTo(0,-len);x.stroke();
+  x.translate(0,-len);
+  x.save(); x.rotate(angle);  fractalBranch(len*0.68, depth-1, angle, w*0.8); x.restore();
+  x.save(); x.rotate(-angle); fractalBranch(len*0.68, depth-1, angle, w*0.8); x.restore();
+}
+
+// courbe de Lissajous fermée (rapport de fréquences entier -> motif fermé exact)
+function lissajous(R, a, b, delta, N){
+  x.beginPath();
+  for(let i=0;i<=N;i++){
+    const th = i/N*Math.PI*2;
+    const px = R*Math.sin(a*th+delta);
+    const py = R*Math.sin(b*th);
+    if(i===0)x.moveTo(px,py);else x.lineTo(px,py);
+  }
+  x.closePath();
+}
+
+// épicycles de Fourier : somme de cercles tournants -> trace une courbe exacte
+function epicycloidPath(R0, terms, N){
+  x.beginPath();
+  for(let i=0;i<=N;i++){
+    const th=i/N*Math.PI*2;
+    let px=0,py=0,r=R0;
+    for(const [k,amp,ph] of terms){
+      px += r*amp*Math.cos(k*th+ph);
+      py += r*amp*Math.sin(k*th+ph);
+    }
+    if(i===0)x.moveTo(px,py);else x.lineTo(px,py);
+  }
+  x.closePath();
+}
+
+// copper bars horizontales façon Amiga
+function copperBars(w,h){
+  const barH=6, gap=14;
+  for(let y=-h/2; y<h/2; y+=gap){
+    const phase = y*0.02 + t*1.4;
+    const r = Math.floor(180+70*Math.sin(phase));
+    const g = Math.floor(20+30*Math.sin(phase+2));
+    const b = Math.floor(30+40*Math.sin(phase+4));
+    x.fillStyle = `rgba(${r},${g},${b},0.10)`;
+    x.fillRect(-w/2, y, w, barH);
+  }
+}
+
+// sinus scroller de points façon Amiga (bande de particules ondulante)
+function sineScroller(R){
+  const N=90;
+  for(let i=0;i<N;i++){
+    const a = i/N*Math.PI*2 + t*0.15;
+    const wob = Math.sin(i*0.35 + t*3)*R*0.03;
+    const rr = R*0.50 + wob;
+    const px = Math.cos(a)*rr, py = Math.sin(a)*rr;
+    const tw = 0.5+0.5*Math.sin(i*0.5+t*4);
+    x.fillStyle = i%2===0 ? `rgba(232,0,58,${0.4+0.4*tw})` : `rgba(216,212,200,${0.3+0.3*tw})`;
+    x.beginPath(); x.arc(px,py, 1.4+1.2*tw, 0, Math.PI*2); x.fill();
+  }
+}
+
+// tunnel façon Amiga : anneaux concentriques défilant vers le centre
+function tunnelRings(R){
+  const rings=14;
+  for(let i=0;i<rings;i++){
+    const phase = (i/rings + (t*0.12)%1) % 1;
+    const rr = R*0.98*phase;
+    const alpha = (1-phase)*0.35;
+    x.strokeStyle = i%2===0 ? `rgba(232,0,58,${alpha})` : `rgba(216,212,200,${alpha*0.6})`;
+    x.lineWidth = 1+2*(1-phase);
+    x.beginPath(); x.arc(0,0, rr, 0, Math.PI*2); x.stroke();
+  }
+}
+
+function draw(){
+  const cx=S/2, cy=S/2;
+  x.fillStyle='#050507'; x.fillRect(0,0,S,S);
+
+  const bgR = S*(0.55+0.25*Math.sin(t*0.3));
+  const bg = x.createRadialGradient(cx,cy,0,cx,cy,bgR);
+  bg.addColorStop(0, `rgba(140,20,35,${0.45+0.2*Math.sin(t*0.4)})`);
+  bg.addColorStop(0.5, 'rgba(60,15,20,0.25)');
+  bg.addColorStop(1, 'rgba(5,5,7,0)');
+  x.fillStyle=bg; x.fillRect(0,0,S,S);
+
+  x.save(); x.translate(cx,cy);
+  const R = S*0.46;
+
+  copperBars(S,S);
+  tunnelRings(R);
+  sineScroller(R);
+
+  // 1. réseau fractal : 8 branches poussant du centre vers l'anneau, symétrie diédrale
+  x.save();
+  x.strokeStyle='rgba(120,55,55,0.55)';
+  dihedral(8, ()=>{
+    x.save();
+    x.translate(0, R*0.10);
+    fractalBranch(R*0.34, 5, 0.42, 1.1);
+    x.restore();
+  });
+  x.restore();
+
+  // 2. courbe de Lissajous précise, rapport 5:8 -> fermeture exacte après un tour
+  x.save();
+  x.rotate(t*0.06);
+  lissajous(R*0.88, 5, 8, Math.PI/2 + Math.sin(t*0.2)*0.3, 800);
+  x.strokeStyle='#e8003a'; x.lineWidth=1.3; x.stroke();
+  x.restore();
+
+  // 3. seconde Lissajous, rapport 3:7, rotation inverse
+  x.save();
+  x.rotate(-t*0.04);
+  lissajous(R*0.60, 3, 7, t*0.15, 700);
+  x.strokeStyle='rgba(216,212,200,0.5)'; x.lineWidth=0.7; x.stroke();
+  x.restore();
+
+  // 4. épicycloïde : somme de 3 harmoniques -> rosace exacte à 5 pointes
+  x.save();
+  x.rotate(t*0.03);
+  epicycloidPath(R*0.42, [
+    [1, 1.0, 0],
+    [5, 0.35, t*0.5],
+    [11, 0.12, -t*0.8]
+  ], 900);
+  x.strokeStyle='rgba(232,0,58,0.8)'; x.lineWidth=1.1; x.stroke();
+  x.restore();
+
+  // 5. polygone régulier central en rotation lente, ancre visuelle
+  x.save();
+  x.rotate(t*0.1);
+  x.beginPath();
+  for(let i=0;i<=9;i++){
+    const a=i/9*Math.PI*2;
+    const px=Math.cos(a)*R*0.14, py=Math.sin(a)*R*0.14;
+    if(i===0)x.moveTo(px,py);else x.lineTo(px,py);
+  }
+  x.closePath();
+  x.strokeStyle='#d8d4c8'; x.lineWidth=0.6; x.stroke();
+  x.restore();
+
+  // point central
+  x.fillStyle='#e8003a';
+  x.beginPath(); x.arc(0,0,R*0.012,0,Math.PI*2); x.fill();
+
+  x.restore();
+
+  // vignette
+  const vg=x.createRadialGradient(cx,cy,R*0.5,cx,cy,R*1.05);
+  vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(0,0,0,0.85)');
+  x.fillStyle=vg; x.fillRect(0,0,S,S);
+}
+
+function loop(){ t+=0.016; draw(); requestAnimationFrame(loop); }
+size();
+addEventListener('resize', size);
+loop();
+</script>
+</body>
+</html>

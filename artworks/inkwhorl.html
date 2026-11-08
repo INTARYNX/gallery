@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Inkwhorl</title>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            gap: 12px;
+            min-height: 100vh;
+            background: #000;
+        }
+        canvas {
+            display: none;
+            border: 1px solid #333;
+            max-width: 100%;
+            height: auto;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas" width="600" height="600"></canvas>
+    <div id="slide" style="position:relative;width:600px;max-width:100%;aspect-ratio:1;border:1px solid #333;display:none">
+        <img style="position:absolute;inset:0;width:100%;height:100%;opacity:1;transition:opacity 0.8s ease">
+        <img style="position:absolute;inset:0;width:100%;height:100%;opacity:0;transition:opacity 0.8s ease">
+    </div>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        let time = 0;
+        let zoomDepth = 0.3 + Math.random() * 1.2;
+        let zoomCycle = 0;
+
+        const palettes = [
+            { bg: '#000000', fg: '#ffffff' },
+            { bg: '#ffffff', fg: '#000000' }
+        ];
+        let palette = 0;
+
+        const waveFns = [
+            Math.sin,
+            x => (2 / Math.PI) * Math.asin(Math.sin(x)),
+            x => ((x / Math.PI) % 2 + 2) % 2 - 1,
+            x => 2 * Math.abs(Math.sin(x)) - 1,
+            x => Math.sin(x) ** 3,
+            x => Math.sin(x + Math.sin(x * 2)),
+            x => Math.tanh(3 * Math.sin(x))
+        ];
+
+        const shape = { wave: 0, symmetry: 6, rotations: 5, maxRadius: 230, ampMul: 1, freqMul: 1, scallopFreq: 2, scallopAmp: 14, mirror: true };
+        const rnd = (a, b) => a + Math.random() * (b - a);
+        function randomShape() {
+            shape.symmetry = 3 + Math.floor(Math.random() * 6);
+            shape.rotations = 2 + Math.floor(Math.random() * 7);
+            shape.maxRadius = rnd(190, 250);
+            shape.ampMul = rnd(0.6, 2);
+            shape.freqMul = rnd(0.6, 1.6);
+            shape.scallopFreq = 1 + Math.floor(Math.random() * 4);
+            shape.scallopAmp = rnd(4, 30);
+            shape.mirror = Math.random() < 0.4;
+            shape.wave = Math.floor(Math.random() * waveFns.length);
+        }
+        const hexToRgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16)).join(',');
+
+        function drawSpiral() {
+            ctx.fillStyle = `rgba(${hexToRgb(palettes[palette].bg)}, 0.2)`;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+
+            const zoomPhase = Math.abs(Math.sin(time * 0.8));
+
+            // Change zoom depth at each cycle
+            if (zoomPhase < 0.05 && zoomCycle !== Math.floor(time * 0.8 / Math.PI)) {
+                zoomDepth = 0.3 + Math.random() * 1.2;
+                zoomCycle = Math.floor(time * 0.8 / Math.PI);
+            }
+
+            const zoom = 1 + zoomPhase * zoomDepth;
+            const rotation = time * (1 + zoomPhase * 2);
+
+            ctx.save();
+            ctx.translate(centerX, centerY);
+            ctx.rotate(rotation);
+            ctx.scale(zoom, zoom);
+            ctx.translate(-centerX, -centerY);
+
+            const maxRadius = shape.maxRadius;
+            const rotations = shape.rotations;
+            const points = 3000;
+
+            const fg = palettes[palette].fg;
+            const offsets = [0, Math.PI * 2 / 3, Math.PI * 4 / 3];
+            const speeds = [1, 1.3, 0.7];
+            const amplitudes = [10, 15, 8].map(a => a * shape.ampMul);
+            const frequencies = [0.3, 0.4, 0.25].map(f => f * shape.freqMul);
+            const phaseShifts = [0, 1.2, 2.5];
+
+            const wf = waveFns[shape.wave];
+            const symmetry = shape.symmetry;
+            const copies = shape.mirror ? symmetry * 2 : symmetry;
+
+            for (let thread = 0; thread < 3; thread++) {
+                for (let k = 0; k < copies; k++) {
+                    ctx.save();
+                    ctx.translate(centerX, centerY);
+                    ctx.rotate((shape.mirror ? Math.floor(k / 2) : k) * Math.PI * 2 / symmetry);
+                    if (shape.mirror && k % 2) ctx.scale(1, -1);
+                    ctx.translate(-centerX, -centerY);
+                    ctx.strokeStyle = fg;
+                    ctx.lineWidth = thread === 2 ? 0.6 : 0.9;
+                    ctx.beginPath();
+
+                    for (let i = 0; i < points; i++) {
+                        const t = i / points;
+                        const angle = t * rotations * Math.PI * 2 / symmetry;
+                        const radius = t * maxRadius;
+
+                        const wave1 = wf(i * frequencies[thread] + time * 5 * speeds[thread] + offsets[thread]);
+                        const wave2 = wf(i * frequencies[thread] * 2.3 + time * 3 * speeds[thread] + phaseShifts[thread]);
+                        const wave3 = wf(i * frequencies[thread] * 5.1 - time * 7 * speeds[thread]);
+                        const pulse = Math.sin(time * 2 + offsets[thread]);
+                        const wave = (wave1 + wave2 * 0.5 + wave3 * 0.3) * amplitudes[thread] * t * pulse;
+                        const scallop = Math.abs(wf(angle * symmetry * shape.scallopFreq + thread)) * shape.scallopAmp * t;
+
+                        const x = centerX + Math.cos(angle) * (radius + wave + scallop);
+                        const y = centerY + Math.sin(angle) * (radius + wave + scallop);
+
+                        if (i === 0) {
+                            ctx.moveTo(x, y);
+                        } else {
+                            ctx.lineTo(x, y);
+                        }
+                    }
+
+                    ctx.stroke();
+                    ctx.restore();
+                }
+            }
+
+            ctx.restore();
+
+            // Scanlines horizontales
+            ctx.globalAlpha = 0.1;
+            for (let y = 0; y < canvas.height; y += 3) {
+                ctx.fillStyle = palettes[palette].bg;
+                ctx.fillRect(0, y, canvas.width, 1);
+            }
+
+            // Scanlines verticales
+            for (let x = 0; x < canvas.width; x += 3) {
+                ctx.fillStyle = palettes[palette].bg;
+                ctx.fillRect(x, 0, 1, canvas.height);
+            }
+
+            // Effet de bavage (ghosting)
+            ctx.globalAlpha = 0.02;
+            ctx.drawImage(canvas, 2, 0);
+            ctx.globalAlpha = 1.0;
+
+            time += 0.02;
+            requestAnimationFrame(drawSpiral);
+        }
+
+        drawSpiral();
+
+        // Slideshow : capture toutes les 3 secondes, puis défilement des captures
+        const slide = document.getElementById('slide');
+        const shots = [];
+        let current = 0;
+
+        function capture() {
+            const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const d = img.data;
+            for (let i = 0; i < d.length; i += 4) {
+                const v = (d[i] + d[i + 1] + d[i + 2]) / 3 > 127 ? 255 : 0;
+                d[i] = d[i + 1] = d[i + 2] = v;
+                d[i + 3] = 255;
+            }
+            const tmp = document.createElement('canvas');
+            tmp.width = canvas.width;
+            tmp.height = canvas.height;
+            tmp.getContext('2d').putImageData(img, 0, 0);
+            shots.push(tmp.toDataURL('image/png'));
+            if (shots.length > 20) shots.shift();
+            slide.style.display = 'block';
+        }
+
+        const imgs = slide.querySelectorAll('img');
+        let front = 0;
+
+        capture();
+        imgs[0].src = shots[0];
+        function nextPalette() {
+            setTimeout(() => {
+                palette = (palette + 1) % palettes.length;
+                randomShape();
+            }, 500);
+        }
+
+        function show(src) {
+            const back = 1 - front;
+            imgs[back].src = src;
+            imgs[back].style.opacity = 1;
+            imgs[front].style.opacity = 0;
+            front = back;
+        }
+
+        function scheduleCapture() {
+            setTimeout(() => {
+                capture();
+                show(shots[shots.length - 1]);
+                nextPalette();
+                scheduleCapture();
+            }, 2000 + Math.random() * 3000);
+        }
+
+        nextPalette();
+        scheduleCapture();
+    </script>
+</body>
+</html>

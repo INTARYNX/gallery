@@ -1,0 +1,1253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Squall Line</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        canvas {
+            display: block;
+            margin: 0 auto;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const mainCtx = canvas.getContext('2d', { alpha: false });
+        let ctx = mainCtx;
+        let BASE = 800, RS = 1;
+
+        function applySize() {
+            const px = Math.max(200, Math.round(BASE * RS));
+            canvas.width = px;
+            canvas.height = px;
+            canvas.style.width = canvas.style.height = BASE + 'px';
+        }
+
+        function resizeCanvas() {
+            BASE = Math.min(window.innerWidth, window.innerHeight);
+            applySize();
+        }
+        
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+        const RS_LEVELS = [1, 0.85, 0.7, 0.55, 0.45, 0.35];
+        let dtF = 1, slowChecks = 0, lastChangeFrame = 0, latX = 0, bob = 0, RSX = 1, frameCount = 0, lastT = performance.now(), emaDt = 16.7;
+
+        let WIDTH = canvas.width;
+        let HEIGHT = canvas.height;
+
+        let angleY = 0, angleX = 0, angleZ = 0;
+        const floatOffset = { y: 0, dir: 1 };
+        let time = 0, storyPhase = 0, phaseTimer = 0;
+        let weatherIntensity = 0, skyDarkness = 0, windStrength = 0, fogIntensity = 0, altitude = 0;
+
+        function noise(x) {
+            const n = Math.sin(x) * 43758.5453123;
+            return n - Math.floor(n);
+        }
+
+        function smoothNoise(x) {
+            const intX = Math.floor(x);
+            const fracX = x - intX;
+            return noise(intX) * (1 - fracX) + noise(intX + 1) * fracX;
+        }
+
+        function turbulence(x, octaves = 4) {
+            let value = 0, amplitude = 1, frequency = 1;
+            for (let i = 0; i < octaves; i++) {
+                value += smoothNoise(x * frequency) * amplitude;
+                amplitude *= 0.5;
+                frequency *= 2;
+            }
+            return value;
+        }
+
+        // ---------- Cloud cover: pre-rendered tileable textures, a few blits per frame ----------
+        const lerp = (a, b, t) => a + (b - a) * t;
+        const clamp01 = v => Math.max(0, Math.min(1, v));
+        const sstep = (e0, e1, x) => { const t = clamp01((x - e0) / (e1 - e0)); return t * t * (3 - 2 * t); };
+        const mix3 = (a, b, t) => [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)];
+        let cloudScroll = 0;
+
+        function periodicNoise(x, y, px, py, seed) {
+            const x0 = Math.floor(x), y0 = Math.floor(y);
+            const fx = x - x0, fy = y - y0;
+            const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+            const h = (ix, iy) => noise((((ix % px) + px) % px) * 127.1 + (((iy % py) + py) % py) * 311.7 + seed);
+            return lerp(lerp(h(x0, y0), h(x0 + 1, y0), sx), lerp(h(x0, y0 + 1), h(x0 + 1, y0 + 1), sx), sy);
+        }
+
+        function makeCloudTexture(w, h, o) {
+            const bx = o.bx || 4, by = o.by || 2, oct = o.oct || 6;
+            const dens = new Float32Array(w * h);
+            for (let y = 0; y < h; y++) {
+                for (let x = 0; x < w; x++) {
+                    let v = 0, amp = 0.5, f = 1;
+                    for (let k = 0; k < oct; k++) {
+                        v += amp * periodicNoise(x / w * bx * f, y / h * by * f, bx * f, by * f, o.seed + k * 17.3);
+                        amp *= 0.5; f *= 2;
+                    }
+                    dens[y * w + x] = v;
+                }
+            }
+            const c = document.createElement('canvas');
+            c.width = w; c.height = h;
+            const g = c.getContext('2d');
+            const img = g.createImageData(w, h);
+            for (let y = 0; y < h; y++) {
+                const yy = y / h;
+                const prof = o.prof ? o.prof(yy) : sstep(0, 0.3, yy) * sstep(1, 0.7, yy);
+                for (let x = 0; x < w; x++) {
+                    const i = y * w + x, d = dens[i];
+                    const dn = dens[((y - 3 + h) % h) * w + (x - 3 + w) % w];
+                    const lit = clamp01(0.55 + (d - dn) * 16 - (d - o.cov) * 0.9);
+                    const col = mix3(o.shadow, o.lit, lit);
+                    const p = i * 4;
+                    img.data[p] = col[0]; img.data[p + 1] = col[1]; img.data[p + 2] = col[2];
+                    img.data[p + 3] = sstep(o.cov, o.cov + o.soft, d) * prof * 255;
+                }
+            }
+            g.putImageData(img, 0, 0);
+            return c;
+        }
+
+        const fairTex = makeCloudTexture(384, 192, { seed: 3.7, cov: 0.48, soft: 0.2, shadow: [125, 138, 160], lit: [255, 250, 242] });
+        const stormTex = makeCloudTexture(384, 192, { seed: 9.1, cov: 0.36, soft: 0.3, shadow: [10, 15, 22], lit: [86, 98, 112] });
+        const shelfTex = makeCloudTexture(512, 128, { seed: 31.4, cov: 0.4, soft: 0.25, shadow: [8, 12, 18], lit: [70, 82, 96], bx: 8, by: 1, oct: 5, prof: yy => sstep(0, 0.55, yy) * sstep(1, 0.85, yy) });
+
+        function drawLayer(tex, scroll, yTop, h, w, alpha) {
+            if (alpha <= 0.002) return;
+            ctx.globalAlpha = Math.min(1, alpha);
+            let x = -(((scroll % w) + w) % w);
+            for (; x < WIDTH; x += w) ctx.drawImage(tex, x, yTop, w + 1, h);
+            ctx.globalAlpha = 1;
+        }
+
+        // ---------- GPU ground: the original checker pattern, extended to the horizon ----------
+        const glCanvas = document.createElement('canvas');
+        let gl = null, glReady = false;
+        const glU = {};
+        let fieldsCanvas = null, glLost = false, lostAt = 0, snapReady = false, snapInfo = null;
+        const groundSnap = document.createElement('canvas');
+        // (re)creates every GPU resource: called at start and again if the browser restores a lost context
+        function setupGL() {
+            try {
+                if (!gl) gl = glCanvas.getContext('webgl', { alpha: false, antialias: false, depth: false, stencil: false });
+                if (!gl) return false;
+                const vsSrc = 'attribute vec2 p; void main() { gl_Position = vec4(p, 0.0, 1.0); }';
+                const fsSrc = `
+                    #ifdef GL_FRAGMENT_PRECISION_HIGH
+                    precision highp float;
+                    #else
+                    precision mediump float;
+                    #endif
+                    uniform sampler2D uTex;
+                    uniform vec2 uVan;
+                    uniform float uH, uInv, uHeight, uScroll, uDark, uGroundH, uK, uLat, uFlash, uWarm;
+                    uniform vec3 uHaze;
+                    void main() {
+                        float x = gl_FragCoord.x * uInv;
+                        float y = (uH - gl_FragCoord.y) * uInv;
+                        float sc = (y - uVan.y) / (uHeight * 0.4);
+                        if (sc <= 0.0) discard;
+                        float z = uHeight * 2.0 / sc - 500.0;
+                        float u = (x - uVan.x) / sc / uK + uLat / uK + 0.31;
+                        float v = (z + uScroll) / uK;
+                        vec3 col = texture2D(uTex, vec2(u, v)).rgb;
+                        col *= mix(vec3(1.0), vec3(0.66, 0.76, 0.92), uWarm);
+                        col = mix(col, vec3(14.0, 22.0, 34.0) / 255.0, 0.55 * uDark);
+                        float t = (y - uVan.y) / (0.6 * uGroundH) * (3.2 + 2.8 * uWarm);
+                        float a = t < 0.2 ? mix(1.0, 0.75, t / 0.2) : (t < 0.55 ? mix(0.75, 0.3, (t - 0.2) / 0.35) : mix(0.3, 0.0, clamp((t - 0.55) / 0.45, 0.0, 1.0)));
+                        col = mix(col, uHaze, a * 0.93);
+                        col += uFlash * vec3(0.08, 0.10, 0.16);
+                        gl_FragColor = vec4(col, 1.0);
+                    }`;
+                const sh = (type, src) => { const o = gl.createShader(type); gl.shaderSource(o, src); gl.compileShader(o); if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o)); return o; };
+                const prog = gl.createProgram();
+                gl.attachShader(prog, sh(gl.VERTEX_SHADER, vsSrc));
+                gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, fsSrc));
+                gl.linkProgram(prog);
+                if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error('link');
+                gl.useProgram(prog);
+                const buf = gl.createBuffer();
+                gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+                gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+                const loc = gl.getAttribLocation(prog, 'p');
+                gl.enableVertexAttribArray(loc);
+                gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+                const tex = gl.createTexture();
+                gl.bindTexture(gl.TEXTURE_2D, tex);
+                gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, fieldsCanvas);
+                gl.generateMipmap(gl.TEXTURE_2D);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+                const an = gl.getExtension('EXT_texture_filter_anisotropic');
+                if (an) gl.texParameterf(gl.TEXTURE_2D, an.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(8, gl.getParameter(an.MAX_TEXTURE_MAX_ANISOTROPY_EXT)));
+                ['uTex', 'uVan', 'uH', 'uInv', 'uHeight', 'uScroll', 'uDark', 'uGroundH', 'uK', 'uHaze', 'uLat', 'uFlash', 'uWarm'].forEach(n => { glU[n] = gl.getUniformLocation(prog, n); });
+                gl.uniform1i(glU.uTex, 0);
+                if (glCanvas.width > 0) gl.viewport(0, 0, glCanvas.width, glCanvas.height);
+                return true;
+            } catch (e) { return false; }
+        }
+
+        (function initGL() {
+            try {
+                const cc = document.createElement('canvas');
+                cc.width = cc.height = 1024;
+                const cg = cc.getContext('2d');
+                let seed = 4242;
+                const rnd = () => { seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+                const cols = ['#7A8B5D', '#9CAF70', '#6B7C4E', '#8f9a62', '#b3b075', '#a39a62', '#7d8f58', '#6f8450', '#98a86a', '#b9b27c', '#8a7a58', '#86a066'];
+                cg.fillStyle = '#7A8B5D';
+                cg.fillRect(0, 0, 1024, 1024);
+                const fields = [];
+                const split = (x, y, w, h, depth) => {
+                    if ((w < 120 && h < 120) || (depth > 1 && rnd() < 0.15 && w < 300 && h < 300)) { fields.push([x, y, w, h]); return; }
+                    const r = 0.3 + rnd() * 0.4;
+                    if ((w >= h) !== (rnd() < 0.25)) { split(x, y, w * r, h, depth + 1); split(x + w * r, y, w * (1 - r), h, depth + 1); }
+                    else { split(x, y, w, h * r, depth + 1); split(x, y + h * r, w, h * (1 - r), depth + 1); }
+                };
+                split(0, 0, 1024, 1024, 0);
+                fields.forEach(([x, y, w, h]) => {
+                    cg.fillStyle = cols[(rnd() * cols.length) | 0];
+                    cg.fillRect(x, y, w, h);
+                    const sp = 4 + ((rnd() * 3) | 0);
+                    if (w >= h) {
+                        for (let yy = y + 1; yy < y + h; yy += sp) { cg.fillStyle = 'rgba(0,0,0,0.09)'; cg.fillRect(x, yy, w, 1.5); cg.fillStyle = 'rgba(255,255,225,0.05)'; cg.fillRect(x, yy + 2, w, 1); }
+                    } else {
+                        for (let xx = x + 1; xx < x + w; xx += sp) { cg.fillStyle = 'rgba(0,0,0,0.09)'; cg.fillRect(xx, y, 1.5, h); cg.fillStyle = 'rgba(255,255,225,0.05)'; cg.fillRect(xx + 2, y, 1, h); }
+                    }
+                    const gr = cg.createLinearGradient(x, y, x + w, y + h);
+                    gr.addColorStop(0, 'rgba(255,255,255,0.05)');
+                    gr.addColorStop(1, 'rgba(0,0,0,0.07)');
+                    cg.fillStyle = gr;
+                    cg.fillRect(x, y, w, h);
+                    cg.strokeStyle = 'rgba(38, 52, 30, 0.35)';
+                    cg.lineWidth = 1.5;
+                    cg.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+                });
+                const idd = cg.getImageData(0, 0, 1024, 1024), dd = idd.data;
+                for (let i = 0; i < dd.length; i += 4) { const n = (Math.random() - 0.5) * 10; dd[i] += n; dd[i + 1] += n; dd[i + 2] += n; }
+                cg.putImageData(idd, 0, 0);
+
+                fieldsCanvas = cc;
+                glReady = setupGL();
+                glCanvas.addEventListener('webglcontextlost', e => { e.preventDefault(); glReady = false; glLost = true; lostAt = performance.now(); });
+                glCanvas.addEventListener('webglcontextrestored', () => { try { glReady = setupGL(); glLost = !glReady; } catch (err) { glReady = false; } });
+            } catch (e) { glReady = false; }
+        })();
+
+        const gridSize = 100, gridDepth = 30, gridWidth = 12;
+        let groundScroll = 0;
+        
+        function getFieldColor(x, z) {
+            const colorIndex = (x + z) % 3;
+            return colorIndex === 0 ? '#7A8B5D' : colorIndex === 1 ? '#9CAF70' : '#6B7C4E';
+        }
+
+        const balloonSegments = 32, balloonRings = 24;
+        const balloonVertices = [], balloonFaces = [];
+        // Classic hot-air balloon profile: broad round dome, widest ~42% from the top, long taper down to the skirt
+        const ENV_R = 66, ENV_HS = 129, ENV_HW = 0.58;
+        const envProfile = h => {
+            if (h >= ENV_HW) { const u = (h - ENV_HW) / (1 - ENV_HW); return Math.sqrt(Math.max(0, 1 - u * u)); }
+            const v = h / ENV_HW;
+            return 0.16 + 0.84 * (0.5 * Math.sin(v * Math.PI / 2) + 0.5 * v * v * (3 - 2 * v));
+        };
+        const envH = th => (1 - Math.cos(th)) / 2;
+        const envY = th => 20 - envH(th) * ENV_HS;
+        const envR = th => ENV_R * envProfile(envH(th));
+
+        for (let ring = 0; ring <= balloonRings; ring++) {
+            const theta = (ring * Math.PI) / balloonRings;
+                        for (let seg = 0; seg <= balloonSegments; seg++) {
+                const phi = (seg * 2 * Math.PI) / balloonSegments;
+                const pillow = 1 + 0.022 * Math.pow(Math.sin(phi * 4), 2) * Math.sin(theta);
+                balloonVertices.push([Math.cos(phi) * envR(theta) * pillow, envY(theta), Math.sin(phi) * envR(theta) * pillow]);
+            }
+        }
+
+        for (let ring = 0; ring < balloonRings; ring++) {
+            for (let seg = 0; seg < balloonSegments; seg++) {
+                const first = ring * (balloonSegments + 1) + seg;
+                balloonFaces.push([first, first + balloonSegments + 1, first + balloonSegments + 2, first + 1]);
+            }
+        }
+
+        const basketVertices = [[-12, 60, -12], [12, 60, -12], [12, 60, 12], [-12, 60, 12], [-15, 45, -15], [15, 45, -15], [15, 45, 15], [-15, 45, 15]];
+        const basketFaces = [[4, 5, 6, 7], [0, 3, 2, 1], [4, 5, 1, 0], [6, 7, 3, 2], [7, 4, 0, 3], [5, 6, 2, 1]];
+
+        const ropeTopR = ENV_R * envProfile((20 + 20) / ENV_HS), ropeTopD = ropeTopR / Math.SQRT2;
+        const ropePoints = [
+            [[-15, 45, -15], [-ropeTopD, -20, -ropeTopD]],
+            [[15, 45, -15], [ropeTopD, -20, -ropeTopD]],
+            [[15, 45, 15], [ropeTopD, -20, ropeTopD]],
+            [[-15, 45, 15], [-ropeTopD, -20, ropeTopD]],
+            [[0, 45, -15], [0, -20, -ropeTopR]],
+            [[15, 45, 0], [ropeTopR, -20, 0]],
+            [[0, 45, 15], [0, -20, ropeTopR]],
+            [[-15, 45, 0], [-ropeTopR, -20, 0]]
+        ];
+
+        const rainbowKeys = ['#FFE22E', '#8BD04A', '#26B5BD', '#6A8CF0', '#A072D8', '#5A372D', '#FF5A94', '#FF5546', '#FFA838', '#FFCB2B'];
+        const rainbowAt = u => {
+            const f = (((u % 1) + 1) % 1) * rainbowKeys.length, i = Math.floor(f), t = f - i;
+            const p = h => [1, 3, 5].map(k => parseInt(h.slice(k, k + 2), 16));
+            const A = p(rainbowKeys[i]), B = p(rainbowKeys[(i + 1) % rainbowKeys.length]);
+            return '#' + A.map((v, k) => Math.round(v + (B[k] - v) * t).toString(16).padStart(2, '0')).join('');
+        };
+        // one colour per facet: a diagonal rainbow that wraps cleanly around the envelope
+        const balloonPanelColors = balloonFaces.map((_, i) => {
+            const ring = Math.floor(i / balloonSegments), sg = i % balloonSegments;
+            return rainbowAt(ring / 12 + sg / 16);
+        });
+
+        function createPerson(x, z) {
+            return {
+                vertices: [[x - 1.5, 41, z - 1.5], [x + 1.5, 41, z - 1.5], [x + 1.5, 41, z + 1.5], [x - 1.5, 41, z + 1.5], [x - 1.5, 44, z - 1.5], [x + 1.5, 44, z - 1.5], [x + 1.5, 44, z + 1.5], [x - 1.5, 44, z + 1.5], [x - 2, 44, z - 1], [x + 2, 44, z - 1], [x + 2, 44, z + 1], [x - 2, 44, z + 1], [x - 2, 53, z - 1], [x + 2, 53, z - 1], [x + 2, 53, z + 1], [x - 2, 53, z + 1]],
+                faces: [{ indices: [4, 5, 6, 7], color: '#FFD7B5' }, { indices: [0, 3, 2, 1], color: '#FFD7B5' }, { indices: [4, 5, 1, 0], color: '#FFD7B5' }, { indices: [6, 7, 3, 2], color: '#FFD7B5' }, { indices: [7, 4, 0, 3], color: '#FFD7B5' }, { indices: [5, 6, 2, 1], color: '#FFD7B5' }, { indices: [12, 13, 14, 15], color: '#34495E' }, { indices: [8, 11, 10, 9], color: '#34495E' }, { indices: [12, 13, 9, 8], color: '#2C3E50' }, { indices: [14, 15, 11, 10], color: '#2C3E50' }, { indices: [15, 12, 8, 11], color: '#1A252F' }, { indices: [13, 14, 10, 9], color: '#1A252F' }]
+            };
+        }
+
+        const person1 = createPerson(-5, -3), person2 = createPerson(5, 3);
+        let birdLastT = 0, birdPhase = 0, birdProgress = 0.2, birdPassed = false;
+
+        const raindrops = Array.from({ length: 150 }, () => ({ x: Math.random() * WIDTH, y: Math.random() * HEIGHT, speed: 3 + Math.random() * 4, length: 10 + Math.random() * 10 }));
+
+        let lightningFlash = 0, boltStart = -1, boltSegs = [], boltRestrike = false;
+        let lightningTimer = 0, lightningCount = 0, dramaticEndFrame = 0, endSequenceActive = false;
+
+
+        function rotateX(point, angle) {
+            const cos = Math.cos(angle), sin = Math.sin(angle);
+            return [point[0], point[1] * cos - point[2] * sin, point[1] * sin + point[2] * cos];
+        }
+
+        function rotateY(point, angle) {
+            const cos = Math.cos(angle), sin = Math.sin(angle);
+            return [point[0] * cos + point[2] * sin, point[1], -point[0] * sin + point[2] * cos];
+        }
+
+        function rotateZ(point, angle) {
+            const cos = Math.cos(angle), sin = Math.sin(angle);
+            return [point[0] * cos - point[1] * sin, point[0] * sin + point[1] * cos, point[2]];
+        }
+
+        function project(point) {
+            const z = point[2] + 300;
+            const scale = (HEIGHT * 0.5) / z;
+            return [point[0] * scale + WIDTH / 2, point[1] * scale + HEIGHT / 2, z];
+        }
+
+        function getNormal(pts) {
+            const v1 = [pts[1][0] - pts[0][0], pts[1][1] - pts[0][1], pts[1][2] - pts[0][2]];
+            const v2 = [pts[2][0] - pts[0][0], pts[2][1] - pts[0][1], pts[2][2] - pts[0][2]];
+            return [v1[1] * v2[2] - v1[2] * v2[1], v1[2] * v2[0] - v1[0] * v2[2], v1[0] * v2[1] - v1[1] * v2[0]];
+        }
+
+        function normalize(v) {
+            const len = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+            return len > 0 ? [v[0] / len, v[1] / len, v[2] / len] : [0, 0, 0];
+        }
+
+        function calculateLighting(normal) {
+            const light = normalize([1, -1, -1]), n = normalize(normal);
+            return 0.5 + Math.max(0, n[0] * light[0] + n[1] * light[1] + n[2] * light[2]) * 0.5;
+        }
+
+        function adjustBrightness(color, factor) {
+            const r = parseInt(color.slice(1, 3), 16);
+            const g = parseInt(color.slice(3, 5), 16);
+            const b = parseInt(color.slice(5, 7), 16);
+            return `rgb(${r * factor}, ${g * factor}, ${b * factor})`;
+        }
+
+        let balloonCtr = [0, -45, 0];
+        const BH = (() => { const L = normalize([1, -1, -1]); return normalize([L[0], L[1], L[2] - 1]); })();
+
+        function drawFace(pts2D, pts3D, color, glow = 0, boost = false, seam = null, fid = 0, ao = 1) {
+            let brightness = calculateLighting(getNormal(pts3D)) * (1 - skyDarkness * 0.5);
+            if (boost) brightness = Math.min(1.12, brightness * 1.4 + 0.08 * (1 - skyDarkness));
+            if (color === '#F7F4EE') brightness = Math.max(brightness, 0.95 * (1 - skyDarkness * 0.5));
+            if (boost) {
+                // fabric look: satin sheen, soft rim light, sky/ground bounce, occlusion near the neck, per-panel variation
+                let n = normalize(getNormal(pts3D));
+                const cen = [0, 1, 2].map(k => (pts3D[0][k] + pts3D[2][k]) / 2);
+                if (n[0] * (cen[0] - balloonCtr[0]) + n[1] * (cen[1] - balloonCtr[1]) + n[2] * (cen[2] - balloonCtr[2]) < 0) n = [-n[0], -n[1], -n[2]];
+                const dk = skyDarkness;
+                const fres = Math.pow(1 - Math.max(0, -n[2]), 3) * (1 - dk * 0.6);
+                const spec = Math.pow(Math.max(0, n[0] * BH[0] + n[1] * BH[1] + n[2] * BH[2]), 18) * 0.34 * (1 - dk) * 255;
+                const up = Math.max(0, -n[1]) * (1 - dk), down = Math.max(0, n[1]);
+                const k = brightness * ao * (1 + (noise(fid * 12.9898) - 0.5) * 0.06);
+                const gl = glow > 0 ? glow * (0.06 + 0.95 * skyDarkness) * 255 : 0;
+                const lf = lightningFlash * 35;
+                const r = Math.min(255, parseInt(color.slice(1, 3), 16) * k + spec + fres * 41 - up * 5 + down * 10 + gl * 0.7 + lf * 0.7);
+                const gr = Math.min(255, parseInt(color.slice(3, 5), 16) * k + spec + fres * 38 + down * 12 + gl * 0.32 + lf * 0.8);
+                const b = Math.min(255, parseInt(color.slice(5, 7), 16) * k + spec + fres * 36 + up * 16 - down * 6 + gl * 0.05 + lf);
+                ctx.fillStyle = `rgb(${r}, ${gr}, ${b})`;
+            } else if (glow > 0) {
+                const g = glow * (0.06 + 0.95 * skyDarkness) * 255;
+                const r = Math.min(255, parseInt(color.slice(1, 3), 16) * brightness + g * 0.7);
+                const gr = Math.min(255, parseInt(color.slice(3, 5), 16) * brightness + g * 0.32);
+                const b = Math.min(255, parseInt(color.slice(5, 7), 16) * brightness + g * 0.05);
+                ctx.fillStyle = `rgb(${r}, ${gr}, ${b})`;
+            } else {
+                ctx.fillStyle = adjustBrightness(color, brightness);
+            }
+            ctx.beginPath();
+            ctx.moveTo(pts2D[0][0], pts2D[0][1]);
+            for (let i = 1; i < pts2D.length; i++) ctx.lineTo(pts2D[i][0], pts2D[i][1]);
+            ctx.closePath();
+            ctx.fill();
+            if (seam) {
+                ctx.strokeStyle = 'rgba(20, 14, 10, 0.13)';
+                ctx.lineWidth = 0.6;
+                ctx.beginPath();
+                if (seam[0]) { ctx.moveTo(pts2D[0][0], pts2D[0][1]); ctx.lineTo(pts2D[1][0], pts2D[1][1]); }
+                if (seam[1]) { ctx.moveTo(pts2D[0][0], pts2D[0][1]); ctx.lineTo(pts2D[3][0], pts2D[3][1]); }
+                ctx.stroke();
+                if (seam[2] || seam[3]) {
+                    const sc = (HEIGHT * 0.5) / ((pts2D[0][2] + pts2D[2][2]) / 2), k = 1 - skyDarkness * 0.5;
+                    const edge = (a, b) => { ctx.beginPath(); ctx.moveTo(pts2D[a][0], pts2D[a][1]); ctx.lineTo(pts2D[b][0], pts2D[b][1]); ctx.stroke(); };
+                    ctx.lineCap = 'round';
+                    [[`rgba(30, 20, 10, ${0.4 * k})`, 1.5], [`rgb(${176 * k | 0}, ${140 * k | 0}, ${92 * k | 0})`, 0.75]].forEach(([col, w]) => {
+                        ctx.strokeStyle = col;
+                        ctx.lineWidth = Math.max(w > 1 ? 1 : 0.7, w * sc);
+                        if (seam[2]) edge(0, 1);
+                        if (seam[3]) edge(3, 2);
+                    });
+                }
+            }
+        }
+
+        function drawRope(p1, p2) {
+            const s = (HEIGHT * 0.5) / ((p1[2] + p2[2]) / 2);
+            const lw = Math.max(0.8, 0.95 * s);
+            const dx = p2[0] - p1[0], dy = p2[1] - p1[1], len = Math.hypot(dx, dy) || 1;
+            const sag = 2 * s * (1 - windStrength * 0.7);
+            const bow = windStrength * 6 * s * Math.sin(time * 2 + p1[0] * 0.1);
+            const cx = (p1[0] + p2[0]) / 2 - dy / len * bow;
+            const cy = (p1[1] + p2[1]) / 2 + sag + dx / len * bow;
+            const k = 1 - skyDarkness * 0.5;
+            const path = () => {
+                ctx.beginPath();
+                ctx.moveTo(p1[0], p1[1]);
+                ctx.quadraticCurveTo(cx, cy, p2[0], p2[1]);
+            };
+            ctx.save();
+            ctx.lineCap = 'round';
+            ctx.strokeStyle = `rgba(30, 20, 10, ${0.45 * k})`;
+            ctx.lineWidth = lw * 1.9;
+            path();
+            ctx.stroke();
+            ctx.strokeStyle = `rgb(${158 * k | 0}, ${120 * k | 0}, ${72 * k | 0})`;
+            ctx.lineWidth = lw;
+            path();
+            ctx.stroke();
+            ctx.strokeStyle = 'rgba(70, 48, 24, 0.55)';
+            ctx.lineWidth = lw * 0.45;
+            ctx.setLineDash([lw * 1.2, lw * 1.2]);
+            path();
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = `rgba(40, 28, 14, ${0.85 * k})`;
+            [p1, p2].forEach(p => { ctx.beginPath(); ctx.arc(p[0], p[1], lw * 0.9, 0, Math.PI * 2); ctx.fill(); });
+            ctx.restore();
+        }
+
+        function updateStory() {
+            phaseTimer += dtF;
+            if (storyPhase === 0) {
+                weatherIntensity = skyDarkness = windStrength = fogIntensity = 0;
+                altitude = Math.min(1, phaseTimer / 450);
+                if (phaseTimer > 450) { storyPhase = 1; phaseTimer = 0; }
+            } else if (storyPhase === 1) {
+                altitude = 1;
+                weatherIntensity = Math.min(0.25, weatherIntensity + 0.0005 * dtF);
+                skyDarkness = Math.min(0.25, skyDarkness + 0.0005 * dtF);
+                windStrength = Math.min(0.15, windStrength + 0.0004 * dtF);
+                fogIntensity = Math.min(0.08, fogIntensity + 0.0002 * dtF);
+                if (phaseTimer > 600) { storyPhase = 2; phaseTimer = 0; }
+            } else if (storyPhase === 2) {
+                altitude = 1;
+                weatherIntensity = Math.min(0.55, weatherIntensity + 0.0008 * dtF);
+                skyDarkness = Math.min(0.55, skyDarkness + 0.0008 * dtF);
+                windStrength = Math.min(0.45, windStrength + 0.0007 * dtF);
+                fogIntensity = Math.min(0.25, fogIntensity + 0.0004 * dtF);
+                if (phaseTimer > 600) { storyPhase = 3; phaseTimer = 0; }
+            } else if (storyPhase === 3) {
+                altitude = 1;
+                weatherIntensity = Math.min(1, weatherIntensity + 0.0012 * dtF);
+                skyDarkness = Math.min(1, skyDarkness + 0.0012 * dtF);
+                windStrength = Math.min(1, windStrength + 0.001 * dtF);
+                fogIntensity = Math.min(1, fogIntensity + 0.0008 * dtF);
+            }
+        }
+
+        function drawBird(x, y, phase, scale, amp = 1, roll = 0, alpha = 1) {
+            ctx.save();
+            ctx.translate(x, y + Math.cos(phase) * 1.6 * scale);
+            ctx.globalAlpha = alpha;
+            ctx.rotate(roll);
+            ctx.scale(scale, scale);
+
+            const grad = ctx.createLinearGradient(0, -15, 0, 5);
+            grad.addColorStop(0, '#1A1A1A');
+            grad.addColorStop(1, '#3A3A3A');
+            ctx.fillStyle = grad;
+
+            // fast downstroke, slower upstroke; the tip lags behind the shoulder and folds on the way up
+            const fl = ph => 11 * amp * (Math.sin(ph) + 0.22 * Math.sin(2 * ph - 0.6));
+            const w0 = fl(phase), w1 = fl(phase - 0.55), w2 = fl(phase - 1.05);
+            const fold = 1 - 0.2 * Math.max(0, Math.min(1, w1 / 11));
+            const p0 = [0, 0], p1 = [14, -9 - w0], p2 = [30 * fold, -5 - w1 * 1.05], p3 = [43 * fold, -5.2 - w2 * 1.2];
+            const bez = (t) => {
+                const u = 1 - t;
+                return [0, 1].map(k => u * u * u * p0[k] + 3 * u * u * t * p1[k] + 3 * u * t * t * p2[k] + t * t * t * p3[k]);
+            };
+            const wing = (dir) => {
+                const N = 28, up = [], down = [];
+                for (let i = 0; i <= N; i++) {
+                    const t = i / N;
+                    const p = bez(t), q = bez(Math.min(1, t + 0.01)), r = bez(Math.max(0, t - 0.01));
+                    let tx = q[0] - r[0], ty = q[1] - r[1];
+                    const l = Math.hypot(tx, ty) || 1;
+                    tx /= l; ty /= l;
+                    const w = 2.3 * Math.pow(1 - t, 0.9) + 0.25;
+                    up.push([dir * p[0] + dir * ty * w, p[1] - tx * w]);
+                    down.push([dir * p[0] - dir * ty * w, p[1] + tx * w]);
+                }
+                ctx.beginPath();
+                up.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]));
+                for (let i = N; i >= 0; i--) ctx.lineTo(down[i][0], down[i][1]);
+                ctx.closePath();
+                ctx.fill();
+            };
+
+            wing(1);
+            wing(-1);
+            ctx.beginPath();
+            ctx.arc(0, 0, 2.4, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.restore();
+        }
+
+        // Skirt: fabric cone under the envelope, with folds and wind flutter
+        function makeSkirt() {
+            const mid = [], hem = [];
+            for (let s = 0; s <= balloonSegments; s++) {
+                const sm = s % balloonSegments;
+                const phi = (s * 2 * Math.PI) / balloonSegments;
+                const f1 = 1 + 0.05 * Math.sin(sm * 2.3 + 1) + windStrength * 0.07 * Math.sin(time * 6 + sm * 1.7);
+                const f2 = 1 + 0.07 * Math.sin(sm * 3.1) + windStrength * 0.10 * Math.sin(time * 7 + sm * 1.3);
+                mid.push([Math.cos(phi) * 10.5 * f1, 25.5, Math.sin(phi) * 10.5 * f1]);
+                hem.push([Math.cos(phi) * 9.6 * f2, 32.5, Math.sin(phi) * 9.6 * f2]);
+            }
+            return { mid, hem };
+        }
+
+        function drawMetal(p1, p2, w, base) {
+            const s = (HEIGHT * 0.5) / ((p1[2] + p2[2]) / 2);
+            const lw = Math.max(0.8, w * s);
+            const k = 1 - skyDarkness * 0.5;
+            ctx.save();
+            ctx.lineCap = 'round';
+            ctx.strokeStyle = `rgba(15, 15, 20, ${0.5 * k})`;
+            ctx.lineWidth = lw * 1.6;
+            ctx.beginPath(); ctx.moveTo(p1[0], p1[1]); ctx.lineTo(p2[0], p2[1]); ctx.stroke();
+            ctx.strokeStyle = `rgb(${base[0] * k | 0}, ${base[1] * k | 0}, ${base[2] * k | 0})`;
+            ctx.lineWidth = lw;
+            ctx.beginPath(); ctx.moveTo(p1[0], p1[1]); ctx.lineTo(p2[0], p2[1]); ctx.stroke();
+            ctx.strokeStyle = `rgba(255, 255, 255, ${0.25 * k})`;
+            ctx.lineWidth = lw * 0.3;
+            ctx.beginPath(); ctx.moveTo(p1[0], p1[1]); ctx.lineTo(p2[0], p2[1]); ctx.stroke();
+            ctx.restore();
+        }
+
+        function drawFlame(base, tip, burst, burn, part) {
+            const s = (HEIGHT * 0.5) / base[2];
+            const w = (1.7 + 1.4 * burst) * s;
+            const jx = (smoothNoise(time * 50) - 0.5) * 2.5 * s;
+            const cx = base[0], cy = (base[1] + tip[1]) / 2;
+            const R = (22 + 55 * burst) * s * (0.4 + 0.7 * skyDarkness) * 1.3;
+            ctx.save();
+            if (part === 'glow') {
+                ctx.globalCompositeOperation = 'lighter';
+                const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, R);
+                const ga = (0.12 + 0.38 * burn) * (0.04 + 0.8 * skyDarkness);
+                [[0, 1, 255, 172, 64], [0.1, 0.75, 255, 160, 56], [0.2, 0.5, 250, 142, 48], [0.35, 0.28, 240, 124, 40], [0.5, 0.14, 232, 108, 34], [0.7, 0.05, 220, 96, 30], [0.85, 0.015, 210, 90, 28], [1, 0, 200, 80, 25]]
+                    .forEach(([p, k, r, g, bl]) => glow.addColorStop(p, `rgba(${r}, ${g}, ${bl}, ${ga * k})`));
+                ctx.fillStyle = glow;
+                ctx.beginPath();
+                ctx.arc(cx, cy, R, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.globalAlpha = Math.min(0.55, 0.2 * (0.3 + 1.0 * skyDarkness));
+            }
+            ctx.globalCompositeOperation = 'source-over';
+            const fg = ctx.createLinearGradient(0, base[1], 0, tip[1]);
+            fg.addColorStop(0, 'rgba(70, 110, 255, 0.9)');
+            fg.addColorStop(0.2, 'rgba(255, 235, 160, 0.95)');
+            fg.addColorStop(0.6, 'rgba(255, 140, 30, 0.85)');
+            fg.addColorStop(1, 'rgba(255, 60, 0, 0)');
+            ctx.fillStyle = fg;
+            ctx.beginPath();
+            ctx.moveTo(base[0] - w, base[1]);
+            ctx.quadraticCurveTo(base[0] - w, cy, tip[0] + jx, tip[1]);
+            ctx.quadraticCurveTo(base[0] + w, cy, base[0] + w, base[1]);
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+        }
+
+        const fogCanvas = document.createElement('canvas'), fogCtx = fogCanvas.getContext('2d');
+        const vigCanvas = document.createElement('canvas');
+        function buildVignette(W, H) {
+            vigCanvas.width = W; vigCanvas.height = H;
+            const vg = vigCanvas.getContext('2d');
+            const cornerGrad1 = vg.createRadialGradient(0, 0, 0, 0, 0, W * 0.6);
+            cornerGrad1.addColorStop(0, 'rgba(0, 0, 0, 0.5)');
+            cornerGrad1.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            vg.fillStyle = cornerGrad1;
+            vg.fillRect(0, 0, W, H);
+            
+            const cornerGrad2 = vg.createRadialGradient(W, 0, 0, W, 0, W * 0.45);
+            cornerGrad2.addColorStop(0, 'rgba(0, 0, 0, 0.35)');
+            cornerGrad2.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            vg.fillStyle = cornerGrad2;
+            vg.fillRect(0, 0, W, H);
+            
+            const cornerGrad3 = vg.createRadialGradient(0, H, 0, 0, H, W * 0.55);
+            cornerGrad3.addColorStop(0, 'rgba(0, 0, 0, 0.4)');
+            cornerGrad3.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            vg.fillStyle = cornerGrad3;
+            vg.fillRect(0, 0, W, H);
+            
+            const cornerGrad4 = vg.createRadialGradient(W, H, 0, W, H, W * 0.5);
+            cornerGrad4.addColorStop(0, 'rgba(0, 0, 0, 0.45)');
+            cornerGrad4.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            vg.fillStyle = cornerGrad4;
+            vg.fillRect(0, 0, W, H);
+            
+            const topGrad = vg.createLinearGradient(0, 0, 0, H * 0.25);
+            topGrad.addColorStop(0, 'rgba(0, 0, 0, 0.25)');
+            topGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            vg.fillStyle = topGrad;
+            vg.fillRect(0, 0, W, H);
+            
+            const bottomGrad = vg.createLinearGradient(0, H, 0, H * 0.75);
+            bottomGrad.addColorStop(0, 'rgba(0, 0, 0, 0.15)');
+            bottomGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            vg.fillStyle = bottomGrad;
+            vg.fillRect(0, 0, W, H);
+            
+            const leftGrad = vg.createLinearGradient(0, 0, W * 0.15, 0);
+            leftGrad.addColorStop(0, 'rgba(0, 0, 0, 0.2)');
+            leftGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            vg.fillStyle = leftGrad;
+            vg.fillRect(0, 0, W, H);
+
+        }
+
+        // ---------- Lightning: one thin bolt, an occasional quick re-strike, a faint flash on the scene ----------
+        function startBolt() {
+            boltSegs = [];
+            const x0 = WIDTH * (0.15 + Math.random() * 0.7);
+            const xEnd = x0 + (Math.random() - 0.5) * WIDTH * 0.25;
+            const yEnd = HEIGHT * (0.5 + Math.random() * 0.08);
+            const add = (x1, y1, x2, y2, disp, w) => {
+                if (disp < 3 * RSX) { boltSegs.push([x1, y1, x2, y2, w]); return; }
+                const mx = (x1 + x2) / 2 + (Math.random() - 0.5) * disp, my = (y1 + y2) / 2 + (Math.random() - 0.5) * disp * 0.35;
+                add(x1, y1, mx, my, disp * 0.55, w);
+                add(mx, my, x2, y2, disp * 0.55, w);
+                if (w === 1 && disp > 20 * RSX && Math.random() < 0.12) {
+                    const dir = Math.random() < 0.5 ? -1 : 1;
+                    add(mx, my, mx + dir * (25 + Math.random() * 40) * RSX, my + (35 + Math.random() * 60) * RSX, disp * 0.7, 0.5);
+                }
+            };
+            add(x0, -10, xEnd, yEnd, WIDTH * 0.1, 1);
+            boltRestrike = Math.random() < 0.5;
+            boltStart = performance.now();
+        }
+
+        function boltIntensity(t) {
+            let v = t < 0.02 ? 0.3 : t < 0.1 ? 1 : 0.5 * Math.exp(-(t - 0.1) * 22);
+            if (boltRestrike && t > 0.17 && t < 0.27) v = Math.max(v, 0.8 * (1 - (t - 0.17) / 0.1));
+            return v * (0.9 + 0.1 * Math.random());
+        }
+
+        function drawBolt(I) {
+            const k = Math.max(0.7, RSX);
+            ctx.save();
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.globalCompositeOperation = 'lighter';
+            [[5, 'rgba(160, 180, 255,', 0.16], [1.5, 'rgba(255, 255, 255,', 0.95]].forEach(([pw, col, pa]) => {
+                [1, 0.5].forEach(gw => {
+                    ctx.strokeStyle = `${col} ${Math.min(1, pa * I)})`;
+                    ctx.lineWidth = Math.max(0.6, pw * gw * k);
+                    ctx.beginPath();
+                    let any = false;
+                    boltSegs.forEach(sg => { if (sg[4] === gw) { ctx.moveTo(sg[0], sg[1]); ctx.lineTo(sg[2], sg[3]); any = true; } });
+                    if (any) ctx.stroke();
+                });
+            });
+            ctx.restore();
+        }
+
+        function render() {
+            const now = performance.now();
+            const dtMs = now - lastT;
+            emaDt = emaDt * 0.9 + Math.min(dtMs, 50) * 0.1;
+            lastT = now;
+            dtF = Math.min(8, Math.max(0.1, dtMs / 16.667));
+            frameCount++;
+            if (frameCount % 30 === 0 && frameCount > 150 && !endSequenceActive) {
+                slowChecks = emaDt > 22 ? slowChecks + 1 : 0;
+                const li = RS_LEVELS.indexOf(RS);
+                let nl = li;
+                if (slowChecks >= 3 && li < RS_LEVELS.length - 1) { nl = li + 1; lastChangeFrame = frameCount; slowChecks = 0; }
+                else if (emaDt < 13 && li > 0 && frameCount - lastChangeFrame > 900) { nl = li - 1; lastChangeFrame = frameCount; }
+                if (nl !== li) {
+                    const oldW = canvas.width;
+                    RS = RS_LEVELS[nl];
+                    applySize();
+                    const r = canvas.width / oldW;
+                    raindrops.forEach(dr => { dr.x *= r; dr.y *= r; });
+                    emaDt = 16.7;
+                }
+            }
+            WIDTH = canvas.width;
+            HEIGHT = canvas.height;
+            RSX = WIDTH / BASE;
+            updateStory();
+            // wind: gusts push the ground sideways and the whole scene rocks vertically
+            const gust = Math.sin(time * 0.9) * 1.2 + (turbulence(time * 1.7 + 300) - 0.94) * 1.6;
+            latX += windStrength * gust * 2.5 * dtF;
+            bob = windStrength * (Math.sin(time * 1.1) * 0.006 + (turbulence(time * 2.3 + 90) - 0.94) * 0.006);
+
+            const gradient = ctx.createLinearGradient(0, 0, 0, HEIGHT);
+            const blueSky = { r: 74, g: 144, b: 226 }, darkSky = { r: 44, g: 62, b: 80 };
+            let sunriseIntensity = storyPhase === 0 ? Math.max(0, 1 - phaseTimer / 430) : 0;
+            // at dawn the horizon haze is warm peach instead of the usual green-grey
+            const dawnTint = h => mix3(h, [248, 192, 132], sunriseIntensity * 0.95);
+            const hazeCol = dawnTint(mix3([200, 210, 196], [46, 56, 64], Math.min(1, skyDarkness * 1.1)));
+            const sunriseR = 255, sunriseG = 180, sunriseB = 120;
+            
+            const r1 = blueSky.r + (darkSky.r - blueSky.r) * skyDarkness + (sunriseR - blueSky.r) * sunriseIntensity;
+            const g1 = blueSky.g + (darkSky.g - blueSky.g) * skyDarkness + (sunriseG - blueSky.g) * sunriseIntensity;
+            const b1 = blueSky.b + (darkSky.b - blueSky.b) * skyDarkness + (sunriseB - blueSky.b) * sunriseIntensity;
+            
+            // sky stops: day/storm palette blended into a clean indigo -> rose -> orange -> gold dawn, anchored on the horizon
+            const dayBase = [blueSky.r + (darkSky.r - blueSky.r) * skyDarkness, blueSky.g + (darkSky.g - blueSky.g) * skyDarkness, blueSky.b + (darkSky.b - blueSky.b) * skyDarkness];
+            const hzFrac = Math.min(0.95, 0.35 + altitude * 0.20 + bob);
+            const dayAt = p => { const lift = p <= 0.4 ? 20 * p / 0.4 : p <= 0.65 ? 20 + 40 * (p - 0.4) / 0.25 : 60; return mix3(dayBase.map(v => v + lift), [214, 228, 238], 0.55 * sstep(0.45 * hzFrac, hzFrac, p) * (1 - skyDarkness)); };
+            // sunrise keyframes (s = 1 .. 0): the sky travels through believable stages instead of cross-fading two palettes
+            const fs = [0, 0.42, 0.8, 1];
+            const K1 = [[46, 58, 124], [170, 104, 152], [255, 150, 98], [255, 206, 132]];
+            const K2 = [[70, 86, 150], [190, 128, 160], [255, 176, 118], [255, 214, 140]];
+            const K3 = [[96, 128, 196], [176, 170, 206], [250, 200, 150], [255, 226, 166]];
+            const sk = sunriseIntensity;
+            fs.forEach((f, i) => {
+                const p = Math.min(1, f * hzFrac + (i === 3 ? 0 : 0));
+                const c0 = dayAt(i === 3 ? hzFrac : p);
+                const c = sk >= 0.6 ? mix3(K2[i], K1[i], (sk - 0.6) / 0.4) : sk >= 0.3 ? mix3(K3[i], K2[i], (sk - 0.3) / 0.3) : mix3(c0, K3[i], sk / 0.3);
+                gradient.addColorStop(i === 3 ? hzFrac : p, `rgb(${c[0] | 0}, ${c[1] | 0}, ${c[2] | 0})`);
+            });
+            { const cb = mix3(dayAt(1), [255, 206, 132], sk); gradient.addColorStop(1, `rgb(${cb[0] | 0}, ${cb[1] | 0}, ${cb[2] | 0})`); }
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, WIDTH, HEIGHT);
+            if (sunriseIntensity > 0.02) {
+                // the sun climbs from behind the horizon while its glow fades into the daylight
+                const sxs = WIDTH * 0.72, sys = HEIGHT * hzFrac + (sunriseIntensity - 0.35) * HEIGHT * 0.25;
+                const vis = sstep(0, 0.3, sunriseIntensity);
+                ctx.save();
+                ctx.globalCompositeOperation = 'lighter';
+                const sg = ctx.createRadialGradient(sxs, sys, 0, sxs, sys, WIDTH * 0.55);
+                sg.addColorStop(0, `rgba(255, 196, 128, ${0.5 * vis})`);
+                sg.addColorStop(0.35, `rgba(255, 170, 110, ${0.16 * vis})`);
+                sg.addColorStop(1, 'rgba(255, 150, 100, 0)');
+                ctx.fillStyle = sg;
+                ctx.fillRect(0, 0, WIDTH, HEIGHT);
+                const coreA = sstep(0.05, 0.3, sunriseIntensity) * (1 - sstep(0.85, 1, sunriseIntensity));
+                const cg = ctx.createRadialGradient(sxs, sys, 0, sxs, sys, WIDTH * 0.03);
+                cg.addColorStop(0, `rgba(255, 240, 200, ${0.95 * coreA})`);
+                cg.addColorStop(1, 'rgba(255, 220, 160, 0)');
+                ctx.fillStyle = cg;
+                ctx.fillRect(0, 0, WIDTH, HEIGHT);
+                ctx.restore();
+            }
+
+            {
+                const hz = HEIGHT * (0.35 + altitude * 0.20 + bob);
+                const wi = weatherIntensity;
+                const stormVis = sstep(0.04, 0.6, wi);
+                const fairVis = Math.max(0, 1 - skyDarkness * 2.4) * (1 - 0.65 * sunriseIntensity);
+                cloudScroll += (0.2 + windStrength * 3) * RSX * dtF;
+
+                // fair-weather cumulus, thinning out as the storm builds
+                drawLayer(fairTex, cloudScroll * 0.4, hz - HEIGHT * 0.34, HEIGHT * 0.26, WIDTH * 2, 0.8 * fairVis);
+                drawLayer(fairTex, cloudScroll * 0.8 + 500, -HEIGHT * 0.1, HEIGHT * 0.45, WIDTH * 1.5, 0.55 * fairVis);
+
+                // eerie light under the approaching storm base
+                const slit = sstep(0.12, 0.45, wi) * (1 - sstep(0.75, 1, wi));
+                if (slit > 0) {
+                    ctx.save();
+                    ctx.translate(WIDTH / 2, hz);
+                    ctx.scale(1, 0.12);
+                    const sg = ctx.createRadialGradient(0, 0, 0, 0, 0, WIDTH * 0.8);
+                    sg.addColorStop(0, `rgba(215, 185, 120, ${0.5 * slit})`);
+                    sg.addColorStop(0.6, `rgba(170, 150, 100, ${0.22 * slit})`);
+                    sg.addColorStop(1, 'rgba(120, 110, 90, 0)');
+                    ctx.fillStyle = sg;
+                    ctx.fillRect(-WIDTH, -WIDTH, WIDTH * 2, WIDTH * 2);
+                    ctx.restore();
+                }
+
+                // the storm: shelf cloud on the horizon, then a lowering deck overhead
+                const shelfH = HEIGHT * (0.1 + 0.2 * stormVis);
+                drawLayer(shelfTex, cloudScroll * 0.5, hz - shelfH * 0.95, shelfH, WIDTH * 2.5, 0.95 * stormVis);
+                drawLayer(stormTex, cloudScroll * 0.8 + 700, hz - HEIGHT * 0.34, HEIGHT * 0.34, WIDTH * 1.9, 0.9 * stormVis);
+                drawLayer(stormTex, cloudScroll * 1.3 + 200, -HEIGHT * (0.5 - 0.38 * stormVis), HEIGHT * 0.7, WIDTH * 1.5, stormVis);
+
+                // heavy, dark ceiling
+                if (stormVis > 0) {
+                    const vg = ctx.createLinearGradient(0, 0, 0, hz);
+                    vg.addColorStop(0, `rgba(6, 10, 16, ${0.55 * stormVis})`);
+                    vg.addColorStop(1, 'rgba(6, 10, 16, 0)');
+                    ctx.fillStyle = vg;
+                    ctx.fillRect(0, 0, WIDTH, hz);
+                }
+            }
+
+            time += 0.008 * dtF;
+            groundScroll += windStrength * 3 * dtF;
+            const gridOffset = Math.floor(groundScroll / gridSize);
+            const scrollRemainder = groundScroll % gridSize;
+            const baseHorizon = 0.35 + altitude * 0.20 + bob;
+            const horizon = HEIGHT * baseHorizon;
+            const vanishX = WIDTH / 2, vanishY = horizon;
+            
+            if (glReady && HEIGHT - vanishY > 4) {
+                const groundH = HEIGHT - vanishY;
+                const hazeG = hazeCol;
+                const gw = Math.max(64, Math.round(WIDTH * 0.7)), gk = gw / WIDTH;
+                if (glCanvas.width !== gw) { glCanvas.width = gw; glCanvas.height = gw; gl.viewport(0, 0, gw, gw); }
+                gl.uniform2f(glU.uVan, vanishX, vanishY);
+                gl.uniform1f(glU.uH, gw);
+                gl.uniform1f(glU.uInv, 1 / gk);
+                gl.uniform1f(glU.uHeight, HEIGHT);
+                gl.uniform1f(glU.uK, 1638.4);
+                gl.uniform1f(glU.uScroll, groundScroll % 1638.4);
+                gl.uniform1f(glU.uLat, latX % 1638.4);
+                gl.uniform1f(glU.uFlash, lightningFlash);
+                gl.uniform1f(glU.uWarm, sunriseIntensity);
+                gl.uniform1f(glU.uDark, skyDarkness);
+                gl.uniform1f(glU.uGroundH, groundH);
+                gl.uniform3f(glU.uHaze, hazeG[0] / 255, hazeG[1] / 255, hazeG[2] / 255);
+                gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+                const dy = Math.floor(vanishY), sy = dy * gk;
+                ctx.drawImage(glCanvas, 0, sy, gw, gw - sy, 0, dy, WIDTH, HEIGHT - dy);
+                if (frameCount % 20 === 0) {
+                    if (groundSnap.width !== gw) { groundSnap.width = gw; groundSnap.height = gw; }
+                    groundSnap.getContext('2d').drawImage(glCanvas, 0, 0);
+                    snapInfo = { gw, dyN: dy / HEIGHT, dark: skyDarkness };
+                    snapReady = true;
+                }
+            } else if (glLost && snapReady && performance.now() - lostAt < 4000) {
+                const dy2 = Math.floor(snapInfo.dyN * HEIGHT), sy2 = Math.floor(snapInfo.dyN * snapInfo.gw);
+                ctx.drawImage(groundSnap, 0, sy2, snapInfo.gw, snapInfo.gw - sy2, 0, dy2, WIDTH, HEIGHT - dy2);
+                const extra = Math.max(0, skyDarkness - snapInfo.dark);
+                if (extra > 0) { ctx.fillStyle = `rgba(14, 22, 34, ${0.55 * extra})`; ctx.fillRect(0, dy2, WIDTH, HEIGHT - dy2); }
+            } else {
+                // plain between the mountains and the fields (only used without the GPU ground)
+                const hzP = HEIGHT * (0.35 + altitude * 0.20 + bob);
+                const hazeP = hazeCol;
+                const gkP = 1 - skyDarkness * 0.5, gcolP = [112 * gkP, 128 * gkP, 84 * gkP];
+                const rgbP = c => `${c[0] | 0}, ${c[1] | 0}, ${c[2] | 0}`;
+                const lgP = ctx.createLinearGradient(0, hzP, 0, HEIGHT);
+                lgP.addColorStop(0, `rgb(${rgbP(hazeP)})`);
+                lgP.addColorStop(0.25, `rgb(${rgbP(mix3(hazeP, gcolP, 0.35))})`);
+                lgP.addColorStop(0.6, `rgb(${rgbP(mix3(hazeP, gcolP, 0.75))})`);
+                lgP.addColorStop(1, `rgb(${rgbP(gcolP)})`);
+                ctx.fillStyle = lgP;
+                ctx.fillRect(0, hzP, WIDTH, HEIGHT - hzP);
+            for (let z = -1; z < gridDepth; z++) {
+                for (let x = 0; x < gridWidth; x++) {
+                    const actualZ = z + gridOffset;
+                    const z1 = z * gridSize - scrollRemainder;
+                    const z2 = (z + 1) * gridSize - scrollRemainder;
+                    const x1 = (x - gridWidth / 2) * gridSize;
+                    const x2 = (x + 1 - gridWidth / 2) * gridSize;
+                    
+                    if (z1 < 0) continue;
+                    
+                    const scale1 = (HEIGHT * 2) / (z1 + 500);
+                    const scale2 = (HEIGHT * 2) / (z2 + 500);
+                    const y1 = vanishY + HEIGHT * 0.4 * scale1;
+                    const y2 = vanishY + HEIGHT * 0.4 * scale2;
+                    
+                    if (y1 < HEIGHT + 100) {
+                        const sx1 = vanishX + x1 * scale1;
+                        const sx2 = vanishX + x2 * scale1;
+                        const sx3 = vanishX + x2 * scale2;
+                        const sx4 = vanishX + x1 * scale2;
+                        
+                        const fadeStart = gridSize * 3;
+                        const fadeDistance = gridSize * 8;
+                        const distanceFade = z1 < fadeStart ? 1 : Math.max(0, 1 - (z1 - fadeStart) / fadeDistance);
+                        const brightness = (1 - skyDarkness * 0.5) * distanceFade;
+                        
+                        ctx.globalAlpha = distanceFade;
+                        ctx.fillStyle = adjustBrightness(getFieldColor(x, actualZ), brightness);
+                        ctx.beginPath();
+                        ctx.moveTo(sx1, Math.max(y1, vanishY));
+                        ctx.lineTo(sx2, Math.max(y1, vanishY));
+                        ctx.lineTo(sx3, Math.min(y2, HEIGHT));
+                        ctx.lineTo(sx4, Math.min(y2, HEIGHT));
+                        ctx.closePath();
+                        ctx.fill();
+                        
+                        if (y2 > vanishY) {
+                            ctx.strokeStyle = `rgba(0, 0, 0, ${(0.2 - skyDarkness * 0.1) * distanceFade})`;
+                            ctx.lineWidth = 1;
+                            ctx.stroke();
+                        }
+                        ctx.globalAlpha = 1;
+                    }
+                }
+            }
+            
+            }
+
+            // distant mountain ridges: each one lighter and hazier than the one in front, resting on a layer of mist
+            {
+                const hzR = HEIGHT * (0.35 + altitude * 0.20 + bob);
+                const hazeR = hazeCol;
+                const rgbS = c => `${c[0] | 0}, ${c[1] | 0}, ${c[2] | 0}`;
+                const ridgeDefs = [
+                    { amp: 0.11, f: 0.0042, haze: 0.5, jag: 0, day: [128, 150, 176], storm: [46, 58, 74], dawn: [112, 90, 130] },
+                    { amp: 0.07, f: 0.0068, haze: 0.34, jag: 0.6, day: [88, 118, 128], storm: [34, 44, 56], dawn: [80, 68, 110] },
+                    { amp: 0.04, f: 0.011, haze: 0.18, jag: 1.1, day: [56, 88, 70], storm: [24, 32, 38], dawn: [48, 42, 78] }
+                ];
+                const STEP = 4;
+                ridgeDefs.forEach((L, i) => {
+                    const amp = HEIGHT * L.amp, foot = hzR + 1;
+                    const off = cloudScroll * (0.04 + 0.03 * i) + i * 370 + latX * (0.02 + 0.015 * i);
+                    const base = mix3(mix3(L.day, L.storm, Math.min(1, skyDarkness * 1.1)), L.dawn, Math.min(1, sunriseIntensity * 1.6) * 0.9);
+                    const topCol = mix3(base, hazeR, L.haze * (1 - 0.55 * sunriseIntensity));
+                    const n = Math.ceil(WIDTH / STEP) + 2;
+                    const ys = [];
+                    for (let k = 0; k < n; k++) {
+                        const t = turbulence((k * STEP + off) * L.f + i * 17.3, 6) / 1.969;
+                        ys.push(hzR - amp * (0.1 + 0.9 * Math.pow(1 - Math.abs(2 * t - 1), 1.25)) - L.jag * noise(k * 5.31 + i * 7.7) * 2);
+                    }
+                    const rg = ctx.createLinearGradient(0, hzR - amp, 0, foot);
+                    rg.addColorStop(0, `rgb(${rgbS(topCol)})`);
+                    rg.addColorStop(0.5, `rgb(${rgbS(mix3(topCol, hazeR, 0.45))})`);
+                    rg.addColorStop(1, `rgb(${rgbS(hazeR)})`);
+                    ctx.fillStyle = rg;
+                    ctx.beginPath();
+                    ctx.moveTo(0, foot);
+                    ys.forEach((y, k) => ctx.lineTo(k * STEP, y));
+                    ctx.lineTo((n - 1) * STEP, foot);
+                    ctx.closePath();
+                    ctx.fill();
+                    // soft rim light along the crest: white in daylight, warm gold while the sun is low
+                    const warmRim = 0.55 * Math.max(0, Math.sin(Math.min(1, sunriseIntensity / 0.75) * Math.PI)) * (1 - skyDarkness);
+                    const rim = 0.2 * (1 - skyDarkness) * (1 - sunriseIntensity);
+                    [[warmRim, '255, 206, 150'], [rim, '255, 255, 255']].forEach(([al, col]) => {
+                        if (al < 0.01) return;
+                        ctx.strokeStyle = `rgba(${col}, ${al})`;
+                        ctx.lineWidth = 1.2;
+                        ctx.beginPath();
+                        ys.forEach((y, k) => k ? ctx.lineTo(k * STEP, y) : ctx.moveTo(0, y));
+                        ctx.stroke();
+                    });
+                    // mist settling at the base, in front of this ridge and the ones behind it
+                    const mg = ctx.createLinearGradient(0, hzR - amp * 0.45, 0, foot);
+                    mg.addColorStop(0, `rgba(${rgbS(hazeR)}, 0)`);
+                    mg.addColorStop(1, `rgba(${rgbS(hazeR)}, ${0.5 - 0.12 * i})`);
+                    ctx.fillStyle = mg;
+                    ctx.fillRect(0, hzR - amp * 0.45, WIDTH, amp * 0.45 + 1);
+                });
+            }
+
+            const spiralX = Math.sin(time * 0.3 * windStrength) * 60 * windStrength;
+            const spiralY = Math.sin(time * 0.2 * windStrength) * 30 * windStrength;
+            const spiralZ = Math.cos(time * 0.3 * windStrength) * 60 * windStrength;
+
+            floatOffset.y += 0.02 * floatOffset.dir * dtF;
+            if (floatOffset.y > 10 || floatOffset.y < -10) floatOffset.dir *= -1;
+
+            angleY += (0.001 + windStrength * 0.015 + (turbulence(time * 3) - 0.5) * windStrength * 0.01) * dtF;
+            angleX = Math.sin(time * 0.25) * 0.05 + (turbulence(time * 2.5 + 50) - 0.5) * windStrength * 0.3;
+            angleZ = Math.cos(time * 0.35) * 0.05 + (turbulence(time * 2.2 + 150) - 0.5) * windStrength * 0.25;
+
+            const xf = v => {
+                let p = [v[0] + spiralX, v[1] + floatOffset.y + spiralY, v[2] + spiralZ];
+                p = rotateX(p, angleX);
+                p = rotateY(p, angleY);
+                return rotateZ(p, angleZ);
+            };
+            balloonCtr = xf([0, -45, 0]);
+            const burst = Math.pow(Math.max(0, Math.sin(time * 1.3)), 6);
+            const burn = (0.25 + 0.75 * burst) * (0.85 + 0.3 * smoothNoise(time * 35));
+
+            const balloonRotated = balloonVertices.map(v => {
+                let p = [v[0] + spiralX, v[1] + floatOffset.y + spiralY, v[2] + spiralZ];
+                p = rotateX(p, angleX);
+                p = rotateY(p, angleY);
+                p = rotateZ(p, angleZ);
+                return p;
+            });
+            const balloonProjected = balloonRotated.map(project);
+
+            const allFaces = [];
+            const zAvg = pts => pts.reduce((q, p) => q + p[2], 0) / pts.length;
+            const area2 = pts => { let q = 0; for (let k = 0; k < pts.length; k++) { const n = pts[(k + 1) % pts.length]; q += pts[k][0] * n[1] - n[0] * pts[k][1]; } return q; };
+
+            // The envelope is convex: keep only the facets turned toward the camera. They can no longer overlap each other,
+            // so their order does not matter; the facet closest to us tells which winding is the front one.
+            let nearestZ = Infinity, frontSign = 1;
+            const envFacets = [];
+            balloonFaces.forEach((face, i) => {
+                const ring = Math.floor(i / balloonSegments);
+                if (ring < 2) return;
+                const pts3D = face.map(idx => balloonRotated[idx]);
+                const pts2D = face.map(idx => balloonProjected[idx]);
+                const z = zAvg(pts2D), a = area2(pts2D);
+                if (z < nearestZ) { nearestZ = z; frontSign = Math.sign(a) || 1; }
+                envFacets.push([i, ring, pts3D, pts2D, a, z]);
+            });
+            envFacets.forEach(([i, ring, pts3D, pts2D, a, z]) => {
+                if (a * frontSign <= 0) return;
+                const sg = i % balloonSegments;
+                const glow = ring < 7 ? burn * 0.45 * (1 - (ring - 2) / 5) : 0;
+                // seam flags: [meridian, ring, strap on the left edge, strap on the right edge]
+                allFaces.push({ pts2D, pts3D, depth: z, color: balloonPanelColors[i], glow, boost: true, seam: [true, true, sg % 4 === 0, (sg + 1) % 4 === 0], fid: i, ao: 1 - 0.22 * Math.max(0, 6 - ring) / 6 });
+            });
+
+            const solid = (pts3D, pts2D, color) => allFaces.push({ pts2D, pts3D, depth: zAvg(pts2D), color });
+            const basketRotated = basketVertices.map(xf), basketProjected = basketRotated.map(project);
+            basketFaces.forEach(face => solid(face.map(k => basketRotated[k]), face.map(k => basketProjected[k]), '#A0522D'));
+            [person1, person2].forEach(person => {
+                const rot = person.vertices.map(xf), proj = rot.map(project);
+                person.faces.forEach(face => solid(face.indices.map(k => rot[k]), face.indices.map(k => proj[k]), face.color));
+            });
+
+            const skirt = makeSkirt();
+            const midR = skirt.mid.map(xf), hemR = skirt.hem.map(xf);
+            const midP = midR.map(project), hemP = hemR.map(project);
+            for (let sg = 0; sg < balloonSegments; sg++) {
+                const t0 = 2 * (balloonSegments + 1) + sg;
+                const faceA = { p3: [midR[sg], balloonRotated[t0], balloonRotated[t0 + 1], midR[sg + 1]], p2: [midP[sg], balloonProjected[t0], balloonProjected[t0 + 1], midP[sg + 1]], color: '#1B1512', glow: burn * 0.9 };
+                const faceB = { p3: [hemR[sg], midR[sg], midR[sg + 1], hemR[sg + 1]], p2: [hemP[sg], midP[sg], midP[sg + 1], hemP[sg + 1]], color: '#14100E', glow: burn * 0.6 };
+                [faceA, faceB].forEach(fc => { if (area2(fc.p2) * frontSign > 0) allFaces.push({ pts2D: fc.p2, pts3D: fc.p3, depth: zAvg(fc.p2), color: fc.color, glow: fc.glow }); });
+            }
+
+            const addMetal = (a, b, w, col) => {
+                const pa = project(xf(a)), pb = project(xf(b));
+                allFaces.push({ metal: [pa, pb, w, col], depth: (pa[2] + pb[2]) / 2 });
+            };
+            const steel = [165, 170, 176];
+            const ringPts = Array.from({ length: 12 }, (_, k) => [9 * Math.cos(k * Math.PI / 6), 36, 9 * Math.sin(k * Math.PI / 6)]);
+            ringPts.forEach((p, k) => addMetal(p, ringPts[(k + 1) % 12], 1.3, steel));
+            addMetal(ringPts[0], ringPts[6], 0.9, steel);
+            addMetal(ringPts[3], ringPts[9], 0.9, steel);
+            [[-10, -10], [10, -10], [10, 10], [-10, 10]].forEach(([px, pz]) => {
+                const k = Math.round(Math.atan2(Math.sign(pz), Math.sign(px)) / (Math.PI / 6));
+                const top = [6.36 * Math.sign(px), 36, 6.36 * Math.sign(pz)];
+                addMetal([px, 45, pz], top, 1.6, steel);
+            });
+            addMetal([0, 37.8, 0], [0, 34.5, 0], 4.2, [70, 70, 76]);
+            const flameBase = project(xf([0, 34.5, 0])), flameTip = project(xf([0, 34.5 - (4 + 11 * burst), 0]));
+            allFaces.push({ flame: [flameBase, flameTip], depth: flameBase[2] });
+
+            ropePoints.forEach(rope => {
+                const rotated = rope.map(v => {
+                    let p = [v[0] + spiralX, v[1] + floatOffset.y + spiralY, v[2] + spiralZ];
+                    p = rotateX(p, angleX);
+                    p = rotateY(p, angleY);
+                    p = rotateZ(p, angleZ);
+                    return project(p);
+                });
+                allFaces.push({ rope: rotated, depth: Math.min(rotated[0][2], rotated[1][2]) - 10 });
+            });
+
+            if (!birdPassed && storyPhase === 0 && phaseTimer > 180) {
+                const nowB = performance.now();
+                const dtB = birdLastT ? Math.min(0.05, (nowB - birdLastT) / 1000) : 0.016;
+                birdLastT = nowB;
+                birdProgress += dtB / 2.6;
+                birdPhase += dtB * Math.PI * 2 * 2.6;
+                const t = Math.min(1, birdProgress);
+                // the bird comes from behind the balloon and flies toward us
+                const bz = 1000 - t * 890;
+                const f = 260 / bz;
+                // starts hidden behind the envelope, slips out of its upper-left edge, then flies off to the left
+                const birdX = WIDTH * (0.5 - 0.62 * t * t);
+                const birdY = HEIGHT * (0.42 + bob - 0.34 * t * t);
+                const roll = -520 * t * 0.0005;
+                const scale = Math.max(0.3, f) * RSX;
+                const amp = 0.3 + 0.7 * sstep(-0.2, 0.4, Math.sin(t * 9));
+                allFaces.push({ bird: [birdX, birdY, birdPhase, scale, amp, roll, Math.min(1, t / 0.2)], depth: bz > 300 ? 1e6 : -1e6 });
+                if (t >= 1) birdPassed = true;
+            }
+
+            allFaces.sort((a, b) => b.depth - a.depth);
+
+            allFaces.forEach(f => f.bird ? drawBird(...f.bird) : f.flame ? drawFlame(f.flame[0], f.flame[1], burst, burn, 'body') : f.rope ? drawRope(f.rope[0], f.rope[1]) : f.metal ? drawMetal(f.metal[0], f.metal[1], f.metal[2], f.metal[3]) : drawFace(f.pts2D, f.pts3D, f.color, f.glow, f.boost, f.seam, f.fid, f.ao));
+
+
+
+            if (weatherIntensity > 0.4) {
+                ctx.strokeStyle = `rgba(174, 214, 241, ${(weatherIntensity - 0.4) * 1.5})`;
+                ctx.lineWidth = 1 + weatherIntensity;
+                const activeRaindrops = Math.floor(150 * (weatherIntensity - 0.4) / 0.6);
+                for (let i = 0; i < activeRaindrops; i++) {
+                    const drop = raindrops[i];
+                    ctx.beginPath();
+                    ctx.moveTo(drop.x, drop.y);
+                    ctx.lineTo(drop.x - (2 + windStrength * 3) * RSX, drop.y + drop.length * (1 + weatherIntensity * 0.5) * RSX);
+                    ctx.stroke();
+                    drop.y += drop.speed * (1 + windStrength) * (1 + weatherIntensity * 0.5) * RSX * dtF;
+                    drop.x -= (1 + windStrength * 2) * RSX * dtF;
+                    if (drop.y > HEIGHT) {
+                        drop.y = -10;
+                        drop.x = Math.random() * WIDTH;
+                    }
+                }
+            }
+
+            if (fogIntensity > 0) {
+                const fw = Math.max(64, WIDTH >> 2);
+                if (fogCanvas.width !== fw) { fogCanvas.width = fw; fogCanvas.height = fw; }
+                const fk = fw / WIDTH, fr = 350 * RSX;
+                fogCtx.setTransform(fk, 0, 0, fk, 0, 0);
+                fogCtx.clearRect(0, 0, WIDTH, HEIGHT);
+                for (let i = 0; i < 8; i++) {
+                    const fogX = (time * 5 * (i + 1) + i * 150) % (WIDTH + 400) - 200;
+                    const fogY = HEIGHT * 0.2 + i * HEIGHT * 0.12;
+                    const fogGrad = fogCtx.createRadialGradient(fogX, fogY, 0, fogX, fogY, fr);
+                    fogGrad.addColorStop(0, `rgba(50, 60, 70, ${fogIntensity * 0.6})`);
+                    fogGrad.addColorStop(0.5, `rgba(40, 50, 60, ${fogIntensity * 0.4})`);
+                    fogGrad.addColorStop(1, 'rgba(40, 50, 60, 0)');
+                    fogCtx.fillStyle = fogGrad;
+                    fogCtx.fillRect(fogX - fr, fogY - fr, fr * 2, fr * 2);
+                }
+                fogCtx.fillStyle = `rgba(35, 45, 55, ${fogIntensity * 0.85})`;
+                fogCtx.fillRect(0, 0, WIDTH, HEIGHT);
+                ctx.drawImage(fogCanvas, 0, 0, WIDTH, HEIGHT);
+            }
+
+            drawFlame(flameBase, flameTip, burst, burn, 'glow');
+
+            if (vigCanvas.width !== WIDTH) buildVignette(WIDTH, HEIGHT);
+            ctx.drawImage(vigCanvas, 0, 0);
+
+            if (weatherIntensity > 0.7) {
+                lightningTimer += dtF;
+                const lightningFreq = 180 - (weatherIntensity - 0.7) * 400;
+                if (lightningTimer > lightningFreq + Math.random() * 240) {
+                    startBolt();
+                    lightningTimer = 0;
+                    lightningCount++;
+                    if (lightningCount >= 10 && !endSequenceActive) {
+                        endSequenceActive = true;
+                        dramaticEndFrame = 0;
+                    }
+                }
+            }
+
+            let flashNow = 0;
+            if (boltStart >= 0) {
+                const bt = (performance.now() - boltStart) / 1000;
+                if (bt > 0.45) boltStart = -1;
+                else {
+                    const I = boltIntensity(bt);
+                    if (I > 0.01) { drawBolt(I); flashNow = Math.max(flashNow, I); }
+                }
+            }
+            lightningFlash = Math.max(lightningFlash * Math.pow(0.8, dtF), flashNow);
+            if (lightningFlash > 0.02) {
+                ctx.fillStyle = `rgba(175, 190, 255, ${lightningFlash * 0.09})`;
+                ctx.fillRect(0, 0, WIDTH, HEIGHT);
+            }
+
+            if (endSequenceActive) {
+                dramaticEndFrame++;
+                if (dramaticEndFrame <= 10) {
+                    ctx.fillStyle = 'rgba(255, 255, 255, 1)';
+                    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+                } else if (dramaticEndFrame <= 70) {
+                    ctx.fillStyle = 'rgba(0, 0, 0, 1)';
+                    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+                } else if (dramaticEndFrame <= 100) {
+                    const glowIntensity = 1 - (dramaticEndFrame - 70) / 30;
+                    ctx.fillStyle = 'rgba(0, 0, 0, 1)';
+                    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+                    const flickerTime = dramaticEndFrame * 0.8;
+                    for (let i = 0; i < 7; i++) {
+                        const offsetX = (turbulence(flickerTime * 1.5 + i * 50) - 0.5) * WIDTH * 0.4;
+                        const offsetY = (turbulence(flickerTime * 1.3 + i * 75 + 25) - 0.5) * HEIGHT * 0.4;
+                        const size = (0.25 + turbulence(flickerTime * 1.7 + i * 30) * 0.5) * WIDTH;
+                        const brightness = glowIntensity * (0.15 + turbulence(flickerTime * 2 + i * 60) * 0.25);
+                        const flicker1 = turbulence(flickerTime * 2 + i * 10);
+                        const flicker2 = turbulence(flickerTime * 2.3 + i * 15);
+                        const flicker3 = turbulence(flickerTime * 1.8 + i * 20);
+                        const glowGrad = ctx.createRadialGradient(WIDTH / 2 + offsetX, HEIGHT / 2 + offsetY, 0, WIDTH / 2 + offsetX, HEIGHT / 2 + offsetY, size);
+                        glowGrad.addColorStop(0, `rgba(${150 + flicker1 * 40}, ${30 + flicker1 * 20}, 0, ${brightness * 0.35})`);
+                        glowGrad.addColorStop(0.3, `rgba(${180 + flicker2 * 30}, ${50 + flicker2 * 25}, 5, ${brightness * 0.2})`);
+                        glowGrad.addColorStop(0.6, `rgba(${100 + flicker3 * 30}, ${40 + flicker3 * 20}, 0, ${brightness * 0.1})`);
+                        glowGrad.addColorStop(1, 'rgba(80, 20, 0, 0)');
+                        ctx.fillStyle = glowGrad;
+                        ctx.fillRect(0, 0, WIDTH, HEIGHT);
+                    }
+                } else {
+                    ctx.fillStyle = 'rgba(0, 0, 0, 1)';
+                    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+                    if (dramaticEndFrame > 110) {
+                        // title card: light, wide-tracked capitals, letters drawn one by one for an even rhythm
+                        const fadeIn = Math.min(1, (dramaticEndFrame - 110) / 60);
+                        const size = WIDTH * 0.05, track = size * 0.42;
+                        ctx.font = `200 ${size}px "Helvetica Neue", "Segoe UI", Helvetica, Arial, sans-serif`;
+                        ctx.textAlign = 'left';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillStyle = `rgba(215, 218, 222, ${fadeIn * 0.85})`;
+                        const title = 'SQUALL LINE';
+                        const widths = [...title].map(ch => ctx.measureText(ch).width);
+                        const total = widths.reduce((q, w) => q + w, 0) + track * (title.length - 1);
+                        let x = WIDTH / 2 - total / 2;
+                        [...title].forEach((ch, i) => { ctx.fillText(ch, x, HEIGHT / 2); x += widths[i] + track; });
+                    }
+                    if (dramaticEndFrame < 200) {
+                        requestAnimationFrame(render);
+                    }
+                    return;
+                }
+            }
+
+            requestAnimationFrame(render);
+        }
+
+        lastT = performance.now();
+        render();
+    </script>
+</body>
+</html>

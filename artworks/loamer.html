@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="version" content="1.0.1">
+<!-- v1.0.1 -->
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #1a1510; display: flex; align-items: center; justify-content: center; height: 100vh; overflow: hidden; margin: 0; padding: 0; }
+
+  /* CRT TV frame */
+  .crt-container {
+    position: relative;
+    width: 100vmin;
+    height: 100vmin;
+    max-width: 100vh;
+    max-height: 100vw;
+    background: #0f0c08;
+  }
+
+  .crt-screen {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #000;
+  }
+
+  canvas { 
+    display: block; 
+    width: 100%;
+    height: 100%;
+    filter: contrast(1.3) brightness(0.9) sepia(0.15);
+  }
+
+  /* Scanlines with warm amber tint */
+  .scanlines {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      rgba(0,0,0,0.15),
+      rgba(0,0,0,0.15) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+    pointer-events: none;
+    z-index: 10;
+    
+  }
+
+  /* Warm color bleed overlay */
+  .color-bleed {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: radial-gradient(ellipse at 30% 40%, rgba(255, 140, 40, 0.06) 0%, transparent 60%),
+                radial-gradient(ellipse at 70% 60%, rgba(255, 100, 30, 0.04) 0%, transparent 50%);
+    pointer-events: none;
+    z-index: 17;
+    
+    animation: colorShift 8s ease-in-out infinite alternate;
+  }
+
+  @keyframes colorShift {
+    0% { opacity: 0.6; }
+    100% { opacity: 1; }
+  }
+
+  /* Interlacing effect */
+  .interlace {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      rgba(255,255,255,0.02),
+      rgba(255,255,255,0.02) 1px,
+      transparent 1px,
+      transparent 2px
+    );
+    pointer-events: none;
+    z-index: 11;
+    animation: interlaceFlicker 0.1s infinite;
+    
+  }
+
+  @keyframes interlaceFlicker {
+    0% { opacity: 0.3; }
+    50% { opacity: 0.5; }
+    100% { opacity: 0.3; }
+  }
+
+  /* Rolling bar */
+  .rolling-bar {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 8px;
+    background: rgba(255, 180, 80, 0.06);
+    pointer-events: none;
+    z-index: 12;
+    animation: roll 4s linear infinite;
+    
+  }
+
+  @keyframes roll {
+    0% { top: -10px; }
+    100% { top: 100%; }
+  }
+
+  /* Vignette with warm dark edges */
+  .vignette {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: radial-gradient(ellipse at center, transparent 50%, rgba(40, 20, 5, 0.5) 100%);
+    pointer-events: none;
+    z-index: 13;
+    
+  }
+
+  /* Noise overlay */
+  .noise {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    pointer-events: none;
+    z-index: 14;
+    opacity: 0.08;
+    
+  }
+
+  /* Screen flicker */
+  .flicker {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(255,255,255,0.02);
+    pointer-events: none;
+    z-index: 15;
+    animation: flicker 0.15s infinite;
+    
+  }
+
+  @keyframes flicker {
+    0% { opacity: 0; }
+    50% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+
+
+
+  /* Screen curvature simulation via border-radius */
+  .curvature {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    
+    box-shadow: inset 0 0 50px rgba(0,0,0,0.5);
+    pointer-events: none;
+    z-index: 16;
+  }
+
+  /* Phosphor glow - warm amber accent */
+  .phosphor {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(255, 160, 60, 0.04);
+    pointer-events: none;
+    z-index: 9;
+    
+    mix-blend-mode: overlay;
+  }
+</style>
+</head>
+<body>
+<div class="crt-container">
+  <div class="crt-screen">
+    <canvas id="c"></canvas>
+    <div class="phosphor"></div>
+    <div class="scanlines"></div>
+    <div class="interlace"></div>
+    <div class="rolling-bar"></div>
+    <div class="vignette"></div>
+    <div class="noise" id="noise"></div>
+    <div class="flicker"></div>
+    <div class="color-bleed"></div>
+
+  </div>
+  <div class="tv-label">Loamer</div>
+</div>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+// Noise generation for 60s TV effect
+const noiseCanvas = document.createElement('canvas');
+const noiseCtx = noiseCanvas.getContext('2d');
+noiseCanvas.width = 256;
+noiseCanvas.height = 256;
+
+function generateNoise() {
+  const imageData = noiseCtx.createImageData(256, 256);
+  const data = imageData.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const val = Math.random() * 255;
+    data[i] = val;
+    data[i+1] = val;
+    data[i+2] = val;
+    data[i+3] = 255;
+  }
+  noiseCtx.putImageData(imageData, 0, 0);
+}
+
+// Generate noise texture
+const noisePattern = () => {
+  generateNoise();
+  return noiseCtx.createPattern(noiseCanvas, 'repeat');
+};
+
+// Apply noise to overlay — pre-generate frames once (toDataURL every 50ms was a CPU hog)
+const noiseDiv = document.getElementById('noise');
+if (noiseDiv) {
+  const frames = [];
+  for (let i = 0; i < 6; i++) { generateNoise(); frames.push(`url(${noiseCanvas.toDataURL()})`); }
+  let fi = 0;
+  setInterval(() => { noiseDiv.style.backgroundImage = frames[fi = (fi + 1) % frames.length]; }, 80);
+}
+
+// Barrel distortion for CRT curvature effect (applied via CSS on canvas)
+// We simulate this by drawing with slight curvature in the animation
+
+function resize() {
+  const s = Math.min(window.innerWidth, window.innerHeight);
+  canvas.width = s;
+  canvas.height = s;
+}
+resize();
+
+const getCX = () => canvas.width / 2;
+const getCY = () => canvas.height / 2;
+
+// per-frame cache (updated once in animate)
+let F = { cx: 0, cy: 0, maxDist: 0 };
+function updateFrameCache() { F.cx = canvas.width / 2; F.cy = canvas.height / 2; F.maxDist = canvas.width * 0.55; }
+updateFrameCache();
+
+const SYMMETRY = 8;
+const COLS = 10;
+const ROWS = 6;
+const MAX_PTS = 16;
+
+function lerp(a, b, t) { return a + (b - a) * t; }
+function easeInOut(t) { return t < 0.5 ? 2*t*t : -1+(4-2*t)*t; }
+
+function polygon(sides, r, rot = 0) {
+  return Array.from({ length: MAX_PTS }, (_, i) => {
+    const s = Math.floor((i / MAX_PTS) * sides);
+    const t = (i / MAX_PTS) * sides - s;
+    const a1 = (s / sides) * Math.PI * 2 + rot;
+    const a2 = ((s + 1) / sides) * Math.PI * 2 + rot;
+    return { x: lerp(Math.cos(a1), Math.cos(a2), t) * r, y: lerp(Math.sin(a1), Math.sin(a2), t) * r };
+  });
+}
+
+function star(spikes, r, rot = 0) {
+  return Array.from({ length: MAX_PTS }, (_, i) => {
+    const total = spikes * 2;
+    const s = Math.floor((i / MAX_PTS) * total);
+    const t = (i / MAX_PTS) * total - s;
+    const r1 = s % 2 === 0 ? r : r * 0.45;
+    const r2 = s % 2 === 0 ? r * 0.45 : r;
+    const a1 = (s / total) * Math.PI * 2 + rot;
+    const a2 = ((s + 1) / total) * Math.PI * 2 + rot;
+    return { x: lerp(Math.cos(a1)*r1, Math.cos(a2)*r2, t), y: lerp(Math.sin(a1)*r1, Math.sin(a2)*r2, t) };
+  });
+}
+
+function circle(r) {
+  return Array.from({ length: MAX_PTS }, (_, i) => {
+    const a = (i / MAX_PTS) * Math.PI * 2;
+    return { x: Math.cos(a) * r, y: Math.sin(a) * r };
+  });
+}
+
+function blob(r, rot = 0) {
+  return Array.from({ length: MAX_PTS }, (_, i) => {
+    const a = (i / MAX_PTS) * Math.PI * 2;
+    const rr = r * (1 + 0.25 * Math.sin(a * 3 + rot * 4));
+    return { x: Math.cos(a) * rr, y: Math.sin(a) * rr };
+  });
+}
+
+function skull(r, rot = 0) {
+  // silhouette de crâne : calotte ronde, pommettes, mâchoire courte
+  const base = [
+    [0,-1],[0.42,-0.94],[0.78,-0.68],[0.95,-0.28],[0.92,0.08],[0.72,0.32],
+    [0.6,0.42],[0.55,0.72],[0.28,0.8],[-0.28,0.8],[-0.55,0.72],[-0.6,0.42],
+    [-0.72,0.32],[-0.92,0.08],[-0.95,-0.28],[-0.78,-0.68]
+  ];
+  const c = Math.cos(rot), s = Math.sin(rot);
+  return base.map(([x, y]) => ({ x: (x*c - y*s) * r, y: (x*s + y*c) * r }));
+}
+
+const SHAPES = [
+  (r, rot) => polygon(3, r, rot),
+  (r, rot) => polygon(4, r, rot),
+  (r, rot) => polygon(5, r, rot),
+  (r, rot) => polygon(6, r, rot),
+  (r, rot) => star(4, r, rot),
+  (r, rot) => star(5, r, rot),
+  (r, rot) => circle(r),
+  (r, rot) => blob(r, rot),
+  (r, rot) => skull(r, rot),
+];
+const SKULL_IDX = SHAPES.length - 1;
+
+const armRotations = Array.from({ length: SYMMETRY }, (_, i) => ({
+  angle: (i / SYMMETRY) * Math.PI * 2,
+  speed: (Math.random() - 0.5) * 0.0005,
+}));
+
+// === Generative ghosts ===
+// Each stream keeps its own list of past silhouettes that shrink and fade
+// with age, drawn directly each frame (no shared buffer = no flicker).
+const GHOST_LIFE = 26;
+function resizeTrail() {}
+
+class Stream {
+  constructor(col, row) {
+    this.col = col;
+    this.row = row;
+    this.lateralOffset = (col / (COLS - 1) - 0.5) * 80;
+    this.dist = (row / ROWS) * canvas.width * 0.55;
+    this.rotation = Math.random() * Math.PI * 2;
+    this.rotSpeed = (Math.random() - 0.5) * 0.02;
+    this.shapeA = Math.floor(Math.random() * SHAPES.length);
+    this.shapeB = Math.floor(Math.random() * SHAPES.length);
+    this.morphT = Math.random();
+    this.morphSpeed = 0.001 + Math.random() * 0.001;
+    this.prev = null;
+    this.colored = Math.random() < 0.04 ? Math.random() * 360 : null;
+    if (this.colored !== null) this.shapeB = SKULL_IDX;
+    this.ghostInterval = 8 + Math.floor(Math.random() * 5);
+    this.ghostTick = Math.floor(Math.random() * this.ghostInterval);
+    this.ghosts = [];
+  }
+
+  update() {
+    const maxDist = F.maxDist;
+    this.dist += 0.1 + (this.dist / maxDist) * 0.8;
+    this.rotation += this.rotSpeed;
+    this.ghostTick++;
+    this.ghostNow = this.ghostTick % this.ghostInterval === 0;
+    for (const g of this.ghosts) g.age++;
+    this.ghosts = this.ghosts.filter(g => g.age < GHOST_LIFE);
+    this.morphT += this.morphSpeed;
+    if (this.morphT >= 1) {
+      this.morphT = 0;
+      this.shapeA = this.shapeB;
+      this.shapeB = this.colored !== null ? SKULL_IDX : Math.floor(Math.random() * SHAPES.length);
+    }
+    if (this.dist > maxDist) { this.dist = 0; this.prev = null; this.ghosts = []; this.colored = Math.random() < 0.04 ? Math.random() * 360 : null; if (this.colored !== null) this.shapeB = SKULL_IDX; }
+  }
+
+  draw(time) {
+    const maxDist = F.maxDist;
+    const size = Math.max(2, (this.dist / maxDist) * canvas.width * 0.04);
+    const ptsA = SHAPES[this.shapeA](size, this.rotation);
+    const ptsB = SHAPES[this.shapeB](size, this.rotation);
+    const t = easeInOut(this.morphT);
+    const pts = ptsA.map((p, i) => ({ x: lerp(p.x, ptsB[i].x, t), y: lerp(p.y, ptsB[i].y, t) }));
+
+    const alpha = Math.sin((this.dist / maxDist) * Math.PI) * 0.85;
+    const hue = (this.col / COLS) * 180 + time * 25;
+    const cx = F.cx, cy = F.cy;
+
+    // Subtle flicker for 60s TV effect
+    const flickerAlpha = 0.95 + Math.random() * 0.05;
+
+    const heads = [];
+    const sineOffset = this.lateralOffset + Math.sin(this.dist * 0.03 + time * 0.5 + this.col) * 20;
+    const radialOffset = Math.sin(this.dist * 0.04 + time * 0.5 + this.col * 1.3) * 15;
+    const armTwist = Math.pow(this.dist / maxDist, 1.7) * 3;
+
+    for (let arm = 0; arm < SYMMETRY; arm++) {
+      const angle = armRotations[arm].angle + armTwist;
+      const ca = Math.cos(angle), sa = Math.sin(angle);
+      // cos(perp) = -sin(angle), sin(perp) = cos(angle)
+      const x = cx + ca * (this.dist + radialOffset) - sa * sineOffset;
+      const y = cy + sa * (this.dist + radialOffset) + ca * sineOffset;
+
+      heads.push({ x, y });
+
+      // --- gen-art ghosts: draw this stream's aged silhouettes here ---
+      for (const g of this.ghosts) {
+        const e = g.age / GHOST_LIFE;          // 0 -> 1
+        const ga = Math.sin(e * Math.PI) * alpha * (this.colored !== null ? 0.3 : 0.18);
+        if (ga < 0.015) continue;              // skip invisible ghosts
+        const sc = 1 - e * 0.7;                // shrink with age
+        const gp = g.arms[arm];
+        ctx.setTransform(sc, 0, 0, sc, gp.x, gp.y);
+        ctx.globalAlpha = ga;
+        ctx.beginPath();
+        ctx.moveTo(g.pts[0].x, g.pts[0].y);
+        for (let i = 1; i < g.pts.length; i++) ctx.lineTo(g.pts[i].x, g.pts[i].y);
+        ctx.closePath();
+        ctx.fillStyle = this.colored !== null
+          ? `hsla(${(this.colored + arm * (360 / SYMMETRY)) % 360}, 75%, 50%, 1)`
+          : `hsla(28, 35%, 22%, 1)`;
+        ctx.fill();
+      }
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalAlpha = 1;
+
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.globalAlpha = alpha * flickerAlpha;
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.closePath();
+      // No stroke - borderless shapes
+      const skullness = (this.shapeA === SKULL_IDX ? 1 - t : 0) + (this.shapeB === SKULL_IDX ? t : 0);
+      ctx.fillStyle = skullness > 0.55
+        ? (this.colored !== null
+            ? `hsla(${(this.colored + arm * (360 / SYMMETRY)) % 360}, 60%, 72%, ${0.6 + skullness * 0.3})`
+            : `hsla(42, 30%, 78%, ${0.55 + skullness * 0.3})`)
+        : (this.colored !== null
+            ? `hsla(${(this.colored + arm * (360 / SYMMETRY)) % 360}, 85%, 55%, 0.4)`
+            : `hsla(30, ${30 + (hue % 20)}%, ${20 + (hue % 20)}%, 0.12)`);
+      ctx.fill();
+
+      // détails du crâne (orbites + nez) quand la forme est dominée par le crâne
+      if (skullness > 0.55 && size > 6) {
+        const c = Math.cos(this.rotation), s = Math.sin(this.rotation);
+        const R = (px, py) => ({ x: (px*c - py*s) * size, y: (px*s + py*c) * size });
+        ctx.fillStyle = `rgba(10, 6, 3, ${skullness})`;
+        for (const [ex, ey] of [[-0.36, -0.15], [0.36, -0.15]]) {
+          const p = R(ex, ey);
+          ctx.beginPath();
+          ctx.ellipse(p.x, p.y, size * 0.2, size * 0.16, this.rotation, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        const n = R(0, 0.28);
+        ctx.beginPath();
+        ctx.ellipse(n.x, n.y, size * 0.09, size * 0.14, this.rotation, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    if (this.ghostNow) this.ghosts.push({ age: 0, arms: heads, pts: pts.map(p => ({ x: p.x, y: p.y })) });
+
+    this.prev = heads;
+  }
+}
+
+const streams = [];
+for (let col = 0; col < COLS; col++)
+  for (let row = 0; row < ROWS; row++)
+    streams.push(new Stream(col, row));
+
+let time = 0;
+
+const craters = Array.from({ length: 40 }, () => {
+  const a = Math.random() * Math.PI * 2;
+  const d = Math.random() * 0.8;
+  return { x: Math.cos(a) * d, y: Math.sin(a) * d, r: Math.random() * 0.04 + 0.01 };
+});
+
+function drawMoon(cx, cy, R, phase) {
+  // phase: 0 = nouvelle, 0.5 = pleine, 1 = nouvelle
+  ctx.save();
+  ctx.translate(cx, cy);
+
+  const lit = '#e8ddd0';
+  const dark = '#1a1610';
+
+  // clip dans le disque
+  ctx.beginPath();
+  ctx.arc(0, 0, R, 0, Math.PI * 2);
+  ctx.clip();
+
+  // angle du terminateur sur le cycle
+  const a = phase * 2 * Math.PI;          // 0 → 2π
+  const cosA = Math.cos(a);               // 1 → -1 → 1
+  const waxing = phase < 0.5;             // lune croissante
+
+  // 1) moitié de base : côté éclairé en clair, reste sombre
+  ctx.fillStyle = dark;
+  ctx.fillRect(-R, -R, R * 2, R * 2);
+
+  // demi-disque éclairé (fixe selon waxing)
+  ctx.fillStyle = lit;
+  ctx.beginPath();
+  if (waxing) ctx.arc(0, 0, R, -Math.PI/2, Math.PI/2, false); // droite
+  else        ctx.arc(0, 0, R, Math.PI/2, -Math.PI/2, false); // gauche
+  ctx.fill();
+
+  // 2) ellipse-terminateur : largeur |cosA|·R, couleur selon le signe
+  //    cosA > 0 (proche nouvelle) → l'ellipse retire de la lumière (dark)
+  //    cosA < 0 (proche pleine)   → l'ellipse ajoute de la lumière (lit)
+  ctx.fillStyle = cosA >= 0 ? dark : lit;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, Math.abs(cosA) * R, R, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // cratères (positions fixes, générées une fois)
+  for (const cr of craters) {
+    ctx.beginPath();
+    ctx.arc(cr.x * R, cr.y * R, cr.r * R, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(60, 40, 10, 0.08)';
+    ctx.fill();
+  }
+
+  // ombrage sphérique 3D
+  const sphere = ctx.createRadialGradient(-R*0.3, -R*0.3, R*0.1, 0, 0, R*1.1);
+  sphere.addColorStop(0, 'rgba(255, 200, 120, 0.12)');
+  sphere.addColorStop(0.5, 'rgba(0,0,0,0)');
+  sphere.addColorStop(1, 'rgba(0,0,0,0.5)');
+  ctx.fillStyle = sphere;
+  ctx.fillRect(-R, -R, R * 2, R * 2);
+
+  ctx.restore();
+}
+
+function animate() {
+  time += 0.001;
+
+  // 60s TV horizontal hold jitter
+  const jitterX = (Math.random() - 0.5) * 0.5;
+  const jitterY = (Math.random() - 0.5) * 0.3;
+
+  ctx.save();
+  ctx.translate(jitterX, jitterY);
+
+  ctx.fillStyle = '#0d0a06';
+  ctx.fillRect(-2, -2, canvas.width + 4, canvas.height + 4);
+
+  updateFrameCache();
+  const cx = F.cx, cy = F.cy;
+  const R = canvas.width * 0.46;
+  const phase = (time * 0.4) % 1;
+
+  // mise à jour des rotations une fois par frame
+  for (const arm of armRotations) arm.angle += arm.speed;
+
+  // halo lunaire
+  const glow = ctx.createRadialGradient(cx, cy, R * 0.7, cx, cy, R * 1.4);
+  glow.addColorStop(0, 'rgba(255, 180, 80, 0.06)');
+  glow.addColorStop(1, 'rgba(200,200,200,0)');
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(cx, cy, R * 1.4, 0, Math.PI * 2);
+  ctx.fill();
+
+  drawMoon(cx, cy, R, phase);
+
+  for (const s of streams) { s.update(); s.draw(time); }
+
+  ctx.restore();
+
+  requestAnimationFrame(animate);
+}
+
+animate();
+window.addEventListener('resize', () => { resize(); resizeTrail(); });
+</script>
+</body>
+</html>

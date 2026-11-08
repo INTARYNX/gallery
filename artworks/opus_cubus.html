@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tessera Cube — Roman Mosaic Wireframe</title>
+<style>
+  html,body{margin:0;height:100%;background:#0a0806;display:flex;align-items:center;justify-content:center;}
+  #wrap{position:relative;max-width:96vmin;max-height:96vmin;box-shadow:0 12px 50px rgba(0,0,0,.6);}
+  #c{display:block;width:100%;height:100%;}
+  #wrap::after{content:"";position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(ellipse at center,
+      rgba(0,0,0,0) 42%, rgba(12,8,4,.5) 100%);}
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c"></canvas></div>
+<script>
+const cv=document.getElementById('c'), ctx=cv.getContext('2d');
+const W=800,H=800;
+const DPR=Math.min(window.devicePixelRatio||1, 2.5);
+cv.width=W*DPR; cv.height=H*DPR;
+ctx.scale(DPR,DPR);
+
+// calque hors-écran pour la traîne du cube : on l'estompe légèrement à chaque
+// frame (au lieu de l'effacer), donc les positions passées persistent et se
+// fondent -> rémanence longue. Compositées ensuite sur le plasma.
+const trail=document.createElement('canvas');
+trail.width=W*DPR; trail.height=H*DPR;
+const tctx=trail.getContext('2d');
+tctx.scale(DPR,DPR);
+
+const clamp=v=>v<0?0:v>255?255:v|0;
+// cache de chaînes "rgb(r,g,b)" : évite de reformater/parser la même couleur
+// des milliers de fois par frame. Rendu identique (même chaîne).
+const _rgbCache=new Map();
+function rgb(c){
+  const k=(c[0]<<16)|(c[1]<<8)|c[2];
+  let s=_rgbCache.get(k);
+  if(s===undefined){ s=`rgb(${c[0]},${c[1]},${c[2]})`; _rgbCache.set(k,s); }
+  return s;
+}
+// construit la matrice de rotation de teinte (une fois par frame, pas par pixel)
+function makeHueMatrix(deg){
+  const a=deg*Math.PI/180, c=Math.cos(a), s=Math.sin(a);
+  return [
+    0.213+c*0.787-s*0.213, 0.715-c*0.715-s*0.715, 0.072-c*0.072+s*0.928,
+    0.213-c*0.213+s*0.143, 0.715+c*0.285+s*0.140, 0.072-c*0.072-s*0.283,
+    0.213-c*0.213-s*0.787, 0.715-c*0.715+s*0.715, 0.072+c*0.928+s*0.072
+  ];
+}
+function applyHue([r,g,b],m){
+  return [
+    clamp(r*m[0]+g*m[1]+b*m[2]),
+    clamp(r*m[3]+g*m[4]+b*m[5]),
+    clamp(r*m[6]+g*m[7]+b*m[8])
+  ];
+}
+
+// palette terre cuite romaine pour les arêtes ; mortier sombre pour le fond
+const STONE=[201,168,95], STONE2=[156,99,52], MORTAR=[44,36,24];
+// plasma : rampe de couleurs chaudes (terre cuite romaine -> ocre -> crème)
+const PLASMA=[
+  [150,120,92],[186,156,116],[210,182,140],[226,202,162],[238,220,186],[248,238,212]
+];
+function plasmaColor(t){                          // t in [0,1] -> couleur interpolée
+  const n=PLASMA.length-1, f=Math.max(0,Math.min(0.9999,t))*n;
+  const i=f|0, k=f-i, a=PLASMA[i], b=PLASMA[i+1];
+  return [a[0]+(b[0]-a[0])*k, a[1]+(b[1]-a[1])*k, a[2]+(b[2]-a[2])*k];
+}
+
+// ===== 1. PAVAGE VORONOÏ JITTERÉ (tessères) =====
+const ROW=11;                                    // pas de la grille de tessères
+const SITE=ROW, SGW=Math.ceil(W/SITE)+2, SGH=Math.ceil(H/SITE)+2;
+const sites=[]; const JIT=SITE*0.34;
+for(let gy=-1; gy<SGH-1; gy++)for(let gx=-1; gx<SGW-1; gx++){
+  sites.push({x:(gx+0.5)*SITE+(Math.random()*2-1)*JIT,
+              y:(gy+0.5)*SITE+(Math.random()*2-1)*JIT,gx,gy});
+}
+const siteAt=(gx,gy)=>(gx<-1||gy<-1||gx>=SGW-1||gy>=SGH-1)?null:sites[(gy+1)*SGW+(gx+1)];
+
+function clipHalf(poly,mx,my,nx,ny){
+  const out=[],side=p=>(p[0]-mx)*nx+(p[1]-my)*ny;
+  for(let i=0;i<poly.length;i++){
+    const a=poly[i],b=poly[(i+1)%poly.length],sa=side(a),sb=side(b);
+    if(sa<=0)out.push(a);
+    if((sa<0&&sb>0)||(sa>0&&sb<0)){const t=sa/(sa-sb);
+      out.push([a[0]+t*(b[0]-a[0]),a[1]+t*(b[1]-a[1])]);}
+  }
+  return out;
+}
+function voronoiCell(s){
+  const R0=SITE*1.6;
+  let poly=[[s.x-R0,s.y-R0],[s.x+R0,s.y-R0],[s.x+R0,s.y+R0],[s.x-R0,s.y+R0]];
+  for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++){
+    if(!dx&&!dy)continue;const o=siteAt(s.gx+dx,s.gy+dy);if(!o)continue;
+    const mx=(s.x+o.x)/2,my=(s.y+o.y)/2;let nx=o.x-s.x,ny=o.y-s.y;
+    const L=Math.hypot(nx,ny)||1;nx/=L;ny/=L;
+    poly=clipHalf(poly,mx,my,nx,ny);if(poly.length<3)break;
+  }
+  return poly;
+}
+const erode=(poly,cx,cy,k)=>poly.map(p=>[cx+(p[0]-cx)*k,cy+(p[1]-cy)*k]);
+
+const JOINT=0.82;
+const tiles=[];
+for(const s of sites){
+  if(s.x<-SITE||s.x>=W+SITE||s.y<-SITE||s.y>=H+SITE)continue;
+  let cell=voronoiCell(s); if(cell.length<3)continue;
+  cell=erode(cell,s.x,s.y,JOINT);
+  const verts=cell.map(p=>[p[0]-s.x,p[1]-s.y]);
+  const tl={x:s.x,y:s.y,verts,d:(Math.random()*2-1)*14};
+  // --- pré-calcul Path2D (forme fixe, construite une seule fois) ---
+  const path=new Path2D();
+  verts.forEach((p,i)=>i?path.lineTo(p[0],p[1]):path.moveTo(p[0],p[1]));
+  path.closePath();
+  tl.path=path;
+  // --- pré-calcul des arêtes pour le biseau (longueur + normale extérieure) ---
+  let area=0;const n=verts.length;
+  for(let i=0;i<n;i++){const a=verts[i],b=verts[(i+1)%n];area+=a[0]*b[1]-b[0]*a[1];}
+  const wind=area<0?1:-1;
+  tl.bevels=[];
+  for(let i=0;i<n;i++){
+    const a=verts[i],b=verts[(i+1)%n],ex=b[0]-a[0],ey=b[1]-a[1],len=Math.hypot(ex,ey)||1;
+    const nx=wind*ey/len,ny=-wind*ex/len, dot=nx*(-0.7071)+ny*(-0.7071);
+    tl.bevels.push({ax:a[0],ay:a[1],bx:b[0],by:b[1],dot});
+  }
+  // --- pré-calcul des constantes plasma (indépendantes du temps) ---
+  tl.p1=s.x*0.012; tl.p2=s.y*0.014; tl.p3=(s.x+s.y)*0.010;
+  tl.p4=Math.hypot(s.x-W/2,s.y-H/2)*0.013;
+  tiles.push(tl);
+}
+
+// ===== GRILLE SPATIALE : tesselle -> cellule, pour ne tester qu'un segment
+// contre les tesselles proches (au lieu de toutes). Rendu identique : on
+// calcule toujours la vraie distance, on réduit juste les candidats. =====
+const GCELL=ROW*2;                                // taille d'une cellule de grille
+const GW=Math.ceil(W/GCELL)+2, GH=Math.ceil(H/GCELL)+2;
+const grid=Array.from({length:GW*GH},()=>[]);
+const gidx=(gx,gy)=>gy*GW+gx;
+for(const tl of tiles){
+  const gx=Math.floor(tl.x/GCELL)+1, gy=Math.floor(tl.y/GCELL)+1;
+  if(gx>=0&&gy>=0&&gx<GW&&gy<GH) grid[gidx(gx,gy)].push(tl);
+}
+
+// ===== 2. PEINTURE D'UNE TESSELLE EN PÂTE DE VERRE =====
+const shade=(c,k)=>[clamp(c[0]+k),clamp(c[1]+k),clamp(c[2]+k)];
+function paintTile(tl,col,c2d){
+  c2d=c2d||ctx;
+  c2d.save();c2d.translate(tl.x,tl.y);
+  c2d.lineJoin='miter';c2d.fillStyle=rgb(col);
+  c2d.fill(tl.path);                              // chemin pré-construit
+  c2d.lineWidth=Math.max(0.6,ROW*0.1);c2d.lineCap='butt';
+  for(const bv of tl.bevels){
+    const d=bv.dot;
+    if(Math.abs(d)<0.12)continue;
+    c2d.strokeStyle=rgb(shade(col,d>0?90*d:95*d));
+    c2d.beginPath();c2d.moveTo(bv.ax,bv.ay);c2d.lineTo(bv.bx,bv.by);c2d.stroke();
+  }
+  c2d.restore();
+}
+
+// ===== 3. CUBE 3D — méandre projeté sur chaque face =====
+const verts3=[[-1,-1,-1],[1,-1,-1],[1,1,-1],[-1,1,-1],
+              [-1,-1,1],[1,-1,1],[1,1,1],[-1,1,1]];
+const edges=[[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],
+             [0,4],[1,5],[2,6],[3,7]];
+
+// 6 faces : indices de sommets + repère UV (origine, axe u, axe v, normale)
+// origine = coin (u=-1,v=-1) ; au = vecteur vers u=+1 ; av = vers v=+1.
+const faces=[
+  {o:[-1,-1, 1],au:[2,0,0],av:[0,2,0],nrm:[0,0, 1]}, // avant  (+z)
+  {o:[ 1,-1,-1],au:[-2,0,0],av:[0,2,0],nrm:[0,0,-1]},// arrière(-z)
+  {o:[-1,-1,-1],au:[0,0,2],av:[0,2,0],nrm:[-1,0,0]}, // gauche (-x)
+  {o:[ 1,-1, 1],au:[0,0,-2],av:[0,2,0],nrm:[1,0,0]}, // droite (+x)
+  {o:[-1, 1,-1],au:[2,0,0],av:[0,0,2],nrm:[0,1,0]},  // haut   (+y)
+  {o:[-1,-1, 1],au:[2,0,0],av:[0,0,-2],nrm:[0,-1,0]},// bas    (-y)
+];
+
+// --- motif méandre en grille, dans l'espace UV [-1,1]² d'une face ---
+// On génère une grille NM×NM de cellules ; chaque cellule contient une clé
+// grecque (segments unitaires). On précalcule tous les segments en UV une fois.
+const NM=1;                                       // nb de motifs par côté de face
+const KEY=[
+  [0.00,0.50,0.18,0.50],[0.18,0.50,0.18,0.18],[0.18,0.18,0.82,0.18],
+  [0.82,0.18,0.82,0.82],[0.82,0.82,0.42,0.82],[0.42,0.82,0.42,0.45],
+  [0.42,0.45,0.60,0.45],[0.82,0.50,1.00,0.50],
+];
+const meanderUV=[];                               // segments [u0,v0,u1,v1] en [-1,1]
+for(let cy=0;cy<NM;cy++)for(let cx=0;cx<NM;cx++){
+  const toU=t=>(cx+t)/NM*2-1, toV=t=>(cy+t)/NM*2-1;
+  for(const [x0,y0,x1,y1] of KEY)
+    meanderUV.push([toU(x0),toV(y0),toU(x1),toV(y1)]);
+}
+
+// distance point-segment 2D au carré
+function distSeg2(px,py,ax,ay,bx,by){
+  const dx=bx-ax,dy=by-ay,L=dx*dx+dy*dy;
+  let t=L?((px-ax)*dx+(py-ay)*dy)/L:0; t=t<0?0:t>1?1:t;
+  const cx=ax+t*dx-px,cy=ay+t*dy-py; return cx*cx+cy*cy;
+}
+
+const EDGE_W=ROW*1.1;                            // demi-épaisseur du trait méandre (px)
+const EW2=EDGE_W*EDGE_W;
+const EDGE_W2=ROW*1.7;                           // demi-épaisseur des arêtes (cadre)
+
+// applique la rotation courante à un point 3D et le projette -> [px,py,z]
+function project(p, ca,sa,cb,sb){
+  const [x,y,z]=p;
+  let y1=y*ca-z*sa, z1=y*sa+z*ca;
+  let x1=x*cb+z1*sb, z2=-x*sb+z1*cb;
+  const d=4.2, s=(d/(d+z2))*210;
+  return [W/2+x1*s, H/2+y1*s, z2];
+}
+
+// ===== CAMÉRA CLIP 80s : cuts rythmés (zooms qui sautent) =====
+// À chaque battement (BEAT ms) on saute sur un nouveau cadrage tiré d'une liste
+// de cibles {x,y,z}. Pas d'interpolation : c'est un cut franc, façon montage.
+const BEAT=1600;                                  // durée d'un plan (ms)
+const SHOTS=[
+  {x:400,y:400,z:1.0},   // plan large
+  {x:400,y:400,z:2.3},   // zoom centre (cube)
+  {x:250,y:300,z:3.0},   // coin haut-gauche
+  {x:560,y:520,z:2.8},   // bas-droite
+  {x:400,y:400,z:1.0},   // large
+  {x:520,y:280,z:3.4},   // serré haut-droite
+  {x:300,y:540,z:2.6},   // bas-gauche
+  {x:400,y:400,z:1.7},   // medium centre
+];
+let lastBeat=-1, camX=400,camY=400,camZ=1;
+function updateCam(ts){
+  const beat=Math.floor(ts/BEAT);
+  if(beat!==lastBeat){                            // nouveau plan : on coupe
+    lastBeat=beat;
+    const s=SHOTS[beat % SHOTS.length];
+    camX=s.x; camY=s.y; camZ=s.z;
+  }
+}
+// applique le cadrage caméra au contexte en une seule matrice (équiv. à
+// translate(W/2,H/2) · scale(z) · translate(-camX,-camY), mais sans empiler) :
+//   x' = DPR*z*(x - camX) + DPR*W/2 ; idem y. Rendu identique.
+function setCam(c2d){
+  const z=DPR*camZ;
+  c2d.setTransform(z,0,0,z, DPR*W/2 - z*camX, DPR*H/2 - z*camY);
+}
+
+function frame(ts){
+  updateCam(ts);
+  const a=ts*0.0006, b=ts*0.00042;
+  const ca=Math.cos(a),sa=Math.sin(a),cb=Math.cos(b),sb=Math.sin(b);
+  const scroll=ts*0.0009;                        // phase d'animation du plasma
+  // teinte oscillant dans une plage chaude (terre cuite <-> ocre <-> brique),
+  // jamais de vert/bleu : on reste dans les teintes de mosaïque romaine.
+  const hue=Math.sin(ts*0.0004)*22;              // ±22° autour de la teinte terre
+
+  // direction de vue (caméra regarde vers +z après projection). On garde une
+  // face si sa normale, tournée, pointe vers la caméra (z<0 = vers nous).
+  function rotN([x,y,z]){
+    let y1=y*ca-z*sa, z1=y*sa+z*ca;
+    let x1=x*cb+z1*sb, z2=-x*sb+z1*cb;
+    return [x1,y1,z2];
+  }
+
+  // segments du méandre projetés en 2D, uniquement pour les faces visibles
+  const segs=[];                                 // {ax,ay,bx,by,z,edge}
+  for(const f of faces){
+    // toutes les faces (pas de culling) : le méandre apparaît partout
+    const rn=rotN(f.nrm);
+    // dépliage : point 3D d'un (u,v) en [-1,1] -> coin o + (u+1)/2*au + (v+1)/2*av
+    const P=(u,v)=>[
+      f.o[0]+(u+1)/2*f.au[0]+(v+1)/2*f.av[0],
+      f.o[1]+(u+1)/2*f.au[1]+(v+1)/2*f.av[1],
+      f.o[2]+(u+1)/2*f.au[2]+(v+1)/2*f.av[2]];
+    for(const [u0,v0,u1,v1] of meanderUV){
+      const A=project(P(u0,v0),ca,sa,cb,sb);
+      const B=project(P(u1,v1),ca,sa,cb,sb);
+      segs.push({ax:A[0],ay:A[1],bx:B[0],by:B[1],z:(A[2]+B[2])*0.5,edge:false});
+    }
+  }
+  // arêtes du cube par-dessus (cadre)
+  const pv=verts3.map(p=>project(p,ca,sa,cb,sb));
+  for(const [i,j] of edges){
+    segs.push({ax:pv[i][0],ay:pv[i][1],bx:pv[j][0],by:pv[j][1],
+               z:(pv[i][2]+pv[j][2])*0.5,edge:true});
+  }
+  // pré-calcul par segment : vecteur, longueur inverse, demi-largeur² (rendu
+  // identique, juste évité de recalculer dx²+dy² pour chaque tesselle).
+  for(const s of segs){
+    s.dx=s.bx-s.ax; s.dy=s.by-s.ay;
+    const L=s.dx*s.dx+s.dy*s.dy; s.invL=L?1/L:0;
+    s.w2 = s.edge ? EDGE_W2*EDGE_W2 : EW2;
+  }
+  const hueM=makeHueMatrix(hue);                  // matrice de teinte : 1×/frame
+
+  // 1) PLASMA net sur le canvas principal (effacé et redessiné chaque frame)
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.fillStyle='#0a0806';ctx.fillRect(0,0,W,H);   // fond plein écran (avant zoom)
+  setCam(ctx);                                     // cadrage caméra (cut)
+  const s8=scroll*0.8, s6=scroll*0.6, s12=scroll*1.2;
+  for(const tl of tiles){
+    let v = Math.sin(tl.p1 + scroll)
+          + Math.sin(tl.p2 - s8)
+          + Math.sin(tl.p3 + s6)
+          + Math.sin(tl.p4 - s12);
+    v = (v+4)/8;
+    const bc=plasmaColor(v);
+    paintTile(tl,[clamp(bc[0]+tl.d),clamp(bc[1]+tl.d),clamp(bc[2]+tl.d)]);
+    tl.near=1e9;                                  // reset pour la passe cube
+  }
+
+  // 2) TRAÎNE : estompe doucement le calque cube (rémanence longue), puis y
+  // peint les tessères touchées par le méandre/arête à la position courante.
+  tctx.setTransform(DPR,0,0,DPR,0,0);             // voile en repère écran
+  tctx.globalCompositeOperation='destination-out';
+  tctx.fillStyle='rgba(0,0,0,0.06)';            // 6%/frame -> longue traîne
+  tctx.fillRect(0,0,W,H);
+  tctx.globalCompositeOperation='source-over';
+  setCam(tctx);                                    // cadrage caméra pour peindre
+
+  // pour chaque segment, ne visiter que les cellules de grille qu'il recouvre
+  // (boîte englobante élargie de la demi-largeur). Test de distance inchangé,
+  // donc near/depth/isEdge retenus sont identiques à la boucle exhaustive.
+  const touched=[];                               // tesselles à repeindre
+  for(const s of segs){
+    const margin=Math.sqrt(s.w2)+GCELL;
+    const minX=Math.min(s.ax,s.bx)-margin, maxX=Math.max(s.ax,s.bx)+margin;
+    const minY=Math.min(s.ay,s.by)-margin, maxY=Math.max(s.ay,s.by)+margin;
+    let gx0=Math.floor(minX/GCELL)+1, gx1=Math.floor(maxX/GCELL)+1;
+    let gy0=Math.floor(minY/GCELL)+1, gy1=Math.floor(maxY/GCELL)+1;
+    gx0=gx0<0?0:gx0; gy0=gy0<0?0:gy0; gx1=gx1>=GW?GW-1:gx1; gy1=gy1>=GH?GH-1:gy1;
+    for(let gy=gy0;gy<=gy1;gy++)for(let gx=gx0;gx<=gx1;gx++){
+      for(const tl of grid[gidx(gx,gy)]){
+        // distSeg2 inliné avec les constantes pré-calculées du segment
+        let t=((tl.x-s.ax)*s.dx+(tl.y-s.ay)*s.dy)*s.invL;
+        t=t<0?0:t>1?1:t;
+        const cx=s.ax+t*s.dx-tl.x, cy=s.ay+t*s.dy-tl.y, dd=cx*cx+cy*cy;
+        if(dd<tl.near && dd<s.w2){
+          if(tl.near===1e9) touched.push(tl);     // première fois : à repeindre
+          tl.near=dd; tl.depth=s.z; tl.isEdge=s.edge;
+        }
+      }
+    }
+  }
+
+  for(const tl of touched){
+    const near=tl.near, dim=Math.max(0,Math.min(1,(tl.depth+1.4)/2.8));
+    let col;
+    if(tl.isEdge){
+      const e=[120-dim*40, 70-dim*25, 40-dim*15];
+      col=applyHue([clamp(e[0]+tl.d),clamp(e[1]+tl.d),clamp(e[2]+tl.d)],hueM);
+    } else {
+      const f=(near/EW2);
+      const base=[
+        STONE[0]*(1-dim)+STONE2[0]*dim,
+        STONE[1]*(1-dim)+STONE2[1]*dim,
+        STONE[2]*(1-dim)+STONE2[2]*dim];
+      col=applyHue([clamp(base[0]+tl.d-f*30),clamp(base[1]+tl.d-f*30),clamp(base[2]+tl.d-f*30)],hueM);
+    }
+    paintTile(tl,col,tctx);
+  }
+
+  // 3) composite la traîne (avec son cube net dessus) sur le plasma
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.drawImage(trail,0,0);
+
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

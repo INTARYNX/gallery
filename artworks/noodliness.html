@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>His Noodliness in Glass</title>
+<style>
+  html,body{margin:0;height:100%;display:flex;align-items:center;justify-content:center;background:#000;}
+  canvas{border-radius:8px;box-shadow:0 0 45px rgba(0,0,0,.5);width:min(90vw,90vh);height:min(90vw,90vh);display:block;}
+</style>
+</head>
+<body>
+<canvas id="c" width="640" height="640"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+const cx = W/2, cy = H/2;
+const R = W*0.46;               // rayon de la rosace
+const LEAD = '#140f07';
+
+// ---- Silhouette du MSV ----
+function distToSegment(px,py,ax,ay,bx,by){
+  const dx=bx-ax,dy=by-ay,l2=dx*dx+dy*dy||1;
+  let tt=((px-ax)*dx+(py-ay)*dy)/l2; tt=Math.max(0,Math.min(1,tt));
+  return Math.hypot(px-(ax+tt*dx), py-(ay+tt*dy));
+}
+function category(x,y){
+  const nx=x/W, ny=y/H;
+  const eyes=[{ex:0.40,ey:0.26,sx:0.44,sy:0.45},{ex:0.60,ey:0.26,sx:0.56,sy:0.45}];
+  for(const e of eyes){
+    const d=Math.hypot(nx-e.ex,ny-e.ey);
+    if(d<0.042) return 'pupil';
+    if(d<0.070) return 'eyeball';
+    if(distToSegment(nx,ny,e.ex,e.ey,e.sx,e.sy)<0.020) return 'noodle';
+  }
+  if(Math.hypot((nx-0.5)/0.28,(ny-0.55)/0.15)<1) return 'noodle';
+  const noodles=[{y0:0.60,amp:0.05,k:14,ph:0},{y0:0.66,amp:0.06,k:11,ph:1.5},
+                 {y0:0.72,amp:0.055,k:16,ph:3},{y0:0.77,amp:0.05,k:12,ph:4.2}];
+  for(const nd of noodles){
+    if(nx<0.16||nx>0.84) continue;
+    const wy=nd.y0+Math.sin(nx*nd.k+nd.ph)*nd.amp;
+    if(Math.abs(ny-wy)<0.019) return 'noodle';
+  }
+  for(const m of [{x:0.40,y:0.55},{x:0.60,y:0.56}])
+    if(Math.hypot(nx-m.x,ny-m.y)<0.048) return 'meatball';
+  return 'bg';
+}
+
+const PAL={
+  noodle:['#e8c24a','#f0d060','#dcae38','#e7bb47'],
+  meatball:['#a83a24','#8f2f1c','#c1492f'],
+  meatShine:['#d8623f','#c8542f'],
+  eyeball:['#f4efe0','#e9e2cc','#fbf7ea'],
+  iris:['#7fb0c8','#6a9fbb','#8cbcd2'],
+  pupil:['#20140a','#2c1c10'],
+  bg:['#26406b','#1e3358','#2f4d7d','#324a86','#20335c','#3b2f6e']
+};
+function pick(a,s){return a[Math.floor(Math.abs(Math.sin(s*91.7))*a.length)%a.length];}
+function shade(hex,amt){const n=parseInt(hex.slice(1),16);
+  let r=(n>>16)+amt,g=((n>>8)&255)+amt,b=(n&255)+amt;
+  return [Math.max(0,Math.min(255,r)),Math.max(0,Math.min(255,g)),Math.max(0,Math.min(255,b))];}
+
+// ---- Graines Voronoi ----
+const seeds=[]; const gcell=32; let si=0;
+for(let gy=-1;gy*gcell<H+gcell;gy++)for(let gx=-1;gx*gcell<W+gcell;gx++){
+  const jx=Math.sin(gx*12.9+gy*4.7)*0.5+0.5, jy=Math.sin(gx*7.3+gy*9.1)*0.5+0.5;
+  const x=gx*gcell+jx*gcell, y=gy*gcell+jy*gcell;
+  const cat=category(x,y);
+  seeds.push({x,y,cat,base:pick(PAL[cat],si*1.3+7)}); si++;
+}
+
+// ---- Rasterisation (une fois) ----
+const img=ctx.createImageData(W,H);
+const cellIndex=new Int32Array(W*H).fill(-1);
+(function raster(){
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+    const o=(y*W+x)*4;
+    if(Math.hypot(x-cx,y-cy)>R){
+      // ---- appareil de pierre de taille (calcaire clair, style église) ----
+      const bh=96;                        // hautes assises régulières
+      const bw=150;                       // grands blocs
+      const row=Math.floor(y/bh);
+      const off=(row%2)*(bw/2);           // décalage doux d'une assise sur deux
+      const lx=((x+off)%bw), ly=(y%bh);
+      const grain=(Math.sin(x*0.7+y*1.1)*Math.cos(x*0.3-y*0.5))*2.2;
+      const bx=Math.floor((x+off)/bw);
+      const blockTone=Math.sin(bx*13.7+row*8.3)*4;
+      const dw=Math.hypot(x-cx,y-cy)/W;
+      // calcaire chaud et clair
+      let tone=182 - dw*30 + blockTone + grain;
+      // joints fins et peu marqués
+      const joint=(lx<2||ly<2||lx>bw-2||ly>bh-2);
+      if(joint) tone-=26;
+      img.data[o]=tone; img.data[o+1]=tone-6; img.data[o+2]=tone-16; img.data[o+3]=255;
+      continue;
+    }
+    let best=1e9,bi=0;
+    for(let k=0;k<seeds.length;k++){const s=seeds[k];const dx=x-s.x,dy=y-s.y;const d=dx*dx+dy*dy;if(d<best){best=d;bi=k;}}
+    cellIndex[y*W+x]=bi;
+    const [r,g,b]=shade(seeds[bi].base,-Math.min(30,Math.sqrt(best)*0.9));
+    img.data[o]=r;img.data[o+1]=g;img.data[o+2]=b;img.data[o+3]=255;
+  }
+  const d=img.data;
+  for(let y=1;y<H;y++)for(let x=1;x<W;x++){
+    const i=y*W+x; if(cellIndex[i]<0) continue;
+    if(cellIndex[i]!==cellIndex[i-1]||cellIndex[i]!==cellIndex[i-W]){
+      const o=i*4; d[o]=20;d[o+1]=15;d[o+2]=9;
+      const o2=(i-1)*4; d[o2]=20;d[o2+1]=15;d[o2+2]=9;
+    }
+  }
+})();
+const baseImg=new ImageData(new Uint8ClampedArray(img.data),W,H);
+
+// ---- Soleil est -> ouest ----
+function sunPos(t){
+  const cycle=(t*0.0012)%1;
+  const ang=Math.PI*(0.15+cycle*0.7);
+  return {sx:cx+Math.cos(Math.PI-ang)*W*0.9, sy:cy-Math.sin(ang)*H*0.85, height:Math.sin(ang)};
+}
+
+// ---- Trous de passoire + god rays ----
+function holes(sun,t){
+  const rings=[{r:R*0.34,n:8},{r:R*0.56,n:14},{r:R*0.78,n:20}];
+  const sunAng=Math.atan2(sun.sy-cy,sun.sx-cx);
+  const rd={x:Math.cos(sunAng+Math.PI),y:Math.sin(sunAng+Math.PI)};
+  ctx.save(); ctx.globalCompositeOperation='lighter';
+  for(const ring of rings)for(let i=0;i<ring.n;i++){
+    const a=(i/ring.n)*Math.PI*2+ring.r*0.01;
+    const hx=cx+Math.cos(a)*ring.r, hy=cy+Math.sin(a)*ring.r;
+    const p=0.5+Math.sin(t*0.04+i+ring.r)*0.5;
+    const len=R*(0.28+sun.height*0.3+p*0.1);
+    const ex=hx+rd.x*len, ey=hy+rd.y*len;
+    const px=-rd.y, py=rd.x, w=R*(0.045+p*0.02);
+    ctx.beginPath(); ctx.moveTo(hx,hy);
+    ctx.lineTo(ex+px*w,ey+py*w); ctx.lineTo(ex-px*w,ey-py*w); ctx.closePath();
+    const it=(0.12+p*0.13)*(0.4+sun.height*0.6);
+    const g=ctx.createLinearGradient(hx,hy,ex,ey);
+    g.addColorStop(0,`rgba(255,248,214,${it})`); g.addColorStop(1,'rgba(255,248,214,0)');
+    ctx.fillStyle=g; ctx.fill();
+  }
+  ctx.restore();
+  for(const ring of rings)for(let i=0;i<ring.n;i++){
+    const a=(i/ring.n)*Math.PI*2+ring.r*0.01;
+    const hx=cx+Math.cos(a)*ring.r, hy=cy+Math.sin(a)*ring.r;
+    const p=0.5+Math.sin(t*0.04+i+ring.r)*0.5, br=0.6+sun.height*0.4;
+    const g=ctx.createRadialGradient(hx,hy,0,hx,hy,R*0.055);
+    g.addColorStop(0,`rgba(255,252,235,${(0.8+p*0.2)*br})`);
+    g.addColorStop(0.6,`rgba(255,244,200,${0.5*br})`);
+    g.addColorStop(1,'rgba(255,244,200,0)');
+    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(hx,hy,R*0.05,0,Math.PI*2); ctx.fill();
+    ctx.lineWidth=3; ctx.strokeStyle=LEAD;
+    ctx.beginPath(); ctx.arc(hx,hy,R*0.03,0,Math.PI*2); ctx.stroke();
+  }
+}
+
+// ---- Boucle ----
+let t=0;
+function frame(){
+  const sun=sunPos(t);
+  const src=baseImg.data, dst=img.data;
+  const hx=cx+(sun.sx-cx)*0.35, hy=cy+(sun.sy-cy)*0.35, cr=W*0.6;
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+    const i=(y*W+x)*4;
+    if(cellIndex[y*W+x]<0){dst[i]=src[i];dst[i+1]=src[i+1];dst[i+2]=src[i+2];continue;}
+    const dl=Math.hypot(x-hx,y-hy)/cr;
+    const l=Math.max(0.35,Math.min(1.4,1.1-dl*0.55+sun.height*0.15+Math.sin((x+y)*0.05+t*0.03)*0.03));
+    dst[i]=Math.min(255,src[i]*l); dst[i+1]=Math.min(255,src[i+1]*l); dst[i+2]=Math.min(255,src[i+2]*l);
+  }
+  ctx.putImageData(img,0,0);
+
+  holes(sun,t);
+
+  // cercle de plomb extérieur
+  ctx.beginPath(); ctx.arc(cx,cy,R,0,Math.PI*2);
+  ctx.lineWidth=12; ctx.strokeStyle=LEAD; ctx.stroke();
+  ctx.lineWidth=3; ctx.strokeStyle='#3a2c14'; ctx.stroke();
+
+  // vignettage
+  const vg=ctx.createRadialGradient(cx,cy,R*0.6,cx,cy,W*0.75);
+  vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(0,0,0,0.22)');
+  ctx.fillStyle=vg; ctx.fillRect(0,0,W,H);
+
+  t++;
+  requestAnimationFrame(frame);
+}
+frame();
+</script>
+</body>
+</html>

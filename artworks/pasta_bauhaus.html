@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<title>Pastafarisme × Bauhaus · Animé</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #000000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: "Helvetica Neue", Arial, sans-serif;
+  }
+  .wrap { text-align: center; }
+  canvas {
+    width: min(90vmin, 720px);
+    height: min(90vmin, 720px);
+    background: #efe6d2;
+  }
+  h1 { margin: 18px 0 4px; font-weight: 700; letter-spacing: 2px; color: #1f1f1f; }
+  p  { margin: 0; color: #4a4a4a; font-size: 14px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <canvas id="fsm" width="800" height="800"></canvas>
+  </div>
+
+<script>
+const c = document.getElementById('fsm');
+const ctx = c.getContext('2d');
+const W = c.width, H = c.height;
+
+const C = {
+  cream:  '#efe6d2',
+  creamDark: '#e0d3b0',
+  red:    '#c8321f',
+  redDark: '#8f1f10',
+  blue:   '#1d4e89',
+  blueDark: '#12315a',
+  yellow: '#f2c14e',
+  yellowDark: '#c98f1f',
+  black:  '#111111',
+  olive:  '#7a8b3a'
+};
+
+let t = 0;
+
+// Gradient de fond radial (recréé chaque frame car dépend du centre)
+function bgGradient() {
+  const g = ctx.createRadialGradient(W/2, H/2, 50, W/2, H/2, W*0.75);
+  g.addColorStop(0, C.cream);
+  g.addColorStop(1, C.creamDark);
+  return g;
+}
+
+function radialShade(x, y, r, c1, c2) {
+  const g = ctx.createRadialGradient(x - r*0.3, y - r*0.3, r*0.1, x, y, r);
+  g.addColorStop(0, c1);
+  g.addColorStop(1, c2);
+  return g;
+}
+
+function linearShade(x0, y0, x1, y1, c1, c2) {
+  const g = ctx.createLinearGradient(x0, y0, x1, y1);
+  g.addColorStop(0, c1);
+  g.addColorStop(1, c2);
+  return g;
+}
+
+function draw() {
+  ctx.fillStyle = bgGradient();
+  ctx.fillRect(0, 0, W, H);
+
+  // ----- CERCLE CENTRAL ONDULANT (le "monstre abstrait") -----
+  const cx = W/2, cy = H/2;
+  const baseR = 180;
+
+  // Boule jaune déformée (les spaghettis abstraits)
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.fillStyle = radialShade(0, 0, baseR + 20, C.yellow, C.yellowDark);
+  ctx.strokeStyle = C.black;
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  for (let i = 0; i <= 64; i++) {
+    const a = (i / 64) * Math.PI * 2;
+    const r = baseR + Math.sin(a * 6 + t * 0.004) * 14 + Math.cos(a * 3 - t * 0.002) * 8;
+    const x = Math.cos(a) * r;
+    const y = Math.sin(a) * r;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+
+  // ----- YEUX (rendent le monstre reconnaissable) -----
+  ctx.save();
+  ctx.translate(cx, cy);
+  const eyeBob = Math.sin(t * 0.003) * 4;
+  [-55, 55].forEach((ex) => {
+    const ey = -30 + eyeBob;
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = C.black;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(ex, ey, 26, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    // pupille qui bouge légèrement
+    const px = ex + Math.cos(t * 0.0015) * 6;
+    const py = ey + Math.sin(t * 0.0015) * 4;
+    ctx.fillStyle = C.black;
+    ctx.beginPath();
+    ctx.arc(px, py, 10, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.restore();
+
+  // ----- PASSOIRE (colander) EN GUISE DE CHAPEAU -----
+  ctx.save();
+  ctx.translate(cx, cy - baseR - 30);
+  ctx.rotate(Math.sin(t * 0.001) * 0.05);
+  ctx.fillStyle = radialShade(0, 0, 70, '#c9c9c9', '#8a8a8a');
+  ctx.strokeStyle = C.black;
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.arc(0, 0, 70, Math.PI, 0);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  // trous de la passoire
+  ctx.fillStyle = C.black;
+  for (let row = 0; row < 3; row++) {
+    const ry = -55 + row * 20;
+    const count = 7 - row * 2;
+    for (let i = 0; i < count; i++) {
+      const spread = 100 - row * 25;
+      const rx = -spread/2 + (spread / (count - 1)) * i;
+      if (rx*rx + ry*ry < 65*65) {
+        ctx.beginPath();
+        ctx.arc(rx, ry, 3.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+  ctx.restore();
+
+  // ----- SPAGHETTIS VOLANTS (lignes ondulées animées) -----
+  ctx.lineWidth = 4;
+  ctx.lineCap = 'round';
+  const strands = 22;
+  for (let i = 0; i < strands; i++) {
+    const phase = i * 0.7;
+    const a0 = (i / strands) * Math.PI * 2 + t * 0.0008;
+    ctx.strokeStyle = i % 3 === 0
+      ? linearShade(cx - 300, cy - 300, cx + 300, cy + 300, C.red, C.redDark)
+      : C.black;
+    ctx.beginPath();
+    for (let k = 0; k <= 30; k++) {
+      const r = 200 + k * 6;
+      const a = a0 + k * 0.05 + Math.sin(t * 0.003 + phase + k * 0.2) * 0.15;
+      const x = cx + Math.cos(a) * r;
+      const y = cy + Math.sin(a) * r;
+      if (k === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  // ----- MEATBALLS FLOTTANTES -----
+  const meatR = 22;
+  for (let i = 0; i < 5; i++) {
+    const phase = i * 1.3;
+    const a = t * 0.001 + phase;
+    const r = 280 + Math.sin(t * 0.002 + phase) * 30;
+    const x = cx + Math.cos(a) * r;
+    const y = cy + Math.sin(a) * r;
+    ctx.fillStyle = radialShade(x, y, meatR, C.red, C.redDark);
+    ctx.beginPath();
+    ctx.arc(x, y, meatR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = C.black;
+    ctx.lineWidth = 4;
+    ctx.stroke();
+  }
+
+  // ----- FORMES BAUHAUX EN ROTATION LENTE -----
+  // Triangle rouge
+  ctx.save();
+  ctx.translate(150, 150);
+  ctx.rotate(t * 0.0005);
+  ctx.fillStyle = linearShade(-60, -60, 60, 50, C.red, C.redDark);
+  ctx.strokeStyle = C.black;
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.moveTo(0, -60);
+  ctx.lineTo(60, 50);
+  ctx.lineTo(-60, 50);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+
+  // Carré jaune (translation pulsante)
+  ctx.save();
+  ctx.translate(640, 160);
+  const sq = 90 + Math.sin(t * 0.002) * 8;
+  ctx.fillStyle = linearShade(-sq/2, -sq/2, sq/2, sq/2, C.yellow, C.yellowDark);
+  ctx.strokeStyle = C.black;
+  ctx.lineWidth = 5;
+  ctx.fillRect(-sq/2, -sq/2, sq, sq);
+  ctx.strokeRect(-sq/2, -sq/2, sq, sq);
+  ctx.restore();
+
+  // Demi-cercle bleu en bas (glissement horizontal)
+  ctx.save();
+  ctx.translate(140, 660);
+  ctx.fillStyle = radialShade(0, 0, 90, C.blue, C.blueDark);
+  ctx.strokeStyle = C.black;
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  const off = Math.sin(t * 0.002) * 20;
+  ctx.arc(0, 0, 80, Math.PI, 0);
+  ctx.lineTo(80, off);
+  ctx.lineTo(-80, off);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+
+  // Barre verticale rouge (oscillation)
+  ctx.save();
+  ctx.translate(700, 600);
+  const bh = 130 + Math.sin(t * 0.003) * 20;
+  ctx.fillStyle = linearShade(-15, -bh/2, 15, bh/2, C.red, C.redDark);
+  ctx.strokeStyle = C.black;
+  ctx.lineWidth = 5;
+  ctx.fillRect(-15, -bh/2, 30, bh);
+  ctx.strokeRect(-15, -bh/2, 30, bh);
+  ctx.restore();
+
+  t += 16;
+  requestAnimationFrame(draw);
+}
+
+draw();
+</script>
+</body>
+</html>

@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Equus Mechanicus</title>
+<style>
+  body {
+    margin: 0; min-height: 100vh; overflow: hidden;
+    background: #1a1a1a; font-family: monospace;
+    display: flex; justify-content: center; align-items: center;
+  }
+  canvas {
+    background: #c9b795;
+    border: 20px solid #2a2a2a;
+    box-shadow: 0 0 50px rgba(0,0,0,.5);
+    filter: blur(0.3px) contrast(1.08);
+    width: min(88vw, 88vh); height: min(88vw, 88vh);
+    cursor: pointer;
+  }
+  .wrapper { animation: breathe 4s ease-in-out infinite; }
+  @keyframes breathe {
+    0%, 100% { transform: scale(1); }
+    50%      { transform: scale(1.002); }
+  }
+</style>
+</head>
+<body>
+<div class="wrapper"><canvas id="c" width="900" height="900"></canvas></div>
+<script>
+const cv = document.getElementById('c'), x = cv.getContext('2d');
+const S = 900, TAU = Math.PI * 2;
+const PAPER = '#c9b795', INK = '#241f19';
+const METAL_D = '#2b2822', METAL = '#413d36', METAL_L = '#6b6459', GLOW = '#a49a86';
+const CONTACT = [0.38, 0.56, 0.00, 0.18];
+const DUTY = 0.28, REACH = 42, L1 = 42, L2 = 40, L3 = 18, G = 80;
+
+const STEPS = 16;        // phases par foulée : la bande du bas en compte autant
+const STRIDE = 0.62;     // secondes par foulée
+let running = true, clock = 0, last = null, lastFi = null;
+const GHOST_INK = '#3b3227';
+
+function seg(ctx, len, w, r) {
+  ctx.beginPath();
+  ctx.moveTo(0, -w / 2); ctx.lineTo(len, -w / 2);
+  ctx.lineTo(len, w / 2); ctx.lineTo(0, w / 2); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.arc(len, 0, r * 0.85, 0, TAU); ctx.fill();
+}
+function joint(ctx, r) {
+  ctx.save();
+  ctx.fillStyle = METAL_L; ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill();
+  ctx.fillStyle = METAL_D; ctx.beginPath(); ctx.arc(0, 0, r * 0.42, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+function leg(ctx, ph, front, back, bob) {
+  ph -= Math.floor(ph);
+  let fx, lift;
+  if (ph < DUTY) {                       // appui : le sabot recule au sol, vitesse constante
+    fx = REACH - 2 * REACH * (ph / DUTY);
+    lift = 0;
+  } else {                               // suspension : retour avant, genou replié
+    const u = (ph - DUTY) / (1 - DUTY);
+    fx = -REACH + 2 * REACH * (0.5 - 0.5 * Math.cos(Math.PI * u));
+    lift = (front ? 26 : 30) * Math.sin(Math.PI * u);
+  }
+
+  // cinématique inverse 2 segments : on vise la cheville
+  let tx = fx, ty = G - L3 - lift - bob;
+  let d = Math.hypot(tx, ty);
+  const dmax = L1 + L2 - 1.5, dmin = 50;   // bornes : ni jambe raide, ni repli qui claque
+  if (d > dmax) { tx *= dmax / d; ty *= dmax / d; d = dmax; }
+  if (d < dmin) { tx *= dmin / d; ty *= dmin / d; d = dmin; }
+  const base = Math.atan2(ty, tx);
+  const cos = Math.max(-1, Math.min(1, (d * d + L1 * L1 - L2 * L2) / (2 * d * L1)));
+  const a1 = base + (front ? -1 : 1) * Math.acos(cos);
+  const a2 = Math.atan2(ty - L1 * Math.sin(a1), tx - L1 * Math.cos(a1));
+  const a3 = Math.PI / 2 + 0.5 * (lift / 50);   // paturon quasi vertical, sabot qui pique au vol
+
+  ctx.save();
+  ctx.fillStyle = back ? METAL_D : METAL;
+  ctx.rotate(a1); seg(ctx, L1, 15, 8);
+  ctx.translate(L1, 0); joint(ctx, 6);
+  ctx.rotate(a2 - a1); seg(ctx, L2, 11, 6);
+  ctx.translate(L2, 0); joint(ctx, 5);
+  ctx.rotate(a3 - a2); seg(ctx, L3, 7, 4);
+  ctx.translate(L3, 0);
+  ctx.fillStyle = back ? '#211e19' : METAL_D;
+  ctx.beginPath(); ctx.ellipse(-3, 0, 5, 9, 0, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+function gear(ctx, r, teeth, ang) {
+  ctx.save(); ctx.rotate(ang);
+  ctx.fillStyle = METAL_L;
+  for (let i = 0; i < teeth; i++) {
+    ctx.save(); ctx.rotate(i * TAU / teeth);
+    ctx.fillRect(r - 1, -1.3, 3, 2.6);
+    ctx.restore();
+  }
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill();
+  ctx.fillStyle = METAL_D;
+  ctx.beginPath(); ctx.arc(0, 0, r * 0.45, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+
+function flywheel(ctx, r, ang) {
+  ctx.save(); ctx.rotate(ang);
+  ctx.fillStyle = METAL_D;
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill();
+  ctx.strokeStyle = METAL_L; ctx.lineWidth = 2.2;
+  ctx.beginPath(); ctx.arc(0, 0, r - 2, 0, TAU); ctx.stroke();
+  ctx.fillStyle = METAL_L;
+  for (let i = 0; i < 5; i++) {
+    ctx.save(); ctx.rotate(i * TAU / 5); ctx.fillRect(-1.3, -r + 3, 2.6, r - 3); ctx.restore();
+  }
+  ctx.beginPath(); ctx.arc(0, 0, 3, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+
+function head(ctx) {
+  ctx.fillStyle = METAL_D;                       // crâne
+  ctx.beginPath();
+  ctx.moveTo(-8, -12); ctx.lineTo(20, -11); ctx.lineTo(34, -6);
+  ctx.lineTo(40, 1); ctx.lineTo(33, 10); ctx.lineTo(6, 12); ctx.lineTo(-8, 9);
+  ctx.closePath(); ctx.fill();
+
+  ctx.fillStyle = METAL;                         // plaque de joue rivetée
+  ctx.beginPath();
+  ctx.moveTo(-4, -7); ctx.lineTo(16, -6); ctx.lineTo(19, 4); ctx.lineTo(-2, 6);
+  ctx.closePath(); ctx.fill();
+
+  ctx.fillStyle = METAL_L;                       // naseau et mors
+  ctx.fillRect(27, -3.5, 10, 2.2);
+  ctx.fillRect(29, 2.5, 7, 1.8);
+  [[-2, -9], [9, -9], [15, 8], [2, 9]].forEach(([px, py]) => {
+    ctx.beginPath(); ctx.arc(px, py, 1.2, 0, TAU); ctx.fill();
+  });
+
+  ctx.beginPath(); ctx.arc(12, -3, 4.6, 0, TAU); ctx.fill();   // lentille
+  ctx.fillStyle = METAL_D; ctx.beginPath(); ctx.arc(12, -3, 3, 0, TAU); ctx.fill();
+  ctx.fillStyle = GLOW;    ctx.beginPath(); ctx.arc(12.9, -3.9, 1.4, 0, TAU); ctx.fill();
+
+  ctx.strokeStyle = METAL_L; ctx.lineCap = 'round';   // oreilles-antennes
+  ctx.lineWidth = 2.6;
+  ctx.beginPath(); ctx.moveTo(-2, -11); ctx.lineTo(-8, -25);
+  ctx.moveTo(5, -11); ctx.lineTo(3, -26); ctx.stroke();
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(-8, -25); ctx.lineTo(-12, -22);
+  ctx.moveTo(3, -26); ctx.lineTo(7, -24); ctx.stroke();
+}
+
+function tail(ctx, p) {
+  ctx.save();
+  ctx.translate(-58, -10);
+  ctx.rotate(2.5 + 0.16 * Math.sin(TAU * p + 1.2));
+  ctx.strokeStyle = METAL; ctx.lineCap = 'round';
+  for (let i = 0; i < 4; i++) {
+    const len = 15 - i * 1.8;
+    ctx.lineWidth = 8 - i * 1.5;
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(len, 0); ctx.stroke();
+    ctx.translate(len, 0);
+    // chaque maillon suit le précédent avec un retard croissant : pendule, pas sinusoïde
+    ctx.rotate(0.10 + 0.22 * Math.sin(TAU * (p - 0.07 * (i + 1)) + 1.2));
+  }
+  ctx.restore();
+}
+
+const HINGE = -6;
+
+function horse(ctx, p) {
+  const t = p * TAU;
+  const bob = -6 * Math.cos(TAU * (p - 0.9));
+  const flex = 0.06 * Math.sin(TAU * (p - 0.12));   // onde vertébrale : le dos se creuse et se rassemble
+
+  ctx.save();
+  ctx.translate(0, bob);
+  ctx.rotate(Math.sin(t) * 0.08);
+
+  // ---- arrière-main, articulée sur la charnière ----
+  ctx.save();
+  ctx.translate(HINGE, 0); ctx.rotate(-flex); ctx.translate(-HINGE, 0);
+
+  ctx.save(); ctx.translate(-46, 6); leg(ctx, p - CONTACT[3], false, true, bob); ctx.restore();
+  tail(ctx, p);
+
+  ctx.fillStyle = METAL;
+  ctx.beginPath();
+  ctx.moveTo(-62, -6); ctx.lineTo(-52, -26); ctx.lineTo(2, -27);
+  ctx.lineTo(2, 17); ctx.lineTo(-50, 16);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = METAL_L; ctx.fillRect(-44, -22, 42, 3.2);
+  for (let i = -46; i < -2; i += 14) { ctx.beginPath(); ctx.arc(i, 11, 2, 0, TAU); ctx.fill(); }
+
+  ctx.fillStyle = METAL_D; ctx.fillRect(-42, -15, 28, 21);      // plaque ouverte du bassin
+  ctx.save(); ctx.translate(-33, -4); gear(ctx, 8, 10, -t * 2.2); ctx.restore();
+  ctx.save(); ctx.translate(-20, -7); gear(ctx, 5.5, 8, t * 3.2); ctx.restore();
+
+  ctx.save(); ctx.translate(-46, 6); leg(ctx, p - CONTACT[2], false, false, bob); ctx.restore();
+  ctx.restore();
+
+  // ---- avant-main ----
+  ctx.save();
+  ctx.translate(HINGE, 0); ctx.rotate(flex); ctx.translate(-HINGE, 0);
+
+  ctx.save(); ctx.translate(44, 6); leg(ctx, p - CONTACT[1], true, true, bob); ctx.restore();
+
+  ctx.fillStyle = METAL;
+  ctx.beginPath();
+  ctx.moveTo(-12, -27); ctx.lineTo(46, -28); ctx.lineTo(60, -8);
+  ctx.lineTo(52, 18); ctx.lineTo(-12, 17);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = METAL_L; ctx.fillRect(-6, -22, 46, 3.2);
+  for (let i = -4; i < 44; i += 14) { ctx.beginPath(); ctx.arc(i, 12, 2, 0, TAU); ctx.fill(); }
+
+  ctx.fillStyle = METAL_D; ctx.fillRect(6, -19, 36, 31);        // carter ouvert du thorax
+  ctx.save(); ctx.translate(24, -3); flywheel(ctx, 13, t * 1.6); ctx.restore();
+  ctx.save(); ctx.translate(40, 8); gear(ctx, 6, 9, -t * 3); ctx.restore();
+
+  const cx = 24 + Math.cos(t * 1.6) * 8, cy = -3 + Math.sin(t * 1.6) * 8;   // bielle sur maneton
+  ctx.strokeStyle = METAL_L; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(HINGE - 2, 4); ctx.stroke();
+  ctx.fillStyle = METAL_D; ctx.beginPath(); ctx.arc(cx, cy, 2.3, 0, TAU); ctx.fill();
+
+  ctx.save();
+  ctx.translate(48, -20); ctx.rotate(-0.62 + Math.sin(t) * 0.09);
+  ctx.fillStyle = METAL; seg(ctx, 40, 20, 10);
+  ctx.strokeStyle = METAL_D; ctx.lineWidth = 2;                 // crinière : faisceau de câbles
+  for (let i = 0; i < 4; i++) {
+    ctx.beginPath(); ctx.moveTo(5 + i * 8, -9);
+    ctx.quadraticCurveTo(10 + i * 8, -16, 3 + i * 8, -19); ctx.stroke();
+  }
+  ctx.translate(40, 0); ctx.rotate(0.95 - Math.sin(t) * 0.06);
+  head(ctx);
+  ctx.restore();
+
+  ctx.save(); ctx.translate(44, 6); leg(ctx, p - CONTACT[0], true, false, bob); ctx.restore();
+  ctx.restore();
+
+  ctx.fillStyle = METAL_L; ctx.beginPath(); ctx.arc(HINGE, 4, 5, 0, TAU); ctx.fill();
+  ctx.fillStyle = METAL_D; ctx.beginPath(); ctx.arc(HINGE, 4, 2.2, 0, TAU); ctx.fill();
+
+  ctx.restore();
+}
+
+
+// ---------- géométrie de la scène ----------
+const SCALE = 1.55, GROUND = 470, HOOF = 86, GHOSTS = 3;
+const STRIDE_LEN = 2 * REACH / DUTY;     // le corps avance plus que le balayage du sabot
+const SPAD = 40, SCOLS = 8, SROWS = 2, STOP = 552;
+const SCW = (S - SPAD * 2) / SCOLS, SCH = (S - 20 - STOP) / SROWS, TSC = 0.38;
+
+// anneau de silhouettes : une seule produite par image de pellicule
+const OW = 580, OH = 430, OX = 270, OY = 205;
+const RING = GHOSTS + 1, ring = [];
+for (let i = 0; i < RING; i++) {
+  const c = document.createElement('canvas');
+  c.width = OW; c.height = OH; ring.push(c);
+}
+const slot = i => ring[((i % RING) + RING) % RING];
+
+function silhouette(canvas, phase, color) {
+  const g = canvas.getContext('2d');
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.clearRect(0, 0, OW, OH);
+  g.save();
+  g.translate(OX, OY); g.scale(SCALE, SCALE);
+  horse(g, phase);
+  g.restore();
+  g.globalCompositeOperation = 'source-in';
+  g.fillStyle = color;
+  g.fillRect(0, 0, OW, OH);
+  g.globalCompositeOperation = 'source-over';
+}
+
+const srand = n => { const v = Math.sin(n * 127.1 + 311.7) * 43758.5453; return v - Math.floor(v); };
+
+const stains = document.createElement('canvas');
+stains.width = stains.height = S;
+(() => {
+  const c = stains.getContext('2d');
+
+  // fibres du papier : orientées, pas concentriques
+  for (let i = 0; i < 1400; i++) {
+    const px = Math.random() * S, py = Math.random() * S;
+    const a = (Math.random() < 0.75 ? 0.12 : 1.4) + (Math.random() - 0.5) * 0.5;
+    const len = 6 + Math.random() * 34;
+    c.strokeStyle = Math.random() < 0.5
+      ? 'rgba(96,74,44,' + (0.02 + Math.random() * 0.05) + ')'
+      : 'rgba(236,226,196,' + (0.02 + Math.random() * 0.06) + ')';
+    c.lineWidth = 0.4 + Math.random() * 0.9;
+    c.beginPath(); c.moveTo(px, py);
+    c.lineTo(px + Math.cos(a) * len, py + Math.sin(a) * len);
+    c.stroke();
+  }
+
+  // auréoles chimiques : contours irréguliers, jamais des cercles
+  for (let i = 0; i < 6; i++) {
+    const cx = Math.random() * S, cy = Math.random() * S;
+    const r = 40 + Math.random() * 90, sq = 0.5 + Math.random() * 0.7;
+    c.save();
+    c.translate(cx, cy); c.rotate(Math.random() * TAU); c.scale(1, sq);
+    c.beginPath();
+    const pts = [];
+    for (let k = 0; k < 40; k++) {
+      const a = k / 40 * TAU;
+      const rr = r * (0.94 + 0.06 * Math.sin(a * 2 + i) + 0.04 * Math.sin(a * 3 + i * 2));
+      pts.push([Math.cos(a) * rr, Math.sin(a) * rr]);
+    }
+    c.moveTo((pts[0][0] + pts[39][0]) / 2, (pts[0][1] + pts[39][1]) / 2);
+    for (let k = 0; k < 40; k++) {          // lissage : le contour passe par les milieux
+      const q = pts[k], n = pts[(k + 1) % 40];
+      c.quadraticCurveTo(q[0], q[1], (q[0] + n[0]) / 2, (q[1] + n[1]) / 2);
+    }
+    c.closePath();
+    const g = c.createRadialGradient(0, 0, r * 0.2, 0, 0, r);
+    g.addColorStop(0, 'rgba(0,0,0,0)');
+    g.addColorStop(0.72, Math.random() < 0.6 ? 'rgba(122,80,32,0.05)' : 'rgba(48,36,22,0.04)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    c.fillStyle = g; c.fill();
+    c.restore();
+  }
+
+  // plis : une arête claire doublée d'une ombre
+  for (let i = 0; i < 3; i++) {
+    const vert = Math.random() < 0.5, u = 120 + Math.random() * (S - 240), drift = (Math.random() - 0.5) * 90;
+    c.lineWidth = 1.4;
+    for (const [off, col] of [[0, 'rgba(240,232,206,0.11)'], [2.5, 'rgba(60,44,26,0.07)']]) {
+      c.strokeStyle = col;
+      c.beginPath();
+      if (vert) { c.moveTo(u + off, 0); c.quadraticCurveTo(u + drift + off, S / 2, u + off, S); }
+      else      { c.moveTo(0, u + off); c.quadraticCurveTo(S / 2, u + drift + off, S, u + off); }
+      c.stroke();
+    }
+  }
+
+  for (let i = 0; i < 80; i++) {          // piqûres d'émulsion
+    c.fillStyle = 'rgba(232,222,190,' + (0.1 + Math.random() * 0.3) + ')';
+    c.beginPath(); c.arc(Math.random() * S, Math.random() * S, Math.random() * 2.2, 0, TAU); c.fill();
+  }
+
+  for (let i = 0; i < 70; i++) {          // poussières collées à la plaque
+    const r = Math.random();
+    c.fillStyle = r > 0.45 ? 'rgba(30,20,10,0.45)' : 'rgba(245,238,215,0.5)';
+    c.beginPath();
+    c.ellipse(Math.random() * S, Math.random() * S, 0.7 + r * 2.4, 0.7 + r, r * 6, 0, TAU);
+    c.fill();
+  }
+
+  for (let i = 0; i < 5; i++) {           // cheveux pris dans l'émulsion
+    const dx = Math.random() * S, dy = Math.random() * S;
+    const len = 14 + Math.random() * 34, a = Math.random() * Math.PI;
+    c.strokeStyle = 'rgba(24,16,8,0.22)'; c.lineWidth = 0.6;
+    c.beginPath(); c.moveTo(dx, dy);
+    c.quadraticCurveTo(dx + Math.cos(a) * len * 0.6 + 6, dy + Math.sin(a) * len * 0.6,
+                       dx + Math.cos(a) * len, dy + Math.sin(a) * len);
+    c.stroke();
+  }
+
+  for (let i = 0; i < 4; i++) {           // rayures : elles ont été faites une fois pour toutes
+    const sx = Math.random() * S;
+    c.strokeStyle = Math.random() > 0.5 ? 'rgba(248,240,215,0.16)' : 'rgba(40,28,14,0.14)';
+    c.lineWidth = 0.5 + Math.random();
+    c.beginPath(); c.moveTo(sx, 0); c.lineTo(sx + (Math.random() - 0.5) * 12, S); c.stroke();
+  }
+})();
+
+// grain d'émulsion : figé lui aussi, c'est de l'argent déposé, pas du bruit
+const grainTex = document.createElement('canvas');
+grainTex.width = grainTex.height = S;
+(() => {
+  const g = grainTex.getContext('2d'), img = g.createImageData(S, S), d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const dark = Math.random() < 0.55;
+    d[i] = dark ? 26 : 236; d[i + 1] = dark ? 22 : 226; d[i + 2] = dark ? 16 : 198;
+    d[i + 3] = Math.pow(Math.random(), 2.4) * 120;
+  }
+  g.putImageData(img, 0, 0);
+})();
+
+// ---------- scène vivante ----------
+function backdrop(travel) {
+  x.strokeStyle = 'rgba(36,31,25,0.09)'; x.lineWidth = 1;
+  const step = 90, o = -(travel * 0.5) % step;
+  for (let i = -1; i < S / step + 1; i++) {
+    const px = o + i * step;
+    x.beginPath(); x.moveTo(px, 150); x.lineTo(px, GROUND); x.stroke();
+  }
+  x.fillStyle = 'rgba(36,31,25,0.2)'; x.font = '12px Georgia, serif';
+  for (let i = -1; i < S / step + 1; i++)
+    x.fillText(String(((i * 21) % 60 + 60) % 60).padStart(2, '0'), o + i * step + 6, 168);
+
+  x.strokeStyle = INK; x.lineWidth = 3;
+  x.beginPath(); x.moveTo(0, GROUND); x.lineTo(S, GROUND); x.stroke();
+
+  x.strokeStyle = 'rgba(36,31,25,0.17)'; x.lineWidth = 1.5;
+  for (let i = -1; i < 26; i++) {
+    const px = (-travel % 60) + i * 60;
+    x.beginPath(); x.moveTo(px, GROUND + 10); x.lineTo(px - 20, GROUND + 56); x.stroke();
+  }
+}
+
+// ---------- bande de phases, sous la scène ----------
+function strip(active) {
+  x.strokeStyle = 'rgba(36,31,25,0.22)'; x.lineWidth = 1;
+  for (let c = 0; c <= SCOLS; c++) {
+    const px = SPAD + c * SCW;
+    x.beginPath(); x.moveTo(px, STOP); x.lineTo(px, STOP + SROWS * SCH); x.stroke();
+  }
+  for (let r = 0; r <= SROWS; r++) {
+    const py = STOP + r * SCH;
+    x.beginPath(); x.moveTo(SPAD, py); x.lineTo(S - SPAD, py); x.stroke();
+  }
+
+  for (let i = 0; i < STEPS; i++) {
+    const cx = SPAD + (i % SCOLS) * SCW, cy = STOP + Math.floor(i / SCOLS) * SCH;
+    const bx = cx + SCW / 2, by = cy + SCH * 0.56, on = i === active;
+
+    if (on) {
+      const g = x.createRadialGradient(bx, by - 10, 5, bx, by - 10, SCW * 0.8);
+      g.addColorStop(0, 'rgba(240,228,198,0.6)');
+      g.addColorStop(1, 'rgba(240,228,198,0)');
+      x.fillStyle = g; x.fillRect(cx + 1, cy + 1, SCW - 2, SCH - 2);
+    }
+
+    x.strokeStyle = 'rgba(36,31,25,0.28)'; x.lineWidth = 1;
+    x.beginPath();
+    x.moveTo(cx + 8, by + HOOF * TSC); x.lineTo(cx + SCW - 8, by + HOOF * TSC); x.stroke();
+
+    x.save();
+    x.globalAlpha = on ? 1 : 0.25;
+    x.translate(bx, by); x.scale(TSC, TSC);
+    horse(x, i / STEPS);
+    x.restore();
+
+    x.globalAlpha = 1;
+    x.fillStyle = on ? INK : 'rgba(36,31,25,0.45)';
+    x.font = '600 11px Georgia, serif';
+    x.fillText(String(i + 1).padStart(2, '0'), cx + 7, cy + SCH - 8);
+  }
+}
+
+// ---------- usure, appliquée en dernier sur toute la plaque ----------
+function wear(fi) {
+  // seule la densité change d'une image à l'autre ; tout le reste appartient à la plaque
+  const flick = srand(fi * 5) - 0.5;
+  const heavy = srand(fi * 5 + 41) > 0.88 ? 2.4 : 1;
+  x.fillStyle = flick > 0 ? 'rgba(255,240,208,' + (flick * 0.17 * heavy) + ')'
+                          : 'rgba(24,16,6,' + (-flick * 0.17 * heavy) + ')';
+  x.fillRect(0, 0, S, S);
+
+  x.drawImage(stains, 0, 0);
+  x.save(); x.globalAlpha = 0.5; x.drawImage(grainTex, 0, 0); x.restore();
+
+  const g = x.createRadialGradient(S / 2, S / 2, S * 0.3, S / 2, S / 2, S * 0.74);
+  g.addColorStop(0, 'rgba(0,0,0,0)');
+  g.addColorStop(1, 'rgba(26,18,6,0.42)');
+  x.fillStyle = g; x.fillRect(0, 0, S, S);
+}
+
+function counterBox(fi) {
+  const w = 88, h = 54, bx = S - SPAD - w, by = 26;
+  const j = Math.floor(fi / 3);                  // il ne bouge pas à chaque image
+  x.save();
+  x.translate(bx + w / 2 + (srand(j) - 0.5) * 2.5, by + h / 2 + (srand(j + 7) - 0.5) * 2);
+  x.rotate((srand(j + 13) - 0.5) * 0.006);
+  x.fillStyle = '#2a2a2a'; x.fillRect(-w / 2 - 5, -h / 2 - 5, w + 10, h + 10);
+  x.fillStyle = PAPER;     x.fillRect(-w / 2, -h / 2, w, h);
+  x.fillStyle = 'rgba(28,20,8,0.18)'; x.fillRect(-w / 2, -h / 2, w, 3);
+  x.fillStyle = '#17140f';
+  x.font = "bold 34px 'Courier New', monospace";
+  x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillText(String((fi % STEPS) + 1).padStart(2, '0'), 0, 2);
+  x.textAlign = 'left'; x.textBaseline = 'alphabetic';
+  x.restore();
+}
+
+function frame(now) {
+  if (last === null) last = now;
+  const dt = Math.min(60, now - last); last = now;
+  if (running) clock += dt;
+
+  const fi = Math.floor(clock / (STRIDE * 1000) * STEPS);
+  if (fi === lastFi) { requestAnimationFrame(frame); return; }   // pellicule immobile : rien à refaire
+
+  // la pellicule saute de temps en temps : l'image précédente repasse
+  const skip = srand(fi * 11 + 3) > 0.955;
+  const df = skip ? fi - 1 : fi;
+  const p = df / STEPS, travel = p * STRIDE_LEN * SCALE;
+
+  if (lastFi === null) for (let k = GHOSTS; k >= 1; k--) silhouette(slot(fi - k), p - k / STEPS, GHOST_INK);
+  silhouette(slot(fi), p, GHOST_INK);
+  lastFi = fi;
+
+  x.fillStyle = PAPER; x.fillRect(0, 0, S, S);
+
+  x.save();
+  // tremblement d'enregistrement : le châssis de prise de vue n'était jamais parfaitement calé
+  x.translate(S / 2 + (srand(fi) - 0.5) * 5, S / 2 + (srand(fi + 99) - 0.5) * 2.4);
+  x.rotate((srand(fi + 41) - 0.5) * 0.007);
+  x.translate(-S / 2, -S / 2);
+
+  backdrop(travel);
+
+  const dx = STRIDE_LEN * SCALE / STEPS;
+  const GA = [0, 0.35, 0.15, 0.05];              // la trace s'efface vite, comme une rémanence
+  for (let k = GHOSTS; k >= 1; k--) {
+    x.globalAlpha = GA[k];
+    x.filter = k === GHOSTS ? 'blur(1.8px)' : (k === 2 ? 'blur(0.7px)' : 'none');
+    x.drawImage(slot(fi - k), S / 2 - k * dx - OX, GROUND - HOOF * SCALE - OY);
+  }
+  x.filter = 'none';
+  x.globalAlpha = 1;
+
+  x.save();
+  x.translate(S / 2, GROUND - HOOF * SCALE); x.scale(SCALE, SCALE);
+  horse(x, p);
+  x.restore();
+
+  x.fillStyle = INK;
+  x.font = '600 27px "Times New Roman", Georgia, serif';
+  x.fillText('EQUUS MECHANICUS — GALLOP', SPAD, 46);
+  x.font = 'italic 14px Georgia, serif';
+  x.fillText(Math.round(STEPS / STRIDE) + ' frames per second · Locomotion Laboratory No. 3', SPAD, 68);
+  x.fillText(running ? 'click to stop the film' : 'film stopped', SPAD, STOP - 14);
+
+  strip(((df % STEPS) + STEPS) % STEPS);
+  x.restore();
+
+  counterBox(df);
+  wear(fi);
+
+  requestAnimationFrame(frame);
+}
+
+cv.addEventListener('click', () => { running = !running; lastFi = null; });
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

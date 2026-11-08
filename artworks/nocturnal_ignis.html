@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<base href="/upstride/">
+    <title>Nocturnal Ignis</title>
+    <style>
+        html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
+        body { display: flex; justify-content: center; align-items: center; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+const gridSize = 32;
+const maxHeight = 8;
+const fogColor = [0, 51, 102];
+
+let W, H, tileWidth, tileHeight, offsetX, offsetY, bg, moon;
+
+// ---------- Terrain ----------
+function noise(x, y, t) {
+    return Math.sin(x * 0.3 + t * 0.1) * Math.cos(y * 0.3 + t * 0.1) +
+           Math.sin(x * 0.15 + y * 0.15 + t * 0.05) * 0.5;
+}
+const targetHeight = (x, y, t) => Math.floor(Math.abs(noise(x, y, t)) * maxHeight);
+
+let terrainTime = 0, terrainAcc = 0;
+const terrain = Array.from({ length: gridSize }, (_, y) =>
+    Array.from({ length: gridSize }, (_, x) => targetHeight(x, y, 0)));
+
+// ---------- Étoiles ----------
+const stars = Array.from({ length: 140 }, () => ({
+    x: Math.random(),
+    y: Math.random() * 0.45,
+    size: 0.4 + Math.random() * 1.2,
+    twinkle: Math.random() * Math.PI * 2,
+    speed: 0.02 + Math.random() * 0.03
+}));
+
+// ---------- Arbres ----------
+const trees = [];
+const treeMap = new Map();
+const targetTrees = Math.floor(gridSize * gridSize * 0.1);
+
+function spawnTree() {
+    const x = Math.floor(Math.random() * gridSize);
+    const y = Math.floor(Math.random() * gridSize);
+    const key = y * gridSize + x;
+    if (treeMap.has(key)) return;
+    const tree = {
+        x, y, key,
+        growth: 0,
+        state: 'growing',
+        age: 0,
+        lifeTime: 15000 + Math.random() * 15000,
+        phase: Math.random() * Math.PI * 2
+    };
+    treeMap.set(key, tree);
+    trees.push(tree);
+}
+for (let i = 0; i < targetTrees; i++) spawnTree();
+
+// ---------- Drones & particules ----------
+const particles = [];
+const drones = Array.from({ length: 8 }, (_, i) => ({
+    dive: i >= 6 ? { state: 'free', t: 0, wait: 5000 + (i - 6) * 9000 + Math.random() * 6000 } : null,
+    x: Math.random() * gridSize,
+    y: Math.random() * gridSize,
+    z: 15 + Math.random() * 20,
+    vx: (Math.random() - 0.5) * 0.04,
+    vy: (Math.random() - 0.5) * 0.04,
+    vz: (Math.random() - 0.5) * 0.01,
+    pulse: Math.random() * Math.PI * 2,
+    angle: Math.random() * Math.PI * 2,
+    angleSpeed: 0.005 + Math.random() * 0.01
+}));
+
+// ---------- Enfers ----------
+const hellDepth = 12;
+const embers = Array.from({ length: 70 }, () => ({
+    x: Math.random(),
+    y: 0.55 + Math.random() * 0.45,
+    size: 0.6 + Math.random() * 1.6,
+    speed: 0.0006 + Math.random() * 0.0015,
+    phase: Math.random() * Math.PI * 2
+}));
+
+// Braises qui traversent la roche et remontent vers la surface
+const risers = Array.from({ length: 32 }, () => ({
+    x: Math.random(),
+    y: 0.25 + Math.random() * 0.75,
+    speed: 0.0004 + Math.random() * 0.0007,
+    phase: Math.random() * Math.PI * 2,
+    size: 0.8 + Math.random() * 1.4
+}));
+
+// Figures de Chladni : la lave se rassemble sur les lignes nodales
+let modeClock = 0;
+const sand = [0, 1, 2].map(i => Array.from({ length: i === 2 ? 1000 : 700 }, () => ({ u: Math.random(), v: Math.random(), k: 0.2 + Math.random() * 0.8, ph: Math.random() * Math.PI * 2 })));
+// Champ organique : plusieurs ondes aux fréquences et phases irrégulières, légèrement déformées
+const waves = Array.from({ length: 6 }, () => ({
+    a: 1.5 + Math.random() * 5.5,
+    b: 1.5 + Math.random() * 5.5,
+    pa: Math.random() * Math.PI * 2,
+    pb: Math.random() * Math.PI * 2,
+    wa: (Math.random() - 0.5) * 0.00018,
+    wb: (Math.random() - 0.5) * 0.00018,
+    w: 0.6 + Math.random() * 0.4
+}));
+const warpSeed = [Math.random() * 6.28, Math.random() * 6.28];
+const waveNorm = waves.reduce((s, w) => s + w.w, 0);
+
+function field(u, v, t) {
+    const P = Math.PI;
+    const uw = u + 0.07 * Math.sin(4.7 * v + t * 0.00011 + warpSeed[0]);
+    const vw = v + 0.07 * Math.sin(3.9 * u + t * 0.00008 + warpSeed[1]);
+    let s = 0;
+    for (const k of waves) {
+        s += k.w * Math.cos(k.a * P * uw + k.pa + t * k.wa) * Math.cos(k.b * P * vw + k.pb + t * k.wb);
+    }
+    return s / waveNorm;
+}
+
+// Le champ évolue lentement : il est échantillonné sur une grille rafraîchie toutes les 5 frames
+const GN = 48;
+const grid = new Float32Array((GN + 1) * (GN + 1));
+let gridAge = 99;
+
+function refreshGrid() {
+    for (let j = 0; j <= GN; j++) {
+        for (let i = 0; i <= GN; i++) grid[j * (GN + 1) + i] = field(i / GN, j / GN, modeClock);
+    }
+}
+
+function sampleGrid(u, v) {
+    const x = u * GN, y = v * GN;
+    const i = Math.min(GN - 1, x | 0), j = Math.min(GN - 1, y | 0);
+    const fx = x - i, fy = y - j, o = j * (GN + 1) + i;
+    return (grid[o] * (1 - fx) + grid[o + 1] * fx) * (1 - fy) +
+           (grid[o + GN + 1] * (1 - fx) + grid[o + GN + 2] * fx) * fy;
+}
+
+function updateSand(dt, ms) {
+    modeClock += ms;
+    if (++gridAge >= 5) { refreshGrid(); gridAge = 0; }
+    const e = 0.02;
+
+    sand.forEach(wall => wall.forEach(p => {
+        const f = sampleGrid(p.u, p.v);
+        const fu = (sampleGrid(Math.min(1, p.u + e), p.v) - f) / e;
+        const fv = (sampleGrid(p.u, Math.min(1, p.v + e)) - f) / e;
+        const amp = Math.min(1, Math.abs(f) * 2.5);
+        p.u -= 0.003 * f * fu * dt;
+        p.v -= 0.003 * f * fv * dt;
+        p.u += (Math.random() - 0.5) * 0.012 * amp * dt;
+        p.v += (Math.random() - 0.5) * 0.012 * amp * dt;
+        p.u = Math.max(0, Math.min(1, p.u));
+        p.v = Math.max(0, Math.min(1, p.v));
+    }));
+}
+
+// ---------- Projection ----------
+function toIso(x, y, z) {
+    return {
+        x: (x - y) * tileWidth + offsetX,
+        y: (x + y) * tileHeight + offsetY - z * tileHeight
+    };
+}
+
+// ---------- Redimensionnement + fond en cache ----------
+function resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = H = Math.min(window.innerWidth, window.innerHeight);
+    canvas.style.width = canvas.style.height = W + 'px';
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    tileWidth = W / (gridSize * 2);
+    tileHeight = tileWidth / 2;
+    offsetX = W / 2;
+    offsetY = H / 2 - (gridSize + (hellDepth - maxHeight) / 2) * tileHeight;
+
+    bg = document.createElement('canvas');
+    bg.width = W * dpr;
+    bg.height = H * dpr;
+    const b = bg.getContext('2d');
+    b.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    const g = b.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#001a33');
+    g.addColorStop(0.45, '#003366');
+    g.addColorStop(0.62, '#1a0a20');
+    g.addColorStop(0.8, '#350606');
+    g.addColorStop(1, '#520e00');
+    b.fillStyle = g;
+    b.fillRect(0, 0, W, H);
+    const lava = b.createRadialGradient(W / 2, H, 0, W / 2, H, W * 0.75);
+    lava.addColorStop(0, 'rgba(200, 70, 0, 0.35)');
+    lava.addColorStop(1, 'rgba(200, 40, 0, 0)');
+    b.fillStyle = lava;
+    b.fillRect(0, 0, W, H);
+
+    // Lune (calque séparé, dessiné par-dessus les étoiles)
+    moon = document.createElement('canvas');
+    moon.width = W * dpr;
+    moon.height = H * dpr;
+    const m = moon.getContext('2d');
+    m.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const mx = W * 0.82, my = H * 0.16, mr = Math.min(W, H) * 0.04;
+    const halo = m.createRadialGradient(mx, my, mr * 0.8, mx, my, mr * 5);
+    halo.addColorStop(0, 'rgba(180, 210, 255, 0.35)');
+    halo.addColorStop(1, 'rgba(180, 210, 255, 0)');
+    m.fillStyle = halo;
+    m.fillRect(mx - mr * 5, my - mr * 5, mr * 10, mr * 10);
+    m.fillStyle = '#e8f0ff';
+    m.beginPath();
+    m.arc(mx, my, mr, 0, Math.PI * 2);
+    m.fill();
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ---------- Rendu ----------
+const mix = (fog, v, k) => Math.floor(fog * k + (1 - fog) * v);
+
+function quad(a, b, c, d, fill, stroke) {
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.lineTo(c.x, c.y);
+    ctx.lineTo(d.x, d.y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+}
+
+// Éclairage : le terrain n'est visible que près des drones
+function tileLight(x, y, h) {
+    let s = 0;
+    for (const d of drones) {
+        const dx = x + 0.5 - d.x, dy = y + 0.5 - d.y, dz = (d.z - h) * 0.12;
+        const k = 1 + (dx * dx + dy * dy + dz * dz) / 16;
+        s += (0.6 + 0.4 * (Math.sin(d.pulse) * 0.5 + 0.5)) * 1.6 / (k * k);
+    }
+    return Math.min(s, 1.3);
+}
+
+// Couleurs quantifiées et mises en cache (évite des milliers de chaînes par frame)
+const faceBase = [[40, 10, 0.4], [50, 10, 0.5], [80, 15, 0.6]];
+const edgeRgb = ['0, 136, 85', '0, 170, 102', '0, 255, 136'];
+const shadeCache = new Map(), edgeCache = new Map();
+
+function shade(type, h, fog, L) {
+    const li = Math.round(Math.min(L, 1.3) * 40), fi = Math.round(fog * 50);
+    const key = (type * 16 + h) * 4096 + fi * 64 + li;
+    let c = shadeCache.get(key);
+    if (!c) {
+        const [g0, gs, bk] = faceBase[type];
+        const gv = g0 + h * gs, Lq = li / 40, fq = fi / 50;
+        const k = 0.06 + Lq * 0.94;
+        const r = Math.min(255, Lq * 90);
+        const g = Math.min(255, mix(fq, gv, fogColor[1]) * k + Lq * 70);
+        const b = Math.min(255, mix(fq, gv * bk, fogColor[2]) * k + Lq * 28);
+        c = `rgb(${r | 0}, ${g | 0}, ${b | 0})`;
+        shadeCache.set(key, c);
+    }
+    return c;
+}
+
+function edgeCol(type, e) {
+    const q = Math.round(e * 60), key = type * 128 + q;
+    let c = edgeCache.get(key);
+    if (!c) { c = `rgba(${edgeRgb[type]}, ${q / 60})`; edgeCache.set(key, c); }
+    return c;
+}
+
+function drawTree(tree, time, fog, L) {
+    const z = Math.floor(terrain[tree.y][tree.x]);
+    const p = toIso(tree.x + 0.5, tree.y + 0.5, z);
+    const s = tileWidth * 0.4 * tree.growth;
+    const sway = Math.sin(time * 0.0015 + tree.phase) * s * 0.12;
+    const a = tree.growth * (1 - fog * 0.6) * (0.12 + 0.88 * Math.min(L, 1));
+
+    ctx.fillStyle = `rgba(101, 67, 33, ${a})`;
+    ctx.fillRect(p.x - s * 0.3, p.y - s * 1.5, s * 0.6, s * 1.5);
+
+    const tiers = [[34, 139, 34, 0.9, 3.2, 1.2], [46, 125, 50, 0.85, 2.4, 0.6], [56, 142, 60, 0.8, 1.7, 0.1]];
+    tiers.forEach(([r, g, b, al, top, base]) => {
+        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${a * al})`;
+        ctx.beginPath();
+        ctx.moveTo(p.x + sway, p.y - s * top);
+        ctx.lineTo(p.x - s * (top - base) * 0.45, p.y - s * base);
+        ctx.lineTo(p.x + s * (top - base) * 0.45, p.y - s * base);
+        ctx.closePath();
+        ctx.fill();
+    });
+}
+
+function wallPoint(side, u, d) {
+    return side === 0 ? toIso(gridSize, u * gridSize, -d) : toIso(u * gridSize, gridSize, -d);
+}
+
+function drawUnderworld(time) {
+    ctx.globalCompositeOperation = 'lighter';
+
+    // Lave du fond (même figure de Chladni)
+    const top = H * 0.58, span = H - top;
+    const bgSand = sand[2];
+    for (const p of bgSand) p.a = Math.min(1, p.v * 4) * p.k * (0.65 + 0.35 * Math.sin(time * 0.0015 + p.ph));
+    for (let lvl = 0; lvl < 5; lvl++) {   // dessin groupé par niveau d'intensité
+        const a = (lvl + 0.5) / 5;
+        for (let pass = 0; pass < 2; pass++) {
+            ctx.fillStyle = pass ? `rgba(230, 110, 30, ${0.28 * a})` : `rgba(200, 50, 0, ${0.07 * a})`;
+            const r = pass ? 0.9 : 3.2;
+            ctx.beginPath();
+            for (const p of bgSand) {
+                if (Math.min(4, (p.a * 5) | 0) !== lvl) continue;
+                const x = p.u * W, y = top + p.v * span;
+                ctx.moveTo(x + r, y);
+                ctx.arc(x, y, r, 0, Math.PI * 2);
+            }
+            ctx.fill();
+        }
+    }
+
+    // Braises
+    embers.forEach(e => {
+        const x = (e.x + Math.sin(time * 0.001 + e.phase) * 0.01) * W;
+        const a = Math.min(1, (e.y - 0.55) / 0.2) * 0.8;
+        ctx.fillStyle = `rgba(255, ${120 + Math.floor(e.phase * 20)}, 30, ${a})`;
+        ctx.beginPath();
+        ctx.arc(x, e.y * H, e.size, 0, Math.PI * 2);
+        ctx.fill();
+    });
+    ctx.globalCompositeOperation = 'source-over';
+
+    // Parois de roche en fusion
+    for (let side = 0; side < 2; side++) {
+        const a = wallPoint(side, 0, 0), b = wallPoint(side, 1, 0);
+        const c = wallPoint(side, 1, hellDepth), d = wallPoint(side, 0, hellDepth);
+        const y0 = Math.min(a.y, b.y), y1 = Math.max(c.y, d.y);
+        const grad = ctx.createLinearGradient(0, y0, 0, y1);
+        grad.addColorStop(0, '#1a0f09');
+        grad.addColorStop(0.4, '#1c0906');
+        grad.addColorStop(1, '#2a0800');
+        quad(a, b, c, d, grad, 'rgba(120, 30, 0, 0.35)');
+        if (side === 1) quad(a, b, c, d, 'rgba(0, 0, 0, 0.25)', 'rgba(0, 0, 0, 0)');
+
+        // Lave sur les lignes nodales
+        ctx.globalCompositeOperation = 'lighter';
+        for (let pass = 0; pass < 2; pass++) {
+            ctx.fillStyle = pass ? 'rgba(150, 35, 5, 0.3)' : 'rgba(110, 18, 0, 0.08)';
+            const r = pass ? 1.1 : 2.6;
+            ctx.beginPath();
+            for (const p of sand[side]) {
+                const X = side === 0 ? gridSize : p.u * gridSize;
+                const Y = side === 0 ? p.u * gridSize : gridSize;
+                const sx = (X - Y) * tileWidth + offsetX;
+                const sy = (X + Y) * tileHeight + offsetY + p.v * hellDepth * tileHeight;
+                ctx.moveTo(sx + r, sy);
+                ctx.arc(sx, sy, r, 0, Math.PI * 2);
+            }
+            ctx.fill();
+        }
+        ctx.globalCompositeOperation = 'source-over';
+    }
+
+    // Braises montantes (cachées par le terrain, elles en ressortent par le haut)
+    ctx.globalCompositeOperation = 'lighter';
+    risers.forEach(r => {
+        const x = (r.x + Math.sin(time * 0.0008 + r.phase) * 0.012) * W;
+        const y = r.y * H;
+        const a = Math.min(1, (1 - r.y) * 6) * Math.min(1, (r.y - 0.25) / 0.2) * 0.9;
+        ctx.fillStyle = `rgba(255, 90, 0, ${0.2 * a})`;
+        ctx.beginPath();
+        ctx.arc(x, y, r.size * 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = `rgba(255, 190, 80, ${a})`;
+        ctx.beginPath();
+        ctx.arc(x, y, r.size, 0, Math.PI * 2);
+        ctx.fill();
+    });
+    ctx.globalCompositeOperation = 'source-over';
+}
+
+function draw(time) {
+    ctx.drawImage(bg, 0, 0, W, H);
+
+    // Étoiles
+    ctx.fillStyle = '#fff';
+    stars.forEach(s => {
+        s.twinkle += s.speed;
+        ctx.globalAlpha = Math.sin(s.twinkle) * 0.3 + 0.7;
+        ctx.beginPath();
+        ctx.arc(s.x * W, s.y * H, s.size, 0, Math.PI * 2);
+        ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    ctx.drawImage(moon, 0, 0, W, H);
+
+    drawUnderworld(time);
+
+    // Terrain + arbres (ordre du peintre : du fond vers l'avant)
+    for (let y = 0; y < gridSize; y++) {
+        for (let x = 0; x < gridSize; x++) {
+            const h = Math.floor(terrain[y][x]);
+            const dx = x - gridSize / 2, dy = y - gridSize / 2;
+            const fog = Math.min(Math.sqrt(dx * dx + dy * dy) / (gridSize * 0.6), 0.4);
+            const L = tileLight(x, y, h);
+            const edge = (1 - fog * 0.7) * (0.1 + 0.9 * Math.min(L, 1));
+
+            // Face droite
+            const hr = x < gridSize - 1 ? Math.floor(terrain[y][x + 1]) : 0;
+            if (hr < h) {
+                quad(toIso(x + 1, y, h), toIso(x + 1, y + 1, h),
+                     toIso(x + 1, y + 1, hr), toIso(x + 1, y, hr),
+                     shade(0, h, fog, L), edgeCol(0, edge));
+            }
+            // Face gauche
+            const hl = y < gridSize - 1 ? Math.floor(terrain[y + 1][x]) : 0;
+            if (hl < h) {
+                quad(toIso(x, y + 1, h), toIso(x + 1, y + 1, h),
+                     toIso(x + 1, y + 1, hl), toIso(x, y + 1, hl),
+                     shade(1, h, fog, L), edgeCol(1, edge));
+            }
+            // Face du dessus
+            quad(toIso(x, y, h), toIso(x + 1, y, h), toIso(x + 1, y + 1, h), toIso(x, y + 1, h),
+                 shade(2, h, fog, L), edgeCol(2, edge));
+
+            const tree = treeMap.get(y * gridSize + x);
+            if (tree && tree.growth > 0) drawTree(tree, time, fog, L);
+        }
+    }
+
+    // Traces lumineuses
+    ctx.globalCompositeOperation = 'lighter';
+    particles.forEach(p => {
+        const pos = toIso(p.x, p.y, p.z);
+        ctx.fillStyle = `rgba(255, 200, 100, ${p.alpha * 0.25})`;
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, p.size * 1.6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = `rgba(255, 255, 150, ${p.alpha * 0.5})`;
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, p.size * 0.6, 0, Math.PI * 2);
+        ctx.fill();
+    });
+
+    // Drones / lucioles
+    drones.forEach(d => {
+        const pos = toIso(d.x, d.y, d.z);
+        const pulse = Math.sin(d.pulse) * 0.5 + 0.5;
+        const size = 2 + pulse * 1.5;
+        const grad = ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, size * 4);
+        const heat = Math.max(0, Math.min(1, -d.z / hellDepth));
+        const fade = d.z < -hellDepth ? Math.max(0, 1 - (-d.z - hellDepth) / 4) : 1;
+        const gc = Math.floor(255 - 150 * heat), bc = Math.floor(100 - 100 * heat);
+        grad.addColorStop(0, `rgba(255, ${gc}, ${bc}, ${pulse * 0.9 * fade})`);
+        grad.addColorStop(0.5, `rgba(255, ${Math.floor(gc * 0.75)}, 30, ${pulse * 0.5 * fade})`);
+        grad.addColorStop(1, 'rgba(255, 100, 0, 0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, size * 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = `rgba(255, ${Math.floor(255 - 100 * heat)}, ${Math.floor(255 - 200 * heat)}, ${(0.9 + pulse * 0.1) * fade})`;
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, size, 0, Math.PI * 2);
+        ctx.fill();
+    });
+    ctx.globalCompositeOperation = 'source-over';
+}
+
+// ---------- Mise à jour ----------
+function update(dt, ms) {
+    // Terrain
+    // (évolution lente : calculée une frame sur trois)
+    terrainAcc += dt;
+    if (terrainAcc >= 3) {
+        const k = terrainAcc;
+        terrainAcc = 0;
+        terrainTime += 0.002 * k;
+        for (let y = 0; y < gridSize; y++) {
+            for (let x = 0; x < gridSize; x++) {
+                const target = targetHeight(x, y, terrainTime);
+                const cur = terrain[y][x];
+                if (Math.abs(cur - target) < 0.1) terrain[y][x] = target;
+                else terrain[y][x] += (cur < target ? 0.02 : -0.02) * k;
+            }
+        }
+    }
+
+    updateSand(dt, ms);
+
+    risers.forEach(r => {
+        r.y -= r.speed * dt;
+        if (r.y < 0.25) { r.y = 1; r.x = Math.random(); }
+    });
+
+    // Braises
+    embers.forEach(e => {
+        e.y -= e.speed * dt;
+        if (e.y < 0.55) { e.y = 1; e.x = Math.random(); }
+    });
+
+    // Arbres
+    for (let i = trees.length - 1; i >= 0; i--) {
+        const t = trees[i];
+        if (t.state === 'growing') {
+            t.growth += 0.015 * dt;
+            if (t.growth >= 1) { t.growth = 1; t.state = 'alive'; }
+        } else if (t.state === 'alive') {
+            t.age += ms;
+            if (t.age > t.lifeTime) t.state = 'dying';
+        } else {
+            t.growth -= 0.015 * dt;
+            if (t.growth <= 0) {
+                treeMap.delete(t.key);
+                trees.splice(i, 1);
+            }
+        }
+    }
+    if (trees.length < targetTrees) spawnTree();
+
+    // Drones
+    drones.forEach(d => {
+        if (Math.random() > 0.3) {
+            particles.push({ x: d.x, y: d.y, z: d.z, size: 1.5 + Math.random() * 1.5, alpha: 0.6, life: 60 });
+        }
+
+        // Plongée dans les enfers (coin avant), puis remontée
+        if (d.dive) {
+            const s = d.dive;
+            s.t += ms;
+            if (s.state === 'free') {
+                if (s.t > s.wait) { s.state = 'approach'; s.t = 0; }
+            } else {
+                d.pulse += 0.05 * dt;
+                if (s.state === 'approach') {
+                    const tx = gridSize + 0.4, ty = gridSize + 0.4;
+                    d.x += (tx - d.x) * 0.02 * dt;
+                    d.y += (ty - d.y) * 0.02 * dt;
+                    d.z += (12 - d.z) * 0.02 * dt;
+                    if (Math.hypot(tx - d.x, ty - d.y) < 0.4) s.state = 'plunge';
+                } else if (s.state === 'plunge') {
+                    d.z -= 0.18 * dt;
+                    if (d.z < -hellDepth - 4) s.state = 'rise';
+                } else {
+                    d.z += 0.14 * dt;
+                    d.x += (gridSize - 4 - d.x) * 0.02 * dt;
+                    d.y += (gridSize - 4 - d.y) * 0.02 * dt;
+                    if (d.z >= 20) { s.state = 'free'; s.t = 0; s.wait = 15000 + Math.random() * 10000; }
+                }
+                return;
+            }
+        }
+
+        d.angle += d.angleSpeed * dt;
+        d.vx += Math.cos(d.angle) * 0.0015 * dt;
+        d.vy += Math.sin(d.angle) * 0.0015 * dt;
+
+        const speed = Math.hypot(d.vx, d.vy);
+        if (speed > 0.06) {
+            d.vx = (d.vx / speed) * 0.06;
+            d.vy = (d.vy / speed) * 0.06;
+        }
+
+        d.x += d.vx * dt;
+        d.y += d.vy * dt;
+        d.z += d.vz * dt;
+        d.pulse += 0.05 * dt;
+
+        if (d.x < 2 || d.x > gridSize - 2) { d.vx *= -0.8; d.angle += Math.PI; }
+        if (d.y < 2 || d.y > gridSize - 2) { d.vy *= -0.8; d.angle += Math.PI; }
+        if (d.z < 15 || d.z > 35) d.vz *= -1;
+
+        d.x = Math.max(2, Math.min(gridSize - 2, d.x));
+        d.y = Math.max(2, Math.min(gridSize - 2, d.y));
+        d.z = Math.max(15, Math.min(35, d.z));
+    });
+
+    // Particules
+    for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.life -= dt;
+        if (p.life <= 0) { particles[i] = particles[particles.length - 1]; particles.pop(); continue; }
+        const t = p.life / 60;
+        p.alpha = t * t * 0.6;
+    }
+}
+
+// ---------- Boucle ----------
+let last = performance.now();
+function animate(now) {
+    const ms = Math.min(now - last, 50);
+    last = now;
+    update(ms / 16.667, ms);
+    draw(now);
+    requestAnimationFrame(animate);
+}
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>

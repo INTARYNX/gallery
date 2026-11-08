@@ -1,0 +1,1144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<base href="/upstride/">
+<title>You cannot OutRun it</title>
+<style>
+  :root{color-scheme:light dark}
+  html,body{height:100%;margin:0;background:#000;font-family:Inter,system-ui,Segoe UI,Roboto,Arial;display:flex;align-items:center;justify-content:center;}
+  #container{width:100%;height:100%;max-width:100vh;max-height:100vw;aspect-ratio:1/1;position:relative;background:#000;}
+  canvas{display:block;width:100%;height:100%;}
+</style>
+</head>
+<body>
+<div id="container">
+  <canvas id="c"></canvas>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const container = document.getElementById('container');
+
+function updateCanvasSize(){
+  const rect = container.getBoundingClientRect();
+  canvas.width = rect.width;
+  canvas.height = rect.height;
+  W = canvas.width;
+  H = canvas.height;
+}
+
+let W, H;
+updateCanvasSize();
+addEventListener('resize', updateCanvasSize);
+
+// --- Configuration Constants ---
+const SEG_LEN = 200;
+const ROAD_W = 2000;
+const CAMERA_H = 1000;
+const CAMERA_DEPTH = 0.84;
+const DRAW_DISTANCE = 300;
+
+// Age at death: official data by World Bank income group, mapped onto the six birth environments.
+// Sources (World Bank, World Development Indicators, via FRED):
+//   Life expectancy at birth, 2024 (SP.DYN.LE00.IN): low income 65.2, lower-middle 69.5, upper-middle 76.0, high 80.4
+//   Infant mortality per 1,000 live births, 2023 (SP.DYN.IMRT.IN): low 47.7, lower-middle 32.6, upper-middle 11.5, high 4.1
+// Model (assumption): deaths at age 1-4 = 0.4 x infant mortality (ratio seen in low-income U5MR 65 vs IMR ~46);
+// from age 5, a Gompertz-Makeham curve (b = 0.085, background 0.001/yr) whose level is calibrated so that the
+// average age at death equals the official life expectancy of the group.
+const INCOME = {                       // [life expectancy, infant mortality per 1000]
+  low:   [65.2, 47.7],
+  lower: [69.5, 32.6],
+  upper: [76.0, 11.5],
+  high:  [80.4, 4.1]
+};
+// metropolis, alpine village, countryside, industrial, shantytown, affluent suburb
+const ENV_INCOME = ['upper', 'high', 'lower', 'lower', 'low', 'high'];
+const GB = 0.085, GC = 0.001, MAXAGE = 105;
+function adultMean(a){                 // mean age at death given survival to 5
+  let s = 0, S = 1;
+  for(let t = 0; t < MAXAGE - 5; t += 0.25){ S = Math.exp(-GC * t - (a / GB) * (Math.exp(GB * t) - 1)); s += S * 0.25; }
+  return 5 + s;
+}
+const GOMPERTZ_A = {};
+for(const k in INCOME){
+  const [e0, imr] = INCOME[k], q0 = imr / 1000, q1 = 0.4 * q0;
+  const target = (e0 - q0 * 0.2 - q1 * 2.5) / (1 - q0 - q1) + 0.5;   // +0.5: ages are floored to whole years
+  let lo = 1e-7, hi = 1e-1;
+  for(let i = 0; i < 60; i++){ const mid = Math.sqrt(lo * hi); if(adultMean(mid) > target) lo = mid; else hi = mid; }
+  GOMPERTZ_A[k] = Math.sqrt(lo * hi);
+}
+function generateLifespan(){
+  const g = ENV_INCOME[birthEnv], q0 = INCOME[g][1] / 1000, q1 = 0.4 * q0;
+  const r = Math.random();
+  if(r < q0) return 0;                                         // dies in the first year
+  if(r < q0 + q1){                                             // 1-4: risk falls with each year survived
+    const u = Math.random();
+    return u < 0.45 ? 1 : u < 0.72 ? 2 : u < 0.89 ? 3 : 4;
+  }
+  const a = GOMPERTZ_A[g];
+  const tg = Math.log(1 - GB * Math.log(Math.random()) / a) / GB;   // ageing (Gompertz)
+  const tm = -Math.log(Math.random()) / GC;                          // background risk (Makeham)
+  let age = 5 + Math.min(tg, tm);
+  // The road you were given, relative to what is usual for your class: a worse road costs years, a better one buys some
+  if(segments.length){
+    const n = segments.length, bad = segments.filter(s => s.q >= 2).length / n;
+    const usual = [0.15, 0.05, 0.30, 0.45, 0.85, 0][birthEnv];
+    age += 8 * Math.max(-0.25, Math.min(0.25, usual - bad));
+  }
+  return Math.max(5, Math.min(MAXAGE, Math.floor(age)));
+}
+
+// Out Run Colors
+const ROAD_COLOR1 = '#6B6B6B'; // Light Gray
+const ROAD_COLOR2 = '#555555'; // Dark Gray
+const RUMBLE_COLOR1 = '#FFFFFF'; // White
+const RUMBLE_COLOR2 = '#FF0000'; // Red
+const GRASS_COLOR1 = '#3c8b3c'; // Light Green
+const GRASS_COLOR2 = '#2d7c2d'; // Dark Green
+const SKY_TOP = '#14083a';
+const SKY_BOT = '#4c0e64';
+
+// --- State Variables ---
+let age = 0;
+let segments = [];
+let seed = Math.random()*10000;
+let playerZ = 0;
+let speed = 0;
+let maxSpeed = 8000;
+let acceleration = 100;
+let lastTime = performance.now();
+let cameraX = 0;
+let fadeAlpha = 0;
+let fadeColor = 'black';
+let deathAge = 0;   // simulated age at death of this life (not a life expectancy); drawn once the birth environment and the road exist
+let isEarlyDeath = deathAge < 73;
+
+
+
+// --- Birth environment backdrop (different each life) ---
+const ENV_NAMES = ['metropolis','alpine village','countryside','industrial','shantytown','affluent suburb'];
+let birthEnv = Math.floor(Math.random() * ENV_NAMES.length);
+let bgSeed = 1 + Math.floor(Math.random() * 1e6);
+
+function seeded(s){ return () => { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; }; }
+
+function drawBackdrop(tod, skyCol){
+  const hz = H / 2, u = H / 720, r = seeded(bgSeed), t = performance.now();
+  const lum = Math.max(Math.min(1, Math.max(0, (tod - 0.6) / 0.25)), Math.max(0, 1 - tod / 0.15) * 0.8);
+  const sc = (skyCol.match(/\d+/g) || [200, 150, 150]).map(Number);
+  const tone = (k, a = 1) => `rgba(${(sc[0] * (1 - k) + 16 * k) | 0},${(sc[1] * (1 - k) + 10 * k) | 0},${(sc[2] * (1 - k) + 26 * k) | 0},${a})`;
+  const FAR = tone(0.34), MID = tone(0.58), NEAR = tone(0.84);
+  const lights = [];
+  const win = (x, y, w, h) => { if(r() < 0.35) lights.push(x, y, w, h); };
+  const box = (x, w, h) => ctx.fillRect(x, hz - h, w, h + 1);
+  const px = Math.max(3, 4 * u);
+  const ridge = (col, base, amp, f1, f2, p1, p2) => {
+    ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(-5, hz + 1);
+    for(let x = -5; x <= W + 5; x += px){
+      const v = 1 - Math.abs(Math.sin(x * f1 + p1) * 0.55 + Math.sin(x * f2 + p2) * 0.3 + Math.sin(x * f2 * 2.3 + p1) * 0.15);
+      ctx.lineTo(x, hz - H * (base + amp * v));
+    }
+    ctx.lineTo(W + 5, hz + 1); ctx.closePath(); ctx.fill();
+  };
+  const hills = (col, base, amp, f1, f2, p1, p2) => {
+    ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(-5, hz + 1);
+    for(let x = -5; x <= W + 5; x += px * 2) ctx.lineTo(x, hz - H * (base + amp * (1 + Math.sin(x * f1 + p1) * 0.6 + Math.sin(x * f2 + p2) * 0.4)));
+    ctx.lineTo(W + 5, hz + 1); ctx.closePath(); ctx.fill();
+  };
+  const pine = (x, w, h) => { ctx.beginPath(); ctx.moveTo(x, hz + 1); ctx.lineTo(x + w / 2, hz - h); ctx.lineTo(x + w, hz + 1); ctx.closePath(); ctx.fill(); };
+
+  if(birthEnv === 0){ // metropolis
+    [[FAR, 0.3, 0.035, 0.05], [NEAR, 0.16, 0.03, 0.045]].forEach(([col, hmax, wmin, wr], layer) => {
+      ctx.fillStyle = col; let x = -W * 0.02;
+      while(x < W){
+        let w = W * (wmin + r() * wr), h = H * (0.05 + r() * hmax);
+        const ant = r() < 0.4, slab = layer && r() < 0.3;
+        if(slab){ w = W * (0.12 + r() * 0.06); h = H * (0.05 + r() * 0.02); }   // long social-housing block
+        box(x, w, h);
+        if(ant && !slab) ctx.fillRect(x + w * 0.5, hz - h - H * 0.035, Math.max(1, 2 * u), H * 0.035);
+        if(layer) for(let wy = hz - h + 8 * u; wy < hz - 6 * u; wy += 11 * u) for(let wx = x + 4 * u; wx < x + w - 6 * u; wx += 8 * u) win(wx, wy, Math.max(1.5, 3 * u), Math.max(2, 5 * u));
+        x += w + W * r() * 0.012;
+      }
+    });
+  } else if(birthEnv === 1){ // alpine village
+    const p1 = r() * 6, p2 = r() * 6;
+    ridge(FAR, 0.04, 0.26, 0.0058, 0.0123, p1, p2);
+    ctx.save(); ctx.clip();
+    const sg = ctx.createLinearGradient(0, hz - H * 0.3, 0, hz - H * 0.15);
+    sg.addColorStop(0, 'rgba(245,245,255,0.7)'); sg.addColorStop(1, 'rgba(245,245,255,0)');
+    ctx.fillStyle = sg; ctx.fillRect(0, hz - H * 0.32, W, H * 0.2); ctx.restore();
+    ridge(MID, 0.02, 0.14, 0.0085, 0.019, p2, p1 + 2);
+    hills(NEAR, 0.0, 0.02, 0.006, 0.015, r() * 6, r() * 6);
+    ctx.fillStyle = NEAR; let x = 0;
+    while(x < W){
+      if(r() < 0.28){
+        const w = W * 0.026, h = H * 0.024;
+        box(x, w, h);
+        ctx.beginPath(); ctx.moveTo(x - 3 * u, hz - h); ctx.lineTo(x + w / 2, hz - h - H * 0.018); ctx.lineTo(x + w + 3 * u, hz - h); ctx.closePath(); ctx.fill();
+        win(x + w * 0.3, hz - h * 0.8, Math.max(1.5, 4 * u), Math.max(2, 5 * u));
+        x += w + W * 0.02;
+      } else {
+        const w = H * 0.026, h = H * (0.04 + r() * 0.04);
+        pine(x, w, h); x += w * 0.65;
+      }
+    }
+  } else if(birthEnv === 2){ // countryside
+    hills(FAR, 0.02, 0.025, 0.004, 0.011, r() * 6, r() * 6);
+    hills(MID, 0.008, 0.02, 0.006, 0.014, r() * 6, r() * 6);
+    { // power lines: the city's electricity passes over, it doesn't stop here
+      ctx.fillStyle = MID; ctx.strokeStyle = MID; ctx.lineWidth = Math.max(1, 1.5 * u);
+      const ph = H * 0.11, pyl = [];
+      for(let k = 0; k < 4; k++){
+        const x = W * (0.05 + k * 0.32 + r() * 0.04); pyl.push(x);
+        ctx.beginPath(); ctx.moveTo(x - W * 0.012, hz); ctx.lineTo(x, hz - ph); ctx.lineTo(x + W * 0.012, hz);
+        ctx.moveTo(x - W * 0.008, hz - ph * 0.35); ctx.lineTo(x + W * 0.008, hz - ph * 0.35); ctx.stroke();
+        ctx.fillRect(x - W * 0.018, hz - ph * 0.85, W * 0.036, Math.max(1, 2 * u));
+      }
+      for(let k = 0; k < 3; k++) for(const sd of [-1, 1]){
+        ctx.beginPath(); ctx.moveTo(pyl[k] + sd * W * 0.016, hz - ph * 0.85);
+        ctx.quadraticCurveTo((pyl[k] + pyl[k + 1]) / 2 + sd * W * 0.016, hz - ph * 0.6, pyl[k + 1] + sd * W * 0.016, hz - ph * 0.85); ctx.stroke();
+      }
+    }
+    const bx = W * (0.12 + r() * 0.2), wx = W * (0.62 + r() * 0.22), by = hz - H * 0.012;
+    ctx.fillStyle = NEAR; ctx.strokeStyle = NEAR; ctx.lineWidth = Math.max(1.5, 3 * u);
+    ctx.fillRect(bx, by - H * 0.04, W * 0.07, H * 0.04);
+    ctx.beginPath(); ctx.moveTo(bx - 3 * u, by - H * 0.04); ctx.lineTo(bx + W * 0.035, by - H * 0.075); ctx.lineTo(bx + W * 0.073, by - H * 0.04); ctx.closePath(); ctx.fill();
+    ctx.fillRect(bx + W * 0.085, by - H * 0.075, W * 0.016, H * 0.075);
+    ctx.beginPath(); ctx.arc(bx + W * 0.093, by - H * 0.075, W * 0.008, Math.PI, 0); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(wx - 5 * u, by); ctx.lineTo(wx - 2 * u, by - H * 0.12); ctx.lineTo(wx + 2 * u, by - H * 0.12); ctx.lineTo(wx + 5 * u, by); ctx.closePath(); ctx.fill();
+    const ang = t * 0.0004;
+    for(let k = 0; k < 4; k++){ const a = ang + k * Math.PI / 2; ctx.beginPath(); ctx.moveTo(wx, by - H * 0.12); ctx.lineTo(wx + Math.cos(a) * H * 0.07, by - H * 0.12 + Math.sin(a) * H * 0.07); ctx.stroke(); }
+    hills(NEAR, 0.0, 0.012, 0.007, 0.017, r() * 6, r() * 6);
+  } else if(birthEnv === 3){ // industrial
+    ctx.fillStyle = FAR; let x = 0;
+    while(x < W){
+      const w = W * (0.05 + r() * 0.07), h = H * (0.03 + r() * 0.04);
+      box(x, w, h); const tooth = 14 * u;
+      for(let sx = x; sx < x + w - tooth; sx += tooth){ ctx.beginPath(); ctx.moveTo(sx, hz - h); ctx.lineTo(sx + tooth, hz - h); ctx.lineTo(sx + tooth, hz - h - H * 0.015); ctx.closePath(); ctx.fill(); }
+      x += w + W * 0.01;
+    }
+    ctx.fillStyle = MID; x = 0;
+    while(x < W){
+      const w = W * (0.08 + r() * 0.08), h = H * (0.04 + r() * 0.03);
+      box(x, w, h);
+      for(let sx = x + 6 * u; sx < x + w - 10 * u; sx += 12 * u) win(sx, hz - h * 0.6, Math.max(2, 6 * u), Math.max(1.5, 4 * u));
+      x += w + W * (0.01 + r() * 0.03);
+    }
+    for(let k = 0; k < 4; k++){
+      const cx = W * (0.1 + k * 0.23 + r() * 0.06), cw = W * 0.014, ch = H * (0.17 + r() * 0.12);
+      ctx.fillStyle = NEAR; box(cx, cw, ch);
+      for(let q = 0; q < 6; q++){
+        const ph = (t * 0.00004 + q / 6) % 1;
+        ctx.fillStyle = tone(0.5, 0.32 * (1 - ph));
+        ctx.beginPath(); ctx.arc(cx + cw / 2 + ph * W * 0.08, hz - ch - ph * H * 0.12, H * (0.015 + ph * 0.04), 0, 6.283); ctx.fill();
+      }
+    }
+    // rows of identical workers' houses, right under the smoke
+    ctx.fillStyle = NEAR; const hw = W * 0.03, th = H * 0.02;
+    for(let x2 = 0; x2 < W; x2 += hw){
+      box(x2, hw - Math.max(1, u), th);
+      ctx.beginPath(); ctx.moveTo(x2, hz - th); ctx.lineTo(x2 + hw / 2, hz - th - H * 0.012); ctx.lineTo(x2 + hw, hz - th); ctx.closePath(); ctx.fill();
+      ctx.fillRect(x2 + hw * 0.7, hz - th - H * 0.014, Math.max(1.5, 2 * u), H * 0.008);
+      win(x2 + hw * 0.35, hz - th * 0.65, Math.max(1.5, 3 * u), Math.max(1.5, 4 * u));
+    }
+  } else if(birthEnv === 4){ // shantytown
+    const hh = x => H * 0.2 * Math.exp(-Math.pow((x - W * 0.5) / (W * 0.38), 2));
+    // glass towers of the rich district, close enough to see, out of reach
+    ctx.fillStyle = tone(0.2);
+    for(let k = 0; k < 9; k++){
+      const w = W * (0.025 + r() * 0.025), h = H * (0.15 + r() * 0.18), x = W * (0.06 + k * 0.1 + r() * 0.03);
+      box(x, w, h);
+      for(let wy = hz - h + 6 * u; wy < hz - hh(x) - 4 * u; wy += 9 * u) for(let wx = x + 3 * u; wx < x + w - 4 * u; wx += 6 * u) win(wx, wy, Math.max(1, 2 * u), Math.max(1.5, 3 * u));
+    }
+    ctx.fillStyle = FAR; ctx.beginPath(); ctx.moveTo(0, hz + 1);
+    for(let x = 0; x <= W; x += px) ctx.lineTo(x, hz - hh(x));
+    ctx.lineTo(W, hz + 1); ctx.closePath(); ctx.fill();
+    const step = H * 0.026;
+    for(let k = 0; k < 9; k++){
+      let x = 0;
+      while(x < W){
+        const bw = W * (0.02 + r() * 0.02), bh = H * (0.02 + r() * 0.015), v = r(), tank = r() < 0.08;
+        if(hh(x + bw / 2) > (k + 1) * step){
+          ctx.fillStyle = tone(0.5 + 0.35 * v);
+          const by = hz - k * step; ctx.fillRect(x, by - bh, bw, bh + 1);
+          if(tank) ctx.fillRect(x + bw * 0.3, by - bh - H * 0.012, bw * 0.4, H * 0.012);
+          win(x + bw * 0.3, by - bh * 0.7, Math.max(1.5, 3 * u), Math.max(1.5, 4 * u));
+        }
+        x += bw + 1;
+      }
+    }
+  } else { // affluent suburb
+    let x = W * 0.02;
+    ctx.fillStyle = FAR; ctx.beginPath();
+    while(x < W){ const cr = H * (0.02 + r() * 0.025); ctx.rect(x, hz - cr * 1.6, Math.max(1.5, 2 * u), cr * 1.6); ctx.moveTo(x + cr, hz - cr * 2); ctx.arc(x, hz - cr * 2, cr, 0, 6.283); x += W * (0.01 + r() * 0.02); }
+    ctx.fill();
+    ctx.fillRect(0, hz - H * 0.032, W, H * 0.033);  // dense undergrowth: no sky between trunks
+    ctx.fillStyle = NEAR; x = W * 0.03;
+    while(x < W){
+      const w = W * (0.1 + r() * 0.05), h = H * (0.04 + r() * 0.02), rh = H * 0.03;
+      box(x, w, h);
+      ctx.beginPath(); ctx.moveTo(x - 4 * u, hz - h); ctx.lineTo(x + w * 0.15, hz - h - rh); ctx.lineTo(x + w * 0.85, hz - h - rh); ctx.lineTo(x + w + 4 * u, hz - h); ctx.closePath(); ctx.fill();
+      ctx.fillRect(x + w * 0.7, hz - h - rh - H * 0.012, w * 0.05, H * 0.015);
+      for(let k = 0; k < 4; k++) win(x + w * (0.12 + k * 0.22), hz - h * 0.75, w * 0.12, h * 0.4);
+      x += w + W * (0.04 + r() * 0.05);
+    }
+    // shrubs, topiary and a continuous hedge along the base
+    ctx.fillStyle = MID; ctx.beginPath();
+    for(let bx = 0; bx < W; bx += W * (0.025 + r() * 0.03)){ const rr = H * (0.014 + r() * 0.016); ctx.moveTo(bx + rr, hz - rr * 0.8); ctx.arc(bx, hz - rr * 0.8, rr, 0, 6.283); }
+    ctx.fill();
+    ctx.fillStyle = NEAR; ctx.beginPath();
+    for(let bx = -5; bx < W + 10; bx += H * 0.012){ const rr = H * (0.008 + r() * 0.008); ctx.moveTo(bx + rr, hz - rr * 0.5); ctx.arc(bx, hz - rr * 0.5, rr, 0, 6.283); }
+    ctx.fill();
+    ctx.fillRect(0, hz - H * 0.006, W, H * 0.007);
+    // gated: iron railing along the front
+    const fh = H * 0.03;
+    ctx.fillRect(0, hz - fh, W, Math.max(1, 1.5 * u));
+    for(let fx = 0; fx < W; fx += 7 * u) ctx.fillRect(fx, hz - fh - 3 * u, Math.max(1, 1.2 * u), fh + 3 * u);
+  }
+  if(lum > 0.02 && lights.length){
+    ctx.fillStyle = `rgba(255,200,110,${0.85 * lum})`;
+    ctx.beginPath();
+    for(let i = 0; i < lights.length; i += 4) ctx.rect(lights[i], lights[i + 1], lights[i + 2], lights[i + 3]);
+    ctx.fill();
+  }
+}
+
+// --- Utility Functions ---
+
+function interpolateColor(color1, color2, t){
+  // Parse hex colors
+  const r1 = parseInt(color1.slice(1,3), 16);
+  const g1 = parseInt(color1.slice(3,5), 16);
+  const b1 = parseInt(color1.slice(5,7), 16);
+  const r2 = parseInt(color2.slice(1,3), 16);
+  const g2 = parseInt(color2.slice(3,5), 16);
+  const b2 = parseInt(color2.slice(5,7), 16);
+  
+  const r = Math.round(r1 + (r2 - r1) * t);
+  const g = Math.round(g1 + (g2 - g1) * t);
+  const b = Math.round(b1 + (b2 - b1) * t);
+  
+  return `rgb(${r},${g},${b})`;
+}
+
+function rand(min,max,seedOffset=0){
+  const x = Math.sin(seed + seedOffset) * 10000;
+  seed += 0.0001 + seedOffset*0.1;
+  return min + (x - Math.floor(x)) * (max-min);
+}
+function easeIn(a,b,t){ return a + (b-a)*(t*t); }
+function easeOut(a,b,t){ return a + (b-a)*(1 - Math.pow(1-t,2)); }
+
+// --- Track Building ---
+
+function addSegment(curve, y){
+  const n = segments.length;
+  segments.push({index:n, curve: curve||0, y: y||0, p1:{world:{z:n*SEG_LEN}}, p2:{world:{z:(n+1)*SEG_LEN}}});
+}
+function addRoad(enter, hold, leave, curve, height){
+  for(let i=0;i<enter;i++){
+    const t = i/enter;
+    addSegment(easeIn(0,curve,t), easeIn(0,height,t));
+  }
+  for(let i=0;i<hold;i++) addSegment(curve, height);
+  for(let i=0;i<leave;i++){
+    const t = i/leave;
+    addSegment(easeOut(curve,0,t), easeOut(height,0,t));
+  }
+}
+function buildTrack(){
+  segments.length = 0;
+  // Initialize road with a few straight segments
+  for(let i=0;i<20;i++) addSegment(0,0);
+  const sections = 40 + Math.floor(rand(0,20,1));
+  for(let s=0;s<sections;s++){
+    const type = Math.floor(rand(0,3,s));
+    if(type === 0){
+      addRoad(10 + Math.floor(rand(5,15,s+1)), 20 + Math.floor(rand(10,40,s+2)), 10 + Math.floor(rand(5,15,s+3)), rand(-1.2,1.2,s+4), 0);
+    } else if(type === 1){
+      addRoad(10 + Math.floor(rand(5,15,s+1)), 20 + Math.floor(rand(10,40,s+2)), 10 + Math.floor(rand(5,15,s+3)), 0, rand(-700,700,s+4));
+    } else {
+      addRoad(12 + Math.floor(rand(6,18,s+1)), 24 + Math.floor(rand(12,48,s+2)), 12 + Math.floor(rand(6,18,s+3)), rand(-1.2,1.2,s+4), rand(-500,500,s+5));
+    }
+  }
+  // End road with a few straight segments
+  for(let i=0;i<30;i++) addSegment(0,0);
+  for(let i=0;i<segments.length;i++){
+    segments[i].p1.world.y = segments[i].y || 0;
+    segments[i].p2.world.y = (segments[i+1] ? segments[i+1].y : segments[i].y) || 0;
+  }
+  // Road quality by social class of the birth environment: [good, worn, poor, dirt track]
+  let wts = [[.55,.30,.13,.02], [.70,.25,.05,0], [.35,.35,.20,.10], [.20,.35,.30,.15], [0,.15,.40,.45], [.95,.05,0,0]][birthEnv];
+  // Luck, weighted by class: chance of a perfect road all life / a bad road all life; others are nudged up or down
+  const [pGood, pBad] = [[.10,.05], [.12,.03], [.06,.08], [0,.15], [0,.25], [.25,.01]][birthEnv];
+  const luck = Math.random();
+  if(luck < pGood) wts = [1,0,0,0];
+  else if(luck > 1 - pBad) wts = [0,0,.5,.5];
+  else {
+    const l = (Math.random()*2 - 1) * 0.6, tgt = l > 0 ? (birthEnv === 4 ? [0,1,0,0] : [1,0,0,0]) : [0,0,.5,.5], m = Math.abs(l);
+    wts = wts.map((w,k) => w*(1-m) + tgt[k]*m);
+  }
+  for(let i=0;i<segments.length;){
+    const len = 12 + Math.floor(Math.random()*34), r = Math.random();
+    let q = 0, acc = 0;
+    for(let k=0;k<4;k++){ acc += wts[k]; if(r < acc){ q = k; break; } }
+    for(let j=0;j<len && i<segments.length;j++,i++) segments[i].q = q;
+  }
+}
+const hsh = (i,k) => { const x = Math.sin(i*127.1 + k*311.7) * 43758.5453; return x - Math.floor(x); };
+buildTrack();
+deathAge = generateLifespan();
+isEarlyDeath = deathAge < 73;
+console.log('Initial death age:', deathAge, 'Early death:', isEarlyDeath);
+
+function findSegment(z){
+  let index = Math.floor(z/SEG_LEN) % segments.length;
+  if(index < 0) index += segments.length;
+  return segments[index];
+}
+
+// --- Projection & Drawing ---
+
+function project(p, cameraX, cameraY, cameraZ){
+  const dz = p.world.z - cameraZ;
+  if(dz <= 0) return null;
+  const scale = CAMERA_DEPTH / dz;
+  return {
+    x: (1 + (p.world.x - cameraX) * scale) * W/2,
+    y: Math.round((1 - (p.world.y - cameraY) * scale) * H/2), // Round Y to align pixels
+    w: scale * ROAD_W * W/2
+  };
+}
+
+function drawQuad(x1,y1,w1, x2,y2,w2, color){
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x1 - w1, y1);
+  ctx.lineTo(x2 - w2, y2);
+  ctx.lineTo(x2 + w2, y2);
+  ctx.lineTo(x1 + w1, y1);
+  ctx.closePath();
+  ctx.fill();
+}
+
+// --- Game Loop ---
+
+function frame(now){
+  const dt = Math.min((now - lastTime)/1000, 0.05);
+   lastTime = now;
+  update(dt);
+  render();
+  requestAnimationFrame(frame);
+}
+
+
+// --- Audio: arcade jingle on the title card, then only a heartbeat and the wind ---
+const AU = { ctx: null, master: null, windGain: null, windFilter: null, hatBuf: null, beatT: 0.8 };
+function audioInit(){
+  if(AU.ctx){ if(AU.ctx.state === 'suspended') AU.ctx.resume(); return; }
+  const C = window.AudioContext || window.webkitAudioContext; if(!C) return;
+  const c = AU.ctx = new C();
+  AU.master = c.createGain(); AU.master.gain.value = 0.8; AU.master.connect(c.destination);
+  // wind: looping brown noise through a low-pass
+  const buf = c.createBuffer(1, c.sampleRate * 4, c.sampleRate), d = buf.getChannelData(0);
+  let last = 0;
+  for(let i = 0; i < d.length; i++){ last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02; d[i] = last * 3.5; }
+  const src = c.createBufferSource(); src.buffer = buf; src.loop = true;
+  AU.windFilter = c.createBiquadFilter(); AU.windFilter.type = 'lowpass'; AU.windFilter.frequency.value = 500;
+  AU.windGain = c.createGain(); AU.windGain.gain.value = 0;
+  src.connect(AU.windFilter); AU.windFilter.connect(AU.windGain); AU.windGain.connect(AU.master); src.start();
+  // short white-noise burst for hi-hats
+  AU.hatBuf = c.createBuffer(1, c.sampleRate * 0.05, c.sampleRate);
+  const h = AU.hatBuf.getChannelData(0); for(let i = 0; i < h.length; i++) h[i] = Math.random() * 2 - 1;
+}
+['click', 'touchend', 'keydown'].forEach(ev => addEventListener(ev, audioInit, { passive: true }));
+audioInit();
+const audioOn = () => AU.ctx && AU.ctx.state === 'running';
+
+let musicOn = false, nextLoopAt = 0, musicBtn = null;
+function jingleBus(){
+  if(!AU.jbus){ AU.jbus = AU.ctx.createGain(); AU.jbus.connect(AU.master); }
+  return AU.jbus;
+}
+function stopJingles(){
+  if(!AU.jbus) return;
+  const t = AU.ctx.currentTime;
+  AU.jbus.gain.setTargetAtTime(0, t, 0.02);
+  const old = AU.jbus; setTimeout(() => old.disconnect(), 300);
+  AU.jbus = null;
+}
+// 80s driving rock: A - G - D - E, 120 bpm, distorted power chords, pumping bass, heroic lead (original tune)
+function distCurve(k){
+  const n = 1024, c = new Float32Array(n);
+  for(let i = 0; i < n; i++){ const x = i * 2 / n - 1; c[i] = (1 + k) * x / (1 + k * Math.abs(x)); }
+  return c;
+}
+function playJingle(at, bars = 1){
+  if(!audioOn() || !musicOn) return;
+  const c = AU.ctx, t0 = at || c.currentTime + 0.03, e8 = 0.25, bus = jingleBus();
+  const mtof = m => 440 * Math.pow(2, (m - 69) / 12);
+  if(!AU.dist) AU.dist = distCurve(40);
+
+  const env = (g, t, v, a, d) => { g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(v, t + a); g.gain.exponentialRampToValueAtTime(0.001, t + d); };
+  const kick = t => { const o = c.createOscillator(), g = c.createGain(); o.frequency.setValueAtTime(130, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.12); env(g, t, 0.9, 0.003, 0.3); o.connect(g); g.connect(bus); o.start(t); o.stop(t + 0.32); };
+  const noiseHit = (t, type, freq, v, d) => { const n = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain(); n.buffer = AU.hatBuf; n.loop = true; f.type = type; f.frequency.value = freq; env(g, t, v, 0.002, d); n.connect(f); f.connect(g); g.connect(bus); n.start(t); n.stop(t + d + 0.02); };
+  const snare = t => { noiseHit(t, 'bandpass', 1800, 0.45, 0.18); const o = c.createOscillator(), g = c.createGain(); o.frequency.value = 190; env(g, t, 0.25, 0.002, 0.1); o.connect(g); g.connect(bus); o.start(t); o.stop(t + 0.12); };
+  const hat = (t, v) => noiseHit(t, 'highpass', 8000, v, 0.04);
+  const crash = t => noiseHit(t, 'highpass', 5000, 0.18, 1.2);
+  const guitar = (root, t, dur, v) => {   // power chord: root, fifth, octave, detuned, through distortion
+    const sh = c.createWaveShaper(), lp = c.createBiquadFilter(), g = c.createGain();
+    sh.curve = AU.dist; lp.type = 'lowpass'; lp.frequency.value = 2800;
+    [0, 7, 12].forEach((iv, k) => [-7, 7].forEach(dt => { const o = c.createOscillator(); o.type = 'sawtooth'; o.frequency.value = mtof(root + iv); o.detune.value = dt + k; o.connect(sh); o.start(t); o.stop(t + dur + 0.05); }));
+    sh.connect(lp); lp.connect(g); g.connect(bus); env(g, t, v, 0.005, dur);
+  };
+  const bass = (m, t, dur) => { const o = c.createOscillator(), lp = c.createBiquadFilter(), g = c.createGain(); o.type = 'sawtooth'; o.frequency.value = mtof(m); lp.type = 'lowpass'; lp.frequency.value = 700; env(g, t, 0.28, 0.005, dur); o.connect(lp); lp.connect(g); g.connect(bus); o.start(t); o.stop(t + dur + 0.02); };
+  const lead = (m, t, dur) => {
+    const o1 = c.createOscillator(), o2 = c.createOscillator(), lp = c.createBiquadFilter(), g = c.createGain(), lfo = c.createOscillator(), lg = c.createGain();
+    o1.type = 'sawtooth'; o2.type = 'square'; o1.frequency.value = o2.frequency.value = mtof(m); o2.detune.value = 8;
+    lfo.frequency.value = 6; lg.gain.value = 12; lfo.connect(lg); lg.connect(o1.detune); lg.connect(o2.detune);
+    lp.type = 'lowpass'; lp.frequency.value = 3500;
+    g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.07, t + 0.02); g.gain.setValueAtTime(0.07, t + dur * 0.8); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o1.connect(lp); o2.connect(lp); lp.connect(g); g.connect(bus);
+    [o1, o2, lfo].forEach(o => { o.start(t); o.stop(t + dur + 0.02); });
+  };
+
+  const chords = [45, 43, 50, 40];   // A, G, D, E
+  const melody = [
+    [[0,76,2],[2,74,1],[3,76,1],[4,81,3],[7,80,1]],
+    [[0,79,2],[2,78,1],[3,76,1],[4,74,3],[7,71,1]],
+    [[0,74,2],[2,76,1],[3,78,1],[4,81,2],[6,78,1],[7,76,1]],
+    [[0,80,3],[3,76,1],[4,83,4]]
+  ];
+  for(let b = 0; b < bars; b++){
+    const tb = t0 + b * 8 * e8, root = chords[b % 4];
+    if(b === 0) crash(tb);
+    for(let i = 0; i < 8; i++){
+      const t = tb + i * e8;
+      hat(t, i % 2 ? 0.05 : 0.09);
+      if(i === 0 || i === 3 || i === 4) kick(t);
+      if(i === 2 || i === 6) snare(t);
+      bass(root - 12, t, e8 * 0.9);
+      if(i === 0) guitar(root, t, e8 * 2.6, 0.13);          // big open chord
+      else if(i > 2) guitar(root, t, e8 * 0.45, 0.09);      // palm-muted chugs
+    }
+    melody[b % 4].forEach(([st, m, len]) => lead(m, tb + st * e8, len * e8 * 0.95));
+  }
+}
+function thump(vol, delay, f, dur){
+  // One heart sound as heard through the chest: a muffled low thud (sine + low-passed brown noise),
+  // smooth bell envelope, no click, no pitch sweep. Light saturation so phone speakers still render it.
+  const c = AU.ctx, t = c.currentTime + delay;
+  if(!AU.heartBus){
+    AU.heartBus = c.createGain(); AU.heartBus.gain.value = 1.6;
+    const sat = c.createWaveShaper(); sat.curve = distCurve(2.5);
+    const muff = c.createBiquadFilter(); muff.type = 'lowpass'; muff.frequency.value = 650; muff.Q.value = 0.5;
+    AU.heartBus.connect(sat); sat.connect(muff); muff.connect(AU.master);
+    const len = Math.floor(c.sampleRate * 0.4); AU.brown = c.createBuffer(1, len, c.sampleRate);
+    const d = AU.brown.getChannelData(0); let last = 0;
+    for(let i = 0; i < len; i++){ last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02; d[i] = last * 3.5; }
+  }
+  const env = g => { g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + 0.022); g.gain.setTargetAtTime(0, t + 0.03, dur / 3.5); };
+  const o = c.createOscillator(), og = c.createGain();
+  o.frequency.setValueAtTime(f * 1.12, t); o.frequency.linearRampToValueAtTime(f, t + dur);
+  env(og); o.connect(og); og.connect(AU.heartBus); o.start(t); o.stop(t + dur * 2.5);
+  const n = c.createBufferSource(), lp = c.createBiquadFilter(), ng = c.createGain();
+  n.buffer = AU.brown; lp.type = 'lowpass'; lp.frequency.value = 220; lp.Q.value = 1.2;
+  env(ng); ng.gain.value = 0; n.connect(lp); lp.connect(ng); ng.connect(AU.heartBus); n.start(t); n.stop(t + dur * 2.5);
+}
+function heartbeat(bpm){
+  // "lub" (S1: lower, longer) then "dub" (S2: higher, shorter); the gap shortens as the heart speeds up
+  const gap = 0.1 + 0.22 * Math.min(1, 60 / bpm);
+  thump(0.9, 0, 48, 0.14);
+  thump(0.6, gap, 64, 0.09);
+}
+function audioLife(dt){
+  if(!audioOn()) return;
+  const sp = Math.min(speed / maxSpeed, 1), years = sp * 120, t = AU.ctx.currentTime;
+  // wind: grows with speed, with slow gusts
+  const gust = 0.75 + 0.25 * Math.sin(t * 0.7) * Math.sin(t * 0.23 + 1);
+  AU.windGain.gain.setTargetAtTime((0.05 + 0.3 * sp) * gust, t, 0.2);   // kept under the heartbeat
+  AU.windFilter.frequency.setTargetAtTime(300 + 1400 * sp, t, 0.2);
+  // heartbeat: fast as a baby, calm in adulthood, a little faster when old
+  AU.beatT -= dt;
+  if(AU.beatT <= 0){
+    const bpm = 56 + 30 * Math.exp(-years / 6) + 8 * Math.max(0, (years - 70) / 35);   // ~86 at birth, ~56 adult, a bit faster when old
+    heartbeat(bpm);
+    AU.beatT = 60 / bpm;
+  }
+}
+function audioSilence(){
+  if(!AU.ctx) return;
+  AU.windGain.gain.cancelScheduledValues(AU.ctx.currentTime);
+  AU.windGain.gain.setTargetAtTime(0, AU.ctx.currentTime, 0.01);
+}
+
+// --- Arcade title card ---
+function drawIntro(){
+  const hz = H * 0.62, cx = W / 2, p = started ? introT : waitT;
+  // sky
+  const sky = ctx.createLinearGradient(0, 0, 0, hz);
+  sky.addColorStop(0, '#0d0221'); sky.addColorStop(0.6, '#3b0a58'); sky.addColorStop(1, '#ff2a6d');
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, W, hz);
+  // striped sun
+  const R = H * 0.2, sy = hz - R * 0.35;
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, sy, R, 0, Math.PI * 2); ctx.clip();
+  const sg = ctx.createLinearGradient(0, sy - R, 0, sy + R);
+  sg.addColorStop(0, '#ffe14d'); sg.addColorStop(0.55, '#ff8a3d'); sg.addColorStop(1, '#ff2a6d');
+  ctx.fillStyle = sg; ctx.fillRect(cx - R, sy - R, R * 2, R * 2);
+  ctx.fillStyle = '#3b0a58';
+  for(let k = 0; k < 7; k++){ const y = sy + R * (0.1 + k * 0.14), th = R * (0.02 + k * 0.012); ctx.fillRect(cx - R, y, R * 2, th); }
+  ctx.restore();
+  // neon grid floor
+  ctx.fillStyle = '#0a0018'; ctx.fillRect(0, hz, W, H - hz);
+  ctx.strokeStyle = '#ff2a6d'; ctx.lineWidth = Math.max(1, H * 0.003);
+  ctx.beginPath();
+  for(let k = -12; k <= 12; k++){ ctx.moveTo(cx + k * W * 0.02, hz); ctx.lineTo(cx + k * W * 0.25, H); }
+  const off = (p * 1.6) % 1;
+  for(let k = 0; k < 12; k++){ const z = (k + 1 - off) / 12, y = hz + (H - hz) * z * z; ctx.moveTo(0, y); ctx.lineTo(W, y); }
+  ctx.stroke();
+
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, hz - 1, W, Math.max(2, H * 0.005));   // white horizon line
+
+  // title: pops in, then bounces gently
+  const k0 = Math.min(1, p / 0.35), pop = 1 + 1.7 * Math.pow(k0 - 1, 3) + 0.7 * Math.pow(k0 - 1, 2);
+  const bob = Math.sin(p * 8) * H * 0.006;
+  const big = 'OUTRUN THIS', small = 'YOU CANNOT';
+  ctx.save();
+  ctx.translate(cx, H * 0.36 + bob); ctx.scale(pop, pop); ctx.transform(1, 0, -0.18, 1, 0, 0);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+  let size = H * 0.13;
+  ctx.font = `900 ${size}px "Arial Black", Impact, sans-serif`;
+  size *= Math.min(1, VW * 0.88 / ctx.measureText(big).width);
+  ctx.font = `900 ${size}px "Arial Black", Impact, sans-serif`;
+  ctx.lineWidth = size * 0.16; ctx.strokeStyle = '#1a0033'; ctx.strokeText(big, 0, 0);
+  const tg = ctx.createLinearGradient(0, -size * 0.5, 0, size * 0.5);
+  tg.addColorStop(0, '#fff6b0'); tg.addColorStop(0.45, '#ffcc00'); tg.addColorStop(0.55, '#ff6a00'); tg.addColorStop(1, '#ff2a6d');
+  ctx.fillStyle = tg; ctx.fillText(big, 0, 0);
+  ctx.lineWidth = size * 0.03; ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.strokeText(big, 0, 0);
+  const s2 = size * 0.42;
+  ctx.font = `900 ${s2}px "Arial Black", Impact, sans-serif`;
+  ctx.lineWidth = s2 * 0.22; ctx.strokeStyle = '#1a0033'; ctx.strokeText(small, 0, -size * 0.78);
+  ctx.fillStyle = '#00f0ff'; ctx.fillText(small, 0, -size * 0.78);
+  ctx.restore();
+
+  // blinking arcade prompt
+  if(Math.floor(p * 4) % 2 === 0){
+    ctx.font = `700 ${Math.round(H * 0.035)}px "Courier New", monospace`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const prompt = started ? 'INSERT LIFE' : 'PRESS START';
+    ctx.fillStyle = '#1a0033'; ctx.fillText(prompt, cx + 2, H * 0.86 + 2);
+    ctx.fillStyle = '#fff'; ctx.fillText(prompt, cx, H * 0.86);
+  }
+  // Car radio: tap it to turn the music on / off, like picking the station before the race
+  if(!started){
+    const rr = (x, y, w, h, r) => { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); };
+    const bw = Math.min(H * 0.62, VW * 0.84), bh = bw * 0.24, bx = cx - bw / 2, by = H * 0.665, on = musicOn;
+
+    // chassis with chrome bezel
+    const ch = ctx.createLinearGradient(0, by, 0, by + bh);
+    ch.addColorStop(0, '#d9d9df'); ch.addColorStop(0.5, '#7a7a82'); ch.addColorStop(1, '#d0d0d8');
+    rr(bx, by, bw, bh, bh * 0.12); ctx.fillStyle = ch; ctx.fill();
+    const pad = bh * 0.06, body = ctx.createLinearGradient(0, by, 0, by + bh);
+    body.addColorStop(0, '#2b2b31'); body.addColorStop(1, '#0d0d10');
+    rr(bx + pad, by + pad, bw - pad * 2, bh - pad * 2, bh * 0.08); ctx.fillStyle = body; ctx.fill();
+
+    // knobs (volume / tuning)
+    const knob = (kx, ang) => {
+      const kr = bh * 0.3, ky = by + bh * 0.5;
+      // knurled black knob, flat face, light indicator notch
+      ctx.fillStyle = '#16161a'; ctx.beginPath(); ctx.arc(kx, ky, kr, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#3c3c44'; ctx.lineWidth = Math.max(1, kr * 0.06);
+      ctx.beginPath();
+      for(let k = 0; k < 28; k++){ const a = k / 28 * Math.PI * 2; ctx.moveTo(kx + Math.cos(a) * kr * 0.82, ky + Math.sin(a) * kr * 0.82); ctx.lineTo(kx + Math.cos(a) * kr, ky + Math.sin(a) * kr); }
+      ctx.stroke();
+      const face = ctx.createLinearGradient(0, ky - kr * 0.75, 0, ky + kr * 0.75);
+      face.addColorStop(0, '#45454d'); face.addColorStop(1, '#202026');
+      ctx.fillStyle = face; ctx.beginPath(); ctx.arc(kx, ky, kr * 0.75, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#e8e8ee'; ctx.lineWidth = Math.max(1.5, kr * 0.1); ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(kx + Math.cos(ang) * kr * 0.3, ky + Math.sin(ang) * kr * 0.3); ctx.lineTo(kx + Math.cos(ang) * kr * 0.65, ky + Math.sin(ang) * kr * 0.65); ctx.stroke();
+      ctx.lineCap = 'butt';
+    };
+    knob(bx + bh * 0.5, on ? -0.4 : -2.4);
+    knob(bx + bw - bh * 0.5, -1.6 + Math.sin(p * 0.5) * 0.05);
+
+    // LCD display
+    const dx = bx + bh * 0.95, dw = bw - bh * 1.9, dy = by + bh * 0.16, dh = bh * 0.46;
+    rr(dx, dy, dw, dh, dh * 0.12); ctx.fillStyle = on ? '#1c1000' : '#0a0a0a'; ctx.fill();
+    ctx.strokeStyle = '#000'; ctx.lineWidth = Math.max(1, bh * 0.03); ctx.stroke();
+    ctx.save(); rr(dx, dy, dw, dh, dh * 0.12); ctx.clip();
+    if(on){
+      // equalizer bars dancing
+      const nb = 10, gw = dw * 0.32 / nb;
+      for(let i = 0; i < nb; i++){
+        const v = 0.25 + 0.75 * Math.abs(Math.sin(p * (5 + i * 1.3) + i * 2.1));
+        ctx.fillStyle = 'rgba(255,176,0,0.85)';
+        ctx.fillRect(dx + dw * 0.64 + i * gw, dy + dh * (0.85 - 0.7 * v), gw * 0.7, dh * 0.7 * v);
+      }
+      ctx.shadowColor = '#ffb000'; ctx.shadowBlur = dh * 0.4;
+    }
+    ctx.font = `700 ${Math.round(dh * 0.46)}px "Courier New", monospace`;
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = on ? '#ffb000' : '#2e2414';
+    ctx.fillText(on ? 'FM 88.8' : 'FM -- OFF', dx + dw * 0.05, dy + dh * 0.52);
+    ctx.restore();
+
+    // preset buttons 1-5, the first one lit when playing
+    const nbtn = 5, gap = bh * 0.04, pw = (dw - gap * (nbtn - 1)) / nbtn, py = by + bh * 0.7, ph = bh * 0.17;
+    ctx.font = `700 ${Math.round(ph * 0.7)}px "Courier New", monospace`; ctx.textAlign = 'center';
+    for(let i = 0; i < nbtn; i++){
+      const x = dx + i * (pw + gap);
+      rr(x, py, pw, ph, ph * 0.2);
+      ctx.fillStyle = on && i === 0 ? '#ff2a6d' : '#3a3a42'; ctx.fill();
+      ctx.fillStyle = on && i === 0 ? '#fff' : '#9a9aa2'; ctx.fillText(String(i + 1), x + pw / 2, py + ph / 2 + 1);
+    }
+    musicBtn = { x: bx + (VW - W) / 2, y: by, w: bw, h: bh };   // whole radio is the switch (screen pixels)
+  }
+}
+
+let dead = false, deadT = 0, deathCause = '';
+let introT = 0;
+let started = false, waitT = 0;   // the title screen stays until the first click / key
+function startGame(){
+  if(started) return;
+  audioInit();
+  const go = () => { started = true; introT = 0; };
+  if(AU.ctx && AU.ctx.state !== 'running') AU.ctx.resume().then(go, go); else go();
+}
+function toggleMusic(){
+  audioInit();
+  musicOn = !musicOn;               // flips immediately, one tap = one toggle
+  if(musicOn){ nextLoopAt = 0; if(AU.ctx) AU.ctx.resume(); }
+  else stopJingles();
+}
+addEventListener('click', e => {
+  if(!started && musicBtn){
+    const r = canvas.getBoundingClientRect();
+    const x = (e.clientX - r.left) * canvas.width / r.width, y = (e.clientY - r.top) * canvas.height / r.height;
+    const b = musicBtn;
+    if(x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h){ toggleMusic(); return; }
+  }
+  startGame();
+});
+addEventListener('keydown', e => { if(e.key === 'm' || e.key === 'M') toggleMusic(); else startGame(); });   // 2 s title card on black at the start of each life
+
+function pickCause(){
+  const L = deathAge, pick = a => a[Math.floor(Math.random() * a.length)];
+  const byEnv = [['Road injury','Heart attack'], ['Avalanche','Fall in the mountains'], ['Farming accident'],
+                 ['Industrial accident','Chronic respiratory disease'], ['Untreated infection','Housing fire'], []][birthEnv];
+  if(L < 5)  return pick(['Neonatal complications','Pneumonia','Diarrhoeal disease','Malaria','Congenital defect','Malnutrition']);
+  if(L < 15) return pick(['Drowning','Road injury','Malaria','Meningitis','Leukemia','Diarrhoeal disease']);
+  if(L < 70 && byEnv.length && Math.random() < 0.4) return pick(byEnv);
+  if(L < 50) return pick(['HIV/AIDS','Tuberculosis','Road injury','Heart disease','Homicide','Cancer']);
+  if(L < 70) return pick(['Heart disease','Stroke','Cancer','Chronic respiratory disease','Diabetes']);
+  return pick(['Heart disease','Stroke','Chronic respiratory disease','Dementia','Pneumonia','Cancer','Old age']);
+}
+
+function update(dt){
+  // Dead: everything is stopped dead. Only the announcement runs.
+  if(dead){
+    deadT += dt;
+    if(deadT > 1){
+      birthEnv = Math.floor(Math.random() * ENV_NAMES.length);
+      questionIdx = Math.floor(Math.random() * QUESTIONS.length);
+      bgSeed = 1 + Math.floor(Math.random() * 1e6);
+      dead = false; age = 0; playerZ = 0; speed = 0; introT = 2; AU.beatT = 0.6; firstLife = false;   // straight into the next life
+      seed = Math.random()*10000;
+      buildTrack();
+      deathAge = generateLifespan();
+      isEarlyDeath = deathAge < 73;
+      console.log('New death age:', deathAge, 'Early death:', isEarlyDeath);
+    }
+    return;
+  }
+
+  if(!started){
+    waitT += dt;
+    if(musicOn && audioOn() && AU.ctx.currentTime > nextLoopAt - 0.15){
+      playJingle(Math.max(nextLoopAt, AU.ctx.currentTime + 0.02), 4);
+      nextLoopAt = Math.max(nextLoopAt, AU.ctx.currentTime + 0.02) + 8;
+    }
+    return;
+  }
+  if(introT < 2){
+    if(introT === 0){ audioSilence(); AU.beatT = 0.6; }
+    introT += dt;
+    if(introT >= 2) stopJingles();   // the music stops dead when life begins
+    return;
+  }
+
+  age += dt * 2;
+
+  // Accelerate continuously
+  speed += acceleration * dt;
+  if(speed > maxSpeed) speed = maxSpeed;
+
+  audioLife(dt);
+
+  // Reached life expectancy: stop instantly, no deceleration
+  if((speed / maxSpeed) * 120 >= deathAge){
+    speed = (deathAge + 0.001) / 120 * maxSpeed;
+    dead = true; deadT = 0; deathCause = pickCause();
+    audioSilence();
+    return;
+  }
+
+  playerZ += speed * dt;
+  while(playerZ >= segments.length*SEG_LEN) playerZ -= segments.length*SEG_LEN;
+}
+
+// The landscape is composed in 4:3 and cropped to the canvas, so a square canvas never stretches it
+let VW = W;   // real visible width
+function render(){
+  VW = W;
+  const DW = Math.round(H * 4 / 3);
+  W = DW;
+  ctx.save();
+  ctx.translate(Math.round((VW - DW) / 2), 0);
+  try { renderScene(); }
+  finally { ctx.restore(); W = VW; }
+}
+
+function renderScene(){
+  if(introT < 2 && !dead){ drawIntro(); return; }
+
+  // Calculate time of day based on speed (0 = dawn, 1 = deep night)
+  const timeOfDay = Math.min(speed / maxSpeed, 1);
+  
+  // Cinematic color transitions through the day
+  let skyTop, skyBot;
+  
+  if(timeOfDay < 0.03){ // Dawn - Deep purple to warm orange
+    const t = timeOfDay / 0.03;
+    skyTop = interpolateColor('#2a1a4a', '#ff6b4a', t);
+    skyBot = interpolateColor('#e8845f', '#ffa36c', t);
+  } else if(timeOfDay < 0.14){ // Morning to Day - Warm to cool blue
+    const t = (timeOfDay - 0.03) / 0.11;
+    skyTop = interpolateColor('#ff6b4a', '#5b9bd5', t);
+    skyBot = interpolateColor('#ffa36c', '#a8d5ff', t);
+  } else if(timeOfDay < 0.5){ // Day - Crisp blue sky
+    const t = (timeOfDay - 0.14) / 0.36;
+    skyTop = interpolateColor('#5b9bd5', '#3d7bb5', t);
+    skyBot = interpolateColor('#a8d5ff', '#87ceeb', t);
+  } else if(timeOfDay < 0.8){ // Golden hour - Blue to amber/purple
+    const t = (timeOfDay - 0.5) / 0.3;
+    skyTop = interpolateColor('#3d7bb5', '#d95d39', t);
+    skyBot = interpolateColor('#87ceeb', '#e8a87c', t);
+  } else { // Night - Deep blue/black
+    const t = (timeOfDay - 0.8) / 0.2;
+    skyTop = interpolateColor('#d95d39', '#0d1b2a', t);
+    skyBot = interpolateColor('#e8a87c', '#1b263b', t);
+  }
+  
+  // 1. Draw Sky (Gradient)
+  const g = ctx.createLinearGradient(0,0,0,H/2);
+  g.addColorStop(0, skyTop);
+  g.addColorStop(1, skyBot);
+  ctx.fillStyle = g;
+  ctx.fillRect(0,0,W,H/2);
+
+  drawBackdrop(timeOfDay, skyBot);
+
+  // 2. Draw Ground/Grass - cinematic color shift
+  const grassBrightness = Math.max(0.25, 1 - timeOfDay * 0.75);
+  const grassHue = 120 - (timeOfDay * 20); // Shift from green to blue-green
+  const grassColorBg = `hsl(${grassHue}, 45%, ${20 * grassBrightness}%)`;
+  ctx.fillStyle = grassColorBg;
+  ctx.fillRect(0,H/2,W,H/2);
+
+  const baseSegmentIndex = Math.floor(playerZ/SEG_LEN);
+  const baseSegment = segments[baseSegmentIndex % segments.length];
+  if(!baseSegment) return;
+
+  // The camera should always look at a point a certain depth ahead
+  const cameraY = CAMERA_H + baseSegment.y;
+  const cameraZ = playerZ + SEG_LEN*CAMERA_DEPTH;
+
+  let maxY = H;
+  let x = 0;
+  const basePercent = (playerZ % SEG_LEN) / SEG_LEN;
+  let dx = -(baseSegment.curve * basePercent);
+
+  for(let n=0;n<DRAW_DISTANCE;n++){
+    const segIndex = (baseSegmentIndex + n) % segments.length;
+    const seg = segments[segIndex];
+
+    const p1 = {world:{x: x, y: seg.p1.world.y, z: seg.p1.world.z}};
+    const p2 = {world:{x: x + dx, y: seg.p2.world.y, z: seg.p2.world.z}};
+
+    dx += seg.curve;
+    x += dx;
+
+    const proj1 = project(p1, 0, cameraY, cameraZ);
+    const proj2 = project(p2, 0, cameraY, cameraZ);
+
+    if(!proj1 || !proj2) continue;
+    if(proj2.y > maxY) continue;
+
+    // 3. Draw Grass (Wide background - cinematic desaturated greens)
+    const grassBrightness = Math.max(0.25, 1 - timeOfDay * 0.75);
+    const grassSat = Math.max(25, 45 - timeOfDay * 20); // Desaturate at night
+    const grass1 = `hsl(115, ${grassSat}%, ${Math.floor(28 * grassBrightness)}%)`;
+    const grass2 = `hsl(118, ${grassSat}%, ${Math.floor(22 * grassBrightness)}%)`;
+    const grassColor = (Math.floor(segIndex/3) % 2 === 0) ? grass1 : grass2;
+    drawQuad(proj1.x, proj1.y, W, proj2.x, proj2.y, W, grassColor);
+
+    // 4. Draw Road: quality depends on the social class of the birth environment
+    const q = seg.q || 0, hs = k => hsh(segIndex, k);
+    const alt = (Math.floor(segIndex/3) % 2 === 0);
+    const roadBrightness = Math.max(0.4, 1 - timeOfDay * 0.6);
+    let L1 = 42 * roadBrightness, L2 = 32 * roadBrightness;
+    if(q === 1){ L1 *= 1.1; L2 *= 1.1; }
+    if(q === 2){ const v = 1 + (hs(1) - 0.5) * 0.35; L1 *= v; L2 *= v; }
+    const roadColor = q === 3
+      ? `hsl(32, 26%, ${Math.floor((alt ? 36 : 31) * roadBrightness * (1 + (hs(1) - 0.5) * 0.2))}%)`
+      : `hsl(30, ${q ? 4 : 5}%, ${Math.floor(alt ? L1 : L2)}%)`;
+    const rk = q === 3 ? 0.9 : 1;
+    drawQuad(proj1.x, proj1.y, proj1.w * rk, proj2.x, proj2.y, proj2.w * rk, roadColor);
+
+    // sub-segment helper: quad between t0..t1 along the segment, at lateral offset o (fraction of road half-width)
+    const sub = (t0, t1, o, ww, col) => {
+      const xa = proj1.x + (proj2.x - proj1.x) * t0, ya = proj1.y + (proj2.y - proj1.y) * t0, wa = proj1.w + (proj2.w - proj1.w) * t0;
+      const xb = proj1.x + (proj2.x - proj1.x) * t1, yb = proj1.y + (proj2.y - proj1.y) * t1, wb = proj1.w + (proj2.w - proj1.w) * t1;
+      drawQuad(xa + o * wa, ya, ww * wa, xb + o * wb, yb, ww * wb, col);
+    };
+    if(q === 1 && hs(2) < 0.25) sub(0, 1, (hs(3) - 0.5) * 1.4, 0.008, 'rgba(0,0,0,0.35)');              // hairline cracks
+    if(q === 2){
+      if(hs(2) < 0.30) sub(0, 1, (hs(3) - 0.5) * 1.2, 0.2, 'rgba(10,9,8,0.28)');                         // old repair patch
+      if(hs(4) < 0.45){ const t = hs(5) * 0.6; sub(t, t + 0.35, (hs(6) - 0.5) * 1.3, 0.07, 'rgba(8,6,5,0.85)'); }  // pothole
+      if(hs(7) < 0.35) sub(0, 1, (hs(8) - 0.5) * 1.6, 0.012, 'rgba(0,0,0,0.6)');                         // crack
+    }
+    if(q === 3){
+      sub(0, 1, -0.32, 0.035, 'rgba(30,20,12,0.45)');                                                       // wheel ruts
+      sub(0, 1, 0.32, 0.035, 'rgba(30,20,12,0.45)');
+      sub(0, 1, -1, 0.1, grassColor);                                                                       // grass creeping in
+      sub(0, 1, 1, 0.1, grassColor);
+      if(hs(9) < 0.3){ const t = hs(10) * 0.6; sub(t, t + 0.3, (hs(11) - 0.5) * 1.2, 0.09, 'rgba(25,16,10,0.7)'); }  // ruts and holes
+    }
+
+    // 5. Rumble strips: intact, faded, broken or absent
+    if(q <= 2 && !(q === 2 && hs(12) < 0.55)){
+      const rumbleColor = q === 0
+        ? ((Math.floor(segIndex/3) % 2 === 0) ? RUMBLE_COLOR1 : RUMBLE_COLOR2)
+        : ((Math.floor(segIndex/3) % 2 === 0) ? 'rgba(255,255,255,0.55)' : 'rgba(255,0,0,0.4)');
+      const rumbleW1 = proj1.w * 0.08, rumbleW2 = proj2.w * 0.08;
+      drawQuad(proj1.x - proj1.w, proj1.y, rumbleW1, proj2.x - proj2.w, proj2.y, rumbleW2, rumbleColor);
+      drawQuad(proj1.x + proj1.w, proj1.y, rumbleW1, proj2.x + proj2.w, proj2.y, rumbleW2, rumbleColor);
+    }
+
+    // 6. Dashed center line: crisp, faded, mostly gone or none
+    let dashOn = (segIndex % 15) < 10;
+    if(q === 1) dashOn = dashOn && hs(13) > 0.3;
+    if(q === 2) dashOn = dashOn && hs(13) > 0.75;
+    if(q === 3) dashOn = false;
+    if(dashOn){
+      drawQuad(proj1.x, proj1.y, proj1.w * 0.02, proj2.x, proj2.y, proj2.w * 0.02, q === 0 ? '#fff' : 'rgba(255,255,255,0.6)');
+    }
+
+    maxY = proj2.y;
+  }
+  // Fog: thick at the horizon, thinning toward the viewer, denser with age
+  {
+    const fa = 0.3 + 0.3 * timeOfDay;
+    const fc = a => skyBot.replace('rgb','rgba').replace(')', `,${a})`);
+    const hz = H/2, fg = ctx.createLinearGradient(0, hz - H*0.06, 0, hz + H*0.3);
+    fg.addColorStop(0, fc(0));
+    fg.addColorStop(0.2, fc(fa));
+    fg.addColorStop(0.4, fc(fa * 0.8));
+    fg.addColorStop(0.7, fc(fa * 0.3));
+    fg.addColorStop(1, fc(0));
+    ctx.fillStyle = fg;
+    ctx.fillRect(0, hz - H*0.06, W, H*0.36);
+  }
+  drawPhilosophicalText();
+  drawAgeNumber();
+  
+  // Add sepia vignette that increases with age
+  drawSepiaVignette(timeOfDay);
+  
+  // Add film grain that increases with age
+  drawFilmGrain(timeOfDay);
+  
+  // Death: the image stays frozen exactly as it is; the cause is announced over it
+  if(dead){ ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); drawDeathText(); }
+}
+
+function drawDeathText(){
+  
+  const a = 1;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.letterSpacing = Math.round(H * 0.008) + 'px';
+  ctx.font = `300 ${Math.round(H * 0.04)}px Inter, Georgia, serif`;
+  ctx.fillStyle = `rgba(235,228,222,${a * 0.9})`;
+  ctx.shadowColor = 'rgba(0,0,0,0.9)'; ctx.shadowBlur = 22;
+  ctx.fillText(`DIED AT ${deathAge}`, W / 2, H * 0.3);
+  ctx.letterSpacing = '0px';
+  const size = Math.round(H * 0.1), maxW = VW * 0.88;
+  ctx.font = `300 italic ${size}px Inter, Georgia, serif`;
+  const fit = Math.min(1, maxW / ctx.measureText(deathCause).width);
+  ctx.font = `300 italic ${Math.round(size * fit)}px Inter, Georgia, serif`;
+  ctx.fillStyle = `rgba(240,232,226,${a})`;
+  ctx.fillText(deathCause, W / 2, H * 0.42);
+  ctx.shadowBlur = 0;
+}
+
+function drawSepiaVignette(intensity){
+  // Sepia vignette increases with age
+  const sepiaAmount = Math.pow(intensity, 0.5) * 0.7;
+  
+  if(sepiaAmount > 0.1){
+    // Create radial gradient from center to edges
+    const centerX = W / 2;
+    const centerY = H / 2;
+    const maxRadius = Math.sqrt(W * W + H * H) / 2;
+    
+    const gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, maxRadius);
+    gradient.addColorStop(0, 'rgba(112, 66, 20, 0)'); // Transparent sepia in center
+    gradient.addColorStop(0.5, `rgba(112, 66, 20, ${sepiaAmount * 0.3})`);
+    gradient.addColorStop(1, `rgba(112, 66, 20, ${sepiaAmount})`); // Full sepia at edges
+    
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, W, H);
+  }
+}
+
+const noiseTile = document.createElement('canvas');
+noiseTile.width = noiseTile.height = 256;
+(function(){
+  const g = noiseTile.getContext('2d'), d = g.createImageData(256,256);
+  for(let i=0;i<d.data.length;i+=4){ d.data[i]=d.data[i+1]=d.data[i+2]=Math.random()*255; d.data[i+3]=255; }
+  g.putImageData(d,0,0);
+})();
+const scanTile = document.createElement('canvas');
+scanTile.width = 1; scanTile.height = 3;
+scanTile.getContext('2d').fillRect(0,0,1,1);
+const noisePat = ctx.createPattern(noiseTile,'repeat');
+const scanPat = ctx.createPattern(scanTile,'repeat');
+
+function drawFilmGrain(intensity){
+  const grainAmount = Math.pow(intensity, 0.7) * 0.8;
+  if(grainAmount > 0.02){
+    const ox = Math.random()*256|0, oy = Math.random()*256|0;
+    ctx.save();
+    ctx.translate(ox,oy);
+    ctx.fillStyle = noisePat;
+    ctx.globalAlpha = Math.min(1, grainAmount * 0.28);
+    ctx.fillRect(-ox,-oy,W,H);
+    ctx.restore();
+    if(intensity > 0.3){
+      ctx.save();
+      ctx.fillStyle = scanPat;
+      ctx.globalAlpha = Math.min(1, 25 * intensity / 255 * 2);
+      ctx.fillRect(0,0,W,H);
+      ctx.restore();
+    }
+  }
+}
+
+function drawAgeNumber(){
+  // Calculate age - continues beyond 100
+  const displayAge = Math.floor((speed / maxSpeed) * 120);
+  
+  // Position at bottom center of screen (where a car would be)
+  const carX = W / 2;
+  const carY = H * 0.82; // Slightly higher
+  
+  // Subtle cinematic glow - less intense, more atmospheric
+  const grd = ctx.createRadialGradient(carX, carY, 5, carX, carY, H * 0.17);
+  grd.addColorStop(0, 'rgba(240,230,210,0.4)');
+  grd.addColorStop(0.3, 'rgba(180,170,150,0.15)');
+  grd.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = grd;
+  ctx.beginPath();
+  ctx.arc(carX, carY, H * 0.17, 0, Math.PI*2);
+  ctx.fill();
+
+  // Draw the number with subtle shadow - same font as text
+  const ageStr = String(displayAge);
+  const size = Math.round(H * 0.15);
+  ctx.font = `300 ${size}px Inter, Georgia, serif`; // Match philosophical text font
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  
+  // Black shadow
+  ctx.shadowColor = 'rgba(0,0,0,0.9)';
+  ctx.shadowBlur = H * 0.03;
+  ctx.shadowOffsetX = ctx.shadowOffsetY = Math.max(1, H * 0.004);
+  
+  // Main number - warm white
+  ctx.fillStyle = '#f5f3ed';
+  ctx.fillText(ageStr, carX, carY);
+  ctx.fillText(ageStr, carX, carY);  // 2nd pass = denser shadow
+  ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetX = ctx.shadowOffsetY = 0;
+}
+
+const QUESTIONS = [
+  'Life is a game of chance, not of skill.'
+];
+let questionIdx = Math.floor(Math.random() * QUESTIONS.length);
+let firstLife = true;   // the opening sentence is shown only once
+
+function drawTitle(){
+  // Title shown at the start of each life, fully visible, then gone together with the question
+  const t = age / 2, q = QUESTIONS[questionIdx];
+  const end = 0.6 + q.length * 0.07;
+  const textAlpha = 1 - Math.min(Math.max((t - (end + 2.5)) / 1.5, 0), 1);
+  if(textAlpha <= 0) return;
+  ctx.font = `300 italic ${Math.round(H * 0.039)}px Inter, Georgia, serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.shadowColor = 'rgba(0,0,0,0.9)';
+  ctx.shadowBlur = H * 0.03;
+  ctx.shadowOffsetX = ctx.shadowOffsetY = Math.max(1, H * 0.003);
+  ctx.fillStyle = `rgba(255, 255, 255, ${textAlpha})`;
+  ctx.fillText('You cannot OutRun this', W / 2, H * 0.1);
+  ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetX = ctx.shadowOffsetY = 0;
+  ctx.textBaseline = 'middle';
+}
+
+function drawPhilosophicalText(){
+  if(!firstLife) return;
+  // Only at the very beginning of a life: a question typed letter by letter, then dissolved
+  const t = age / 2;
+  const q = QUESTIONS[questionIdx];
+  const typed = Math.floor((t - 0.6) / 0.07);
+  const end = 0.6 + q.length * 0.07;
+  const alpha = (1 - Math.min(Math.max((t - (end + 2.5)) / 1.5, 0), 1)) * 0.9;
+  if(typed <= 0 || alpha <= 0) return;
+
+  const size = Math.round(H * 0.048);
+  ctx.font = `300 italic ${size}px Inter, Georgia, serif`;
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+
+  // wrap on two lines if too wide
+  let lines = [q];
+  if(ctx.measureText(q).width > VW * 0.86){
+    const mid = q.lastIndexOf(' ', Math.floor(q.length / 2) + 6);
+    lines = [q.slice(0, mid), q.slice(mid + 1)];
+  }
+  ctx.fillStyle = `rgba(235,230,225,${alpha})`;
+  ctx.shadowColor = `rgba(0,0,0,${alpha})`;
+  ctx.shadowBlur = H * 0.03;
+  ctx.shadowOffsetX = ctx.shadowOffsetY = Math.max(1, H * 0.003);
+  let left = typed;
+  lines.forEach((ln, i) => {
+    const n = Math.min(Math.max(left, 0), ln.length);
+    left -= ln.length;
+    if(n <= 0) return;
+    const x0 = W / 2 - ctx.measureText(ln).width / 2;
+    ctx.fillText(ln.slice(0, n), x0, H * 0.2 + i * size * 1.35);
+    ctx.fillText(ln.slice(0, n), x0, H * 0.2 + i * size * 1.35);  // 2nd pass = denser shadow
+  });
+  ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetX = ctx.shadowOffsetY = 0;
+  ctx.textAlign = 'center';
+}
+
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -1,0 +1,997 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GEARHAUS</title>
+<style>
+  html,body{margin:0;height:100%;background:#0a0a0a;overflow:hidden;
+    font-family:Futura,"Century Gothic","Avenir Next",Avenir,sans-serif;color:#161616}
+  #stage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
+  canvas{display:block;width:100vmin;height:100vmin;border:2px solid #161616;box-sizing:border-box}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="c"></canvas></div>
+
+<script>
+"use strict";
+const S = 1000, MARGIN = 40;
+
+/* ==========================================================================
+   1. DENTURE — développante de cercle (module m, dents z, α = 20°)
+   ========================================================================== */
+const PA = 20 * Math.PI / 180, INV_PA = Math.tan(PA) - PA;
+const inv = a => Math.tan(a) - a;
+const pathCache = new Map();
+
+function toothPath(z, m, internal) {
+  const key = z + "|" + m.toFixed(4) + "|" + internal;
+  let p = pathCache.get(key);
+  if (p) return p;
+
+  const r = m * z / 2, rb = r * Math.cos(PA);
+  const rTip  = internal ? r - m : r + m;
+  const rRoot = internal ? r + 1.25 * m : r - 1.25 * m;
+  const half = Math.PI / (2 * z), sgn = internal ? 1 : -1;
+  const ang = x => half + sgn * ((x <= rb ? 0 : inv(Math.acos(rb / x))) - INV_PA);
+
+  p = new Path2D();
+  const N = 6;
+  for (let k = 0; k < z; k++) {
+    const phi = k * 2 * Math.PI / z;
+    for (let i = 0; i <= N; i++) {
+      const x = rRoot + (rTip - rRoot) * i / N, a = phi - ang(x);
+      const px = Math.cos(a) * x, py = Math.sin(a) * x;
+      (k === 0 && i === 0) ? p.moveTo(px, py) : p.lineTo(px, py);
+    }
+    for (let i = N; i >= 0; i--) {
+      const x = rRoot + (rTip - rRoot) * i / N, a = phi + ang(x);
+      p.lineTo(Math.cos(a) * x, Math.sin(a) * x);
+    }
+  }
+  p.closePath();
+  pathCache.set(key, p);
+  return p;
+}
+
+/* Crémaillère : têtes vers -x (côté pignon), glissement sur y, dents paires. */
+function rackPath(m, len) {
+  const key = "rack|" + m.toFixed(4) + "|" + len.toFixed(1);
+  let p = pathCache.get(key);
+  if (p) return p;
+
+  const pitch = Math.PI * m, tan = Math.tan(PA);
+  let n = Math.ceil(len / pitch) + 2; if (n % 2) n++;
+  const tipW = pitch / 4 - m * tan, rootW = pitch / 4 + 1.25 * m * tan;
+  const root = 1.25 * m, back = root + 5 * m, y0 = -n * pitch / 2;
+
+  p = new Path2D();
+  p.moveTo(root, y0);
+  for (let k = 0; k < n; k++) {
+    const c = y0 + (k + .5) * pitch;
+    p.lineTo(root, c - rootW);
+    p.lineTo(-m,   c - tipW);
+    p.lineTo(-m,   c + tipW);
+    p.lineTo(root, c + rootW);
+  }
+  p.lineTo(root, -y0); p.lineTo(back, -y0); p.lineTo(back, y0);
+  p.closePath();
+  pathCache.set(key, p);
+  return p;
+}
+
+/* ==========================================================================
+   2. MOTEUR CINÉMATIQUE
+   ========================================================================== */
+class Machine {
+  constructor() { this.nodes = []; this.map = {}; this.belts = []; this.order = null; }
+  _add(n) { this.nodes.push(n); this.map[n.id] = n; this.order = null; return n; }
+  _get(id) { return this.map[id]; }
+
+  pop(k = 1) {
+    for (let i = 0; i < k; i++) {
+      const n = this.nodes.pop();
+      if (!n) break;
+      delete this.map[n.id];
+      if (this.belts.length && this.belts[this.belts.length - 1][1] === n.id) this.belts.pop();
+    }
+    this.order = null;
+  }
+
+  frame(id, o = {}) {
+    return this._add({ id, type: 'frame', x: o.x || 0, y: o.y || 0, rot: 0,
+      speed: o.speed || 0, driver: o.driver, ratio: o.ratio ?? 1, phase: o.phase || 0 });
+  }
+
+  gear(id, o) {
+    const g = this._add({ id, type: 'gear', link: 'root', z: o.z, m: o.m, r: o.m * o.z / 2,
+      internal: !!o.internal, frame: o.frame, speed: o.speed || 0, drive: o.drive,
+      phase: o.phase || 0, color: o.color || 0, layer: o.layer || 0 });
+    this._place(g, o.x, o.y);
+    return g;
+  }
+
+  mesh(pid, id, o) {
+    const p = this._get(pid), m = o.m || p.m, r = m * o.z / 2;
+    let link, d;
+    if (p.internal)      { link = 'ringToPin'; d = p.r - r; }
+    else if (o.internal) { link = 'pinToRing'; d = r - p.r; }
+    else                 { link = 'ext';       d = p.r + r; }
+    const g = this._add({ id, type: 'gear', link, parent: pid, z: o.z, m, r,
+      internal: link === 'pinToRing', frame: o.frame ?? p.frame, d0: d, angle: o.angle,
+      phase: o.phase || 0, color: o.color || 0, layer: o.layer ?? p.layer });
+    this._place(g, p.ax + Math.cos(o.angle) * d, p.ay + Math.sin(o.angle) * d);
+    return g;
+  }
+
+  axle(pid, id, o) {
+    const p = this._get(pid), m = o.m || p.m;
+    const g = this._add({ id, type: 'gear', link: 'axle', parent: pid, z: o.z, m, r: m * o.z / 2,
+      internal: !!o.internal, frame: o.frame ?? p.frame, phase: o.phase || 0,
+      color: o.color || 0, layer: o.layer ?? p.layer + 1 });
+    this._place(g, p.ax, p.ay);
+    return g;
+  }
+
+  belt(pid, id, o) {
+    const p = this._get(pid), m = o.m || p.m;
+    const g = this._add({ id, type: 'gear', link: 'belt', parent: pid, z: o.z, m, r: m * o.z / 2,
+      frame: o.frame ?? p.frame, cross: !!o.cross, dist: o.dist, angle: o.angle,
+      phase: o.phase || 0, color: o.color || 0, layer: o.layer ?? p.layer });
+    this._place(g, p.ax + Math.cos(o.angle) * o.dist, p.ay + Math.sin(o.angle) * o.dist);
+    this.belts.push([pid, id, !!o.cross]);
+    return g;
+  }
+
+  rack(pid, id, o) {
+    const p = this._get(pid);
+    return this._add({ id, type: 'rack', parent: pid, m: p.m, angle: o.angle,
+      len: o.len || 900, color: o.color || 0, layer: o.layer ?? p.layer });
+  }
+
+  _place(g, ax, ay) {
+    const f = g.frame ? this._get(g.frame) : null;
+    g.ax = ax; g.ay = ay;
+    g.lx = f ? ax - f.x : ax;
+    g.ly = f ? ay - f.y : ay;
+  }
+
+  drawOrder() {
+    if (!this.order)
+      this.order = this.nodes.filter(n => n.type !== 'frame')
+        .sort((a, b) => (a.layer - b.layer) ||
+          ((b.type === 'rack' ? 1e9 : b.r) - (a.type === 'rack' ? 1e9 : a.r)));
+    return this.order;
+  }
+
+  update(t) {
+    for (const n of this.nodes) {
+      if (n.type === 'frame') {
+        n.rot = n.driver ? this._get(n.driver).rot * n.ratio + n.phase : t * n.speed + n.phase;
+        continue;
+      }
+      if (n.type === 'rack') {
+        const p = this._get(n.parent);
+        n.ax = p.ax; n.ay = p.ay; n.r = p.r;
+        n.s = p.r * (p.rot - n.angle);
+        continue;
+      }
+
+      const f = n.frame ? this._get(n.frame) : null;
+      if (f) {
+        const c = Math.cos(f.rot), s = Math.sin(f.rot);
+        n.ax = f.x + n.lx * c - n.ly * s;
+        n.ay = f.y + n.lx * s + n.ly * c;
+        n.frot = f.rot;
+      } else { n.ax = n.lx; n.ay = n.ly; n.frot = 0; }
+
+      const p = n.parent ? this._get(n.parent) : null;
+      switch (n.link) {
+        case 'root': n.rot = (n.drive ? n.drive(t) : t * n.speed) + n.phase + n.frot; break;
+        case 'axle': n.rot = p.rot + n.phase; break;
+        case 'belt': n.rot = (n.cross ? -1 : 1) * (p.z / n.z) * p.rot + n.phase; break;
+        default: {
+          const dx = n.ax - p.ax, dy = n.ay - p.ay, th = Math.atan2(dy, dx);
+          n.bad = Math.abs(Math.hypot(dx, dy) - n.d0) > 0.5;
+          if (n.link === 'ext')
+            n.rot = th - (p.z / n.z) * (p.rot - th) + Math.PI + Math.PI / n.z;
+          else if (n.link === 'ringToPin')
+            n.rot = th + (p.z / n.z) * (p.rot - th + Math.PI / p.z);
+          else {
+            const tr = th + Math.PI;
+            n.rot = tr + (p.z / n.z) * (p.rot - tr) - Math.PI / n.z;
+          }
+          n.rot += n.phase;
+        }
+      }
+    }
+  }
+
+  ratio(id, ref) {
+    const n = this._get(id), rn = this._get(ref);
+    this.update(0); const a = n.type === 'rack' ? n.s : n.rot, r0 = rn.rot;
+    this.update(1); const b = n.type === 'rack' ? n.s : n.rot, r1 = rn.rot;
+    if (r1 === r0) return 0;
+    const k = (b - a) / (r1 - r0);
+    return n.type === 'rack' ? k * 2 * Math.PI : k;
+  }
+}
+
+/* ==========================================================================
+   3. SOLVEUR DE MONTAGE (inchangé — voir commentaires dans la version outil)
+   ========================================================================== */
+const CLEAR = 3;
+const tipR  = n => n.internal ? n.r - n.m : n.r + n.m;
+const boreR = n => n.r - n.m;
+const rimR  = n => n.r + 2.6 * n.m;
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function shuffle(arr, rng) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = (rng() * (i + 1)) | 0;
+    const tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+  }
+  return arr;
+}
+
+class Solver {
+  constructor(spec, opts = {}) {
+    this.spec = spec;
+    this.cand = opts.candidates || 30;
+    this.restarts = opts.restarts || 10;
+    this.budget = opts.budget || 30000;
+    this.samples = this.buildSamples();
+  }
+
+  buildSamples() {
+    const sp = this.spec.filter(s => s.op === 'frame' && s.speed).map(s => Math.abs(s.speed));
+    const moving = this.spec.some(s => s.drive || s.op === 'rack');
+    if (!sp.length && !moving) return [0];
+    const period = sp.length ? 2 * Math.PI / Math.min.apply(null, sp) : 10;
+    const out = [];
+    for (let i = 0; i < 18; i++) out.push(period * i / 18);
+    return out;
+  }
+
+  apply(M, s, ang) {
+    if (M.nodes.length) M.update(0);
+    const o = Object.assign({}, s, ang === undefined ? {} : { angle: ang });
+    switch (s.op) {
+      case 'frame': return M.frame(s.id, o);
+      case 'gear':  return M.gear(s.id, o);
+      case 'mesh':  return M.mesh(s.from, s.id, o);
+      case 'axle':  return M.axle(s.from, s.id, o);
+      case 'belt':  return M.belt(s.from, s.id, o);
+      case 'rack':  return M.rack(s.from, s.id, o);
+    }
+  }
+
+  pairGap(M, a, b) {
+    let min = Infinity;
+    for (const t of this.samples) {
+      M.update(t);
+      const d = Math.hypot(a.ax - b.ax, a.ay - b.ay);
+      if (d < min) min = d;
+    }
+    return min;
+  }
+
+  related(a, b) {
+    if (a.parent === b.id || b.parent === a.id) return true;
+    if (a.parent && a.parent === b.parent && a.link === 'axle') return true;
+    if (b.parent && a.parent === b.parent && b.link === 'axle') return true;
+    return false;
+  }
+
+  meshesAt(a, b, d) {
+    if (Math.abs(a.m - b.m) > 1e-6) return false;
+    if (a.internal && b.internal) return false;
+    const target = (a.internal || b.internal) ? Math.abs(a.r - b.r) : a.r + b.r;
+    return Math.abs(d - target) < 0.75;
+  }
+
+  interference(M, a, b) {
+    const d = this.pairGap(M, a, b);
+    const ring = a.internal ? a : b.internal ? b : null;
+    const other = ring === a ? b : a;
+
+    if (!ring) {
+      if (a.layer !== b.layer) return true;
+      return d >= tipR(a) + tipR(b) + CLEAR;
+    }
+    if (other.internal) {
+      return d >= rimR(a) + rimR(b) + CLEAR ||
+             d + rimR(b) <= boreR(a) - CLEAR ||
+             d + rimR(a) <= boreR(b) - CLEAR;
+    }
+    return d + tipR(other) <= boreR(ring) - CLEAR ||
+           d - tipR(other) >= rimR(ring) + CLEAR;
+  }
+
+  buried(M, a, b) {
+    if (a.layer === b.layer) return false;
+    const hi = a.layer > b.layer ? a : b, lo = hi === a ? b : a;
+    if (hi.internal) return false;
+    return this.pairGap(M, hi, lo) + tipR(lo) <= tipR(hi);
+  }
+
+  contactHidden(M, child, others) {
+    if (!child.parent || !(child.link === 'ext' || child.link === 'ringToPin'
+        || child.link === 'pinToRing')) return false;
+    const p = M.map[child.parent], top = Math.max(child.layer, p.layer);
+    for (const t of this.samples) {
+      M.update(t);
+      const dx = child.ax - p.ax, dy = child.ay - p.ay, L = Math.hypot(dx, dy) || 1;
+      const sg = child.internal ? -1 : 1;
+      const cx = p.ax + dx / L * p.r * sg, cy = p.ay + dy / L * p.r * sg;
+      for (const o of others) {
+        if (o === child || o === p || o.internal || o.type === 'rack') continue;
+        if (o.layer <= top) continue;
+        if (Math.hypot(cx - o.ax, cy - o.ay) < tipR(o) - 1) return true;
+      }
+    }
+    return false;
+  }
+
+  rackClear(M, rack, g) {
+    const p = M.map[rack.parent];
+    if (g === p) return true;
+    const ux = Math.cos(rack.angle), uy = Math.sin(rack.angle);
+    for (const t of this.samples) {
+      M.update(t);
+      const proj = (g.ax - p.ax) * ux + (g.ay - p.ay) * uy;
+      if (proj + tipR(g) > p.r - p.m - CLEAR) return false;
+    }
+    return true;
+  }
+
+  feasible(M, node) {
+    const others = M.nodes.filter(n => n.type === 'gear' && n !== node);
+    if (node.type === 'rack') {
+      for (const o of others) if (!this.rackClear(M, node, o)) return false;
+      return true;
+    }
+    if (node.type === 'gear') {
+      for (const rk of M.nodes)
+        if (rk.type === 'rack' && !this.rackClear(M, rk, node)) return false;
+      if (node.link === 'belt') {
+        const p = M.map[node.parent];
+        if (this.pairGap(M, node, p) < node.r + p.r + 8) return false;
+      }
+      for (const o of others) {
+        if (this.related(node, o)) continue;
+        if (this.meshesAt(node, o, this.pairGap(M, node, o))) continue;
+        if (!this.interference(M, node, o)) return false;
+        if (this.buried(M, node, o)) return false;
+      }
+      if (this.contactHidden(M, node, others)) return false;
+      for (const o of others)
+        if (o.link && this.contactHidden(M, o, [node])) return false;
+    }
+    return true;
+  }
+
+  attempt(seed) {
+    const rng = mulberry32(seed);
+    const M = new Machine();
+    const chosen = [];
+    let visited = 0;
+    const spec = this.spec;
+
+    const dfs = i => {
+      if (i === spec.length) return true;
+      if (visited > this.budget) return false;
+      const s = spec[i];
+
+      if (s.angle !== null && s.angle !== undefined || s.op === 'frame' ||
+          s.op === 'gear' || s.op === 'axle') {
+        const n = this.apply(M, s);
+        visited++;
+        if (n.type !== 'frame' && !this.feasible(M, n)) { M.pop(); return false; }
+        chosen[i] = s.angle;
+        if (dfs(i + 1)) return true;
+        M.pop();
+        return false;
+      }
+
+      const base = [];
+      for (let k = 0; k < this.cand; k++) base.push(k * 2 * Math.PI / this.cand);
+      shuffle(base, rng);
+      for (const a0 of base) {
+        const a = a0 + (rng() - .5) * (Math.PI / this.cand);
+        const n = this.apply(M, s, a);
+        visited++;
+        if (this.feasible(M, n)) {
+          chosen[i] = a;
+          if (dfs(i + 1)) return true;
+        }
+        M.pop();
+        if (visited > this.budget) return false;
+      }
+      return false;
+    };
+
+    return dfs(0) ? { M, chosen, visited } : { M: null, visited };
+  }
+
+  extent(M) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const t of this.samples) {
+      M.update(t);
+      for (const n of M.nodes) {
+        if (n.type === 'rack') {
+          const px = n.ax + Math.cos(n.angle) * n.r;
+          const py = n.ay + Math.sin(n.angle) * n.r;
+          x0 = Math.min(x0, px); x1 = Math.max(x1, px);
+          y0 = Math.min(y0, py); y1 = Math.max(y1, py);
+          continue;
+        }
+        if (n.type !== 'gear') continue;
+        const R = n.internal ? rimR(n) : tipR(n);
+        x0 = Math.min(x0, n.ax - R); x1 = Math.max(x1, n.ax + R);
+        y0 = Math.min(y0, n.ay - R); y1 = Math.max(y1, n.ay + R);
+      }
+    }
+    return { x0, y0, x1, y1, w: x1 - x0, h: y1 - y0 };
+  }
+
+  solve() {
+    let best = null, tried = 0, visited = 0;
+    for (let k = 0; k < this.restarts; k++) {
+      const res = this.attempt(1234 + k * 7919);
+      tried++; visited += res.visited;
+      if (!res.M) continue;
+      const e = this.extent(res.M);
+      let tilt = 0;
+      for (const n of res.M.nodes) {
+        if (n.type !== 'rack') continue;
+        const a = ((n.angle % (Math.PI / 2)) + Math.PI / 2) % (Math.PI / 2);
+        tilt += Math.min(a, Math.PI / 2 - a) / (Math.PI / 4);
+      }
+      const score = Math.max(e.w, e.h) * (1 + .35 * tilt);
+      if (!best || score < best.score) best = { score, chosen: res.chosen, e };
+    }
+    if (!best) return null;
+
+    const k = (S - 2 * MARGIN) / Math.max(best.e.w, best.e.h);
+    const cx = (best.e.x0 + best.e.x1) / 2, cy = (best.e.y0 + best.e.y1) / 2;
+    const fx = x => (x - cx) * k + S / 2, fy = y => (y - cy) * k + S / 2;
+
+    const out = this.spec.map((s, i) => {
+      const o = Object.assign({}, s);
+      if (o.angle === null || o.angle === undefined) o.angle = best.chosen[i];
+      if (o.m) o.m *= k;
+      if (o.dist) o.dist *= k;
+      if (o.len) o.len *= k;
+      if (o.x !== undefined) { o.x = fx(s.x); o.y = fy(s.y); }
+      return o;
+    });
+    return { spec: out, scale: k, tried, visited, span: Math.round(best.score) };
+  }
+}
+
+function build(spec) {
+  const M = new Machine();
+  const sv = new Solver(spec);
+  for (const s of spec) sv.apply(M, s);
+
+  const racks = M.nodes.filter(n => n.type === 'rack');
+  if (racks.length) {
+    const travel = new Map(racks.map(n => [n, 0]));
+    for (let i = 0; i <= 40; i++) {
+      M.update(i * sv.samples[sv.samples.length - 1] / 40 || i * .25);
+      for (const n of racks) travel.set(n, Math.max(travel.get(n), Math.abs(n.s)));
+    }
+    for (const n of racks) n.len = 1.6 * S + 2 * travel.get(n);
+    M.update(0);
+  }
+  return M;
+}
+
+/* ==========================================================================
+   4. RENDU — Bauhaus : aplats de couleurs primaires, contours noirs épais,
+   pas de dégradé ni de lueur. Chaque moyeu reprend le trio de forme de
+   Kandinsky (cercle / carré / triangle) associé à sa couleur.
+   ========================================================================== */
+const PALETTE = ['#e0421f', '#1e4c8c', '#f2b705', '#dedad0', '#8a8680', '#3c7a5c'];
+const OUTLINE = ['#161616', '#161616', '#161616', '#161616', '#161616', '#161616'];
+const HUB_SHAPE = [1, 0, 2, 0, 1, 2];   // 0 cercle · 1 carré · 2 triangle
+
+const hexToRgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+const rgbToHex = rgb => '#' + rgb.map(v => Math.round(Math.max(0, Math.min(255, v)))
+  .toString(16).padStart(2, '0')).join('');
+function lerpColor(a, b, k) {
+  const A = hexToRgb(a), B = hexToRgb(b);
+  return rgbToHex(A.map((v, i) => v + (B[i] - v) * k));
+}
+
+function shapePath(type, r) {
+  r = Math.max(0, r);
+  const p = new Path2D();
+  if (type === 0) { p.arc(0, 0, r, 0, Math.PI * 2); return p; }
+  if (type === 1) { p.rect(-r * .82, -r * .82, r * 1.64, r * 1.64); return p; }
+  for (let i = 0; i < 3; i++) {
+    const a = -Math.PI / 2 + i * 2 * Math.PI / 3;
+    const x = Math.cos(a) * r * 1.15, y = Math.sin(a) * r * 1.15;
+    i === 0 ? p.moveTo(x, y) : p.lineTo(x, y);
+  }
+  p.closePath();
+  return p;
+}
+
+function plane(ctx, r) {
+  r = Math.max(0, r);
+  if (r <= 2) return;
+  ctx.fillStyle = 'rgba(8,8,8,.32)';
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
+}
+
+let CLOCK = 0;                       // temps courant, pour les pièces animées
+
+/* Rouage psychédélique : teinte qui défile et anneaux concentriques.
+   Un seul par montage, et pas à chaque montage — l'accident coloré ne vaut
+   que s'il reste rare au milieu des aplats Bauhaus. */
+function psyFill(g) {
+  const h = (CLOCK * 40 + (g.psySeed || 0) * 360) % 360;
+  return 'hsl(' + h.toFixed(0) + ',85%,58%)';
+}
+
+function paintPsyRings(ctx, g, alpha) {
+  const rMax = Math.max(0, g.r - 1.25 * g.m);
+  const n = 5;
+  ctx.globalAlpha = alpha;
+  for (let i = n; i >= 1; i--) {
+    const rr = rMax * i / n;
+    if (rr <= 0) continue;
+    const h = (CLOCK * 40 + (g.psySeed || 0) * 360 + i * 47) % 360;
+    ctx.beginPath(); ctx.arc(0, 0, rr, 0, Math.PI * 2);
+    ctx.fillStyle = 'hsl(' + h.toFixed(0) + ',85%,' + (i % 2 ? 58 : 78) + '%)';
+    ctx.fill();
+    ctx.lineWidth = 1.5; ctx.strokeStyle = '#161616'; ctx.stroke();
+  }
+}
+
+function paintHub(ctx, hub, hIdx, fillColor, strokeColor, a) {
+  if (a <= .001) return;
+  const hp = shapePath(HUB_SHAPE[hIdx], hub);
+  ctx.globalAlpha = a;
+  ctx.fillStyle = strokeColor; ctx.fill(hp);
+  ctx.lineWidth = 1.5; ctx.strokeStyle = fillColor; ctx.stroke(hp);
+  ctx.beginPath(); ctx.fillStyle = fillColor; ctx.arc(0, 0, hub * .3, 0, Math.PI * 2); ctx.fill();
+}
+
+function drawGear(ctx, g, alpha) {
+  const idx = ((g.color % PALETTE.length) + PALETTE.length) % PALETTE.length;
+  const fill = g.bad ? '#c81e3a' : (g.psy ? psyFill(g) : (g.fill || PALETTE[idx]));
+  const stroke = g.bad ? '#161616' : (g.stroke || OUTLINE[idx]);
+  const path = toothPath(g.z, g.m, g.internal);
+  const lw = 1.8;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(g.ax, g.ay);
+  if (g.layer > 0 && !g.internal) plane(ctx, g.r - 1.25 * g.m);
+  ctx.rotate(g.rot);
+
+  if (g.internal) {
+    const rim = Math.max(0, rimR(g)), body = new Path2D();
+    body.arc(0, 0, rim, 0, Math.PI * 2);
+    body.addPath(path);
+    ctx.fillStyle = fill; ctx.fill(body, "evenodd");
+    ctx.lineWidth = 2; ctx.strokeStyle = stroke;
+    ctx.stroke(path);
+    const outer = new Path2D(); outer.arc(0, 0, rim, 0, Math.PI * 2);
+    ctx.lineWidth = 1.8;
+    ctx.stroke(outer);
+    ctx.restore();
+    return;
+  }
+
+  ctx.fillStyle = fill; ctx.fill(path);
+  ctx.lineWidth = lw; ctx.strokeStyle = stroke; ctx.stroke(path);
+  if (g.psy) paintPsyRings(ctx, g, alpha);
+
+  const hub = Math.max(.6, g.m * 1.7, g.r * .24);
+  if (g.hubK !== undefined && g.srcColor !== undefined && g.dstColor !== undefined) {
+    const si = ((g.srcColor % PALETTE.length) + PALETTE.length) % PALETTE.length;
+    const di = ((g.dstColor % PALETTE.length) + PALETTE.length) % PALETTE.length;
+    if (si === di) paintHub(ctx, hub, di, fill, stroke, alpha);
+    else {
+      paintHub(ctx, hub, si, fill, stroke, alpha * (1 - g.hubK));
+      paintHub(ctx, hub, di, fill, stroke, alpha * g.hubK);
+    }
+  } else {
+    paintHub(ctx, hub, idx, fill, stroke, alpha);
+  }
+  ctx.restore();
+}
+
+function drawRack(ctx, n, alpha) {
+  const idx = n.color % PALETTE.length;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(n.ax, n.ay);
+  ctx.rotate(n.angle);
+  ctx.translate(n.r, n.s);
+  const path = rackPath(n.m, n.len);
+  ctx.fillStyle = PALETTE[idx]; ctx.fill(path);
+  ctx.lineWidth = 1.8; ctx.strokeStyle = OUTLINE[idx]; ctx.stroke(path);
+  ctx.restore();
+}
+
+function drawBelt(ctx, a, b, cross, alpha) {
+  if (!a || !b) return;
+  const d = Math.hypot(b.ax - a.ax, b.ay - a.ay);
+  if (!(d > 0)) return;
+  const th = Math.atan2(b.ay - a.ay, b.ax - a.ax);
+  // la sangle court au fond de la denture (cercle de pied), pas sur le primitif
+  const RA = Math.max(0, a.r - 1.25 * (a.m || 0)), RB = Math.max(0, b.r - 1.25 * (b.m || 0));
+  const g = Math.acos(Math.max(-1, Math.min(1, (cross ? RA + RB : RA - RB) / d)));
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = '#161616'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+  for (const s of [1, -1]) {
+    const a1 = th + s * g, a2 = cross ? a1 + Math.PI : a1;
+    ctx.beginPath();
+    ctx.moveTo(a.ax + Math.cos(a1) * RA, a.ay + Math.sin(a1) * RA);
+    ctx.lineTo(b.ax + Math.cos(a2) * RB, b.ay + Math.sin(a2) * RB);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/* ==========================================================================
+   5. SPECS — générateurs de topologie
+   ========================================================================== */
+const SPECS = {
+  "Épicycloïdal": () => {
+    const rng = mulberry32((Math.random() * 1e9) | 0);
+    const pick = a => a[(rng() * a.length) | 0];
+    // condition d'assemblage : (zS + zR) divisible par le nombre de satellites (3).
+    // Avec zR = zS + 2·zP, cela revient à (zS + zP) ≡ 0 [3] — sans quoi les
+    // satellites à 120° ne retombent pas en phase sur le soleil et la couronne.
+    let zS, zP;
+    do { zS = pick([18, 21, 24, 27, 30]); zP = pick([12, 15, 18, 21]); }
+    while ((zS + zP) % 3 !== 0);
+    const zR = zS + 2 * zP;
+    const m = 10, wS = 1.0 + rng() * .7;
+    const spec = [
+      { op: 'frame', id: 'carrier', x: 500, y: 500, speed: zS * wS / (zS + zR) },
+      { op: 'gear', id: 'sun', z: zS, m, x: 500, y: 500, speed: wS, color: 2 }
+    ];
+    for (let i = 0; i < 3; i++)
+      spec.push({ op: 'mesh', from: 'sun', id: 'p' + i, z: zP, frame: 'carrier',
+        angle: i * 2 * Math.PI / 3 - Math.PI / 2, color: 1 });
+    spec.push({ op: 'mesh', from: 'p0', id: 'ring', z: zR, internal: true,
+      frame: 'carrier', angle: Math.PI / 2, color: 0 });
+    return { spec, ref: 'sun', out: [['ring', 'couronne'], ['p0', 'satellite'], ['carrier', 'porte-sat.']] };
+  },
+
+  "Réducteur 4 étages": () => {
+    const rng = mulberry32((Math.random() * 1e9) | 0);
+    const pick = a => a[(rng() * a.length) | 0];
+    const zp = pick([11, 13, 15, 17]), ratio = 2.6 + rng() * 1.2;
+    const zB = Math.max(zp + 4, Math.round(zp * ratio));
+    return { spec: [
+      { op: 'gear', id: 'a',  z: zp, m: 10, x: 500, y: 500, speed: 1.6 + rng() * 1.2, color: 0 },
+      { op: 'mesh', from: 'a',  id: 'B1', z: zB, angle: null, color: 2 },
+      { op: 'axle', from: 'B1', id: 'p1', z: zp, m: 6.5, color: 1 },
+      { op: 'mesh', from: 'p1', id: 'B2', z: zB, angle: null, color: 3 },
+      { op: 'axle', from: 'B2', id: 'p2', z: zp, m: 4.2, color: 5 },
+      { op: 'mesh', from: 'p2', id: 'B3', z: zB, angle: null, color: 4 },
+      { op: 'axle', from: 'B3', id: 'p3', z: zp, m: 2.7, color: 1 },
+      { op: 'mesh', from: 'p3', id: 'B4', z: zB, angle: null, color: 0 }
+    ],
+    ref: 'a',
+    out: [['B1', 'étage 1'], ['B2', 'étage 2'], ['B3', 'étage 3'], ['B4', 'sortie']] };
+  },
+
+  "Pignon–crémaillère": () => {
+    const rng = mulberry32((Math.random() * 1e9) | 0);
+    const pick = a => a[(rng() * a.length) | 0];
+    const w = .6 + rng() * .2, amp = 1.6 + rng() * .4;   // tirés une fois, pas par image
+    return { spec: [
+      { op: 'gear', id: 'drv', z: pick([28, 34, 40]), m: 9, x: 500, y: 500,
+        drive: t => Math.sin(t * w) * amp, color: 2 },
+      { op: 'mesh', from: 'drv', id: 'p',   z: pick([18, 22, 26]), angle: null, color: 3 },
+      { op: 'axle', from: 'p',   id: 'p2',  z: pick([16, 20, 24]), m: 7, color: 1 },
+      { op: 'mesh', from: 'p2',  id: 'pin', z: pick([22, 26, 30]), angle: null, color: 0 },
+      { op: 'rack', from: 'pin', id: 'rack', angle: null, len: 1700, color: 4 }
+    ],
+    ref: 'drv',
+    out: [['pin', 'pignon'], ['rack', 'course (u/tr)']] };
+  },
+
+  "Couronne + courroies": () => {
+    const rng = mulberry32((Math.random() * 1e9) | 0);
+    const pick = a => a[(rng() * a.length) | 0];
+    return { spec: [
+      { op: 'gear', id: 'in',   z: pick([12, 14, 16]), m: 8, x: 500, y: 500, speed: 1.5 + rng() * .8, color: 2 },
+      { op: 'belt', from: 'in',   id: 'pul',  z: pick([16, 18, 22]), dist: 420 + rng() * 100, angle: null, color: 5 },
+      { op: 'axle', from: 'pul',  id: 'pd',   z: pick([10, 12, 14]), color: 1 },
+      { op: 'mesh', from: 'pd',   id: 'q',    z: pick([18, 20, 24]), angle: null, color: 3 },
+      { op: 'mesh', from: 'q',    id: 'pin',  z: pick([12, 14, 16]), angle: null, color: 4 },
+      { op: 'mesh', from: 'pin',  id: 'ring', z: pick([46, 52, 58]), internal: true, angle: null, color: 0 },
+      { op: 'mesh', from: 'ring', id: 'w',    z: pick([14, 16, 18]), angle: null, color: 1 },
+      { op: 'belt', from: 'w',    id: 'far',  z: pick([22, 26, 30]), dist: 340 + rng() * 100, cross: true, angle: null, color: 5 }
+    ],
+    ref: 'in',
+    out: [['pul', 'poulie'], ['ring', 'couronne'], ['far', 'croisée']] };
+  },
+
+  "Train aléatoire": () => {
+    const rng = mulberry32((Math.random() * 1e9) | 0);
+    const pick = a => a[(rng() * a.length) | 0];
+    const z0 = pick([12, 14, 16]), m0 = 9;
+    const spec = [{ op: 'gear', id: 'g0', z: z0, m: m0, x: 500, y: 500,
+      speed: 1.4 + rng(), color: (rng() * 6) | 0 }];
+
+    let last = 'g0', z = z0, m = m0, r = m0 * z0 / 2, inside = false, left = 0;
+    let prevColor = spec[0].color;
+    const steps = 6 + ((rng() * 3) | 0);
+    const nextColor = () => {
+      let c; do { c = (rng() * PALETTE.length) | 0; } while (c === prevColor);
+      prevColor = c; return c;
+    };
+
+    for (let n = 1; n <= steps; n++) {
+      const id = 'g' + n, color = nextColor();
+      if (inside && left <= 0) break;
+      const roll = rng();
+      const canAxle = 1.4 * r / 16 > 1.2;
+      const canRing = !inside && z <= 18 && n <= steps - 2;
+      const canBelt = !inside;
+
+      if (canRing && roll < .18) {
+        z = z * 3 + 6;
+        spec.push({ op: 'mesh', from: last, id, z, internal: true, angle: null, color });
+        r = m * z / 2; inside = true; left = 2;
+      } else if (canAxle && roll < .40) {
+        const z2 = pick([12, 14, 16]);
+        m = 1.4 * r / z2;
+        spec.push({ op: 'axle', from: last, id, z: z2, m, color });
+        z = z2; r = m * z / 2;
+      } else if (canBelt && roll < .52) {
+        const z2 = pick([18, 24, 30]);
+        spec.push({ op: 'belt', from: last, id, z: z2,
+          dist: 320 + rng() * 220, cross: rng() < .4, angle: null, color });
+        z = z2; r = m * z / 2;
+      } else {
+        const z2 = inside ? pick([12, 14, 16]) : pick([14, 20, 26, 34]);
+        spec.push({ op: 'mesh', from: last, id, z: z2, angle: null, color });
+        z = z2; r = m * z / 2;
+      }
+      if (inside) left--;
+      last = id;
+    }
+    return { spec, ref: 'g0', out: [[last, 'sortie']] };
+  }
+};
+/* Poids de tirage : le générateur aléatoire domine, les topologies "signature"
+   reviennent en respiration régulière plutôt qu'à fréquence égale. */
+const WEIGHTED = ["Train aléatoire", "Train aléatoire", "Train aléatoire",
+  "Épicycloïdal", "Réducteur 4 étages", "Pignon–crémaillère", "Couronne + courroies"];
+
+function solveNamed(name) {
+  const tries = name === "Train aléatoire" ? 10 : 6;
+  for (let i = 0; i < tries; i++) {
+    const def = SPECS[name]();
+    const sol = new Solver(def.spec).solve();
+    if (sol) return { def, sol };
+  }
+  return null;
+}
+
+let lastName = null, bag = [];
+function pickName() {
+  if (!bag.length) {
+    bag = shuffle(WEIGHTED.slice(), rng);
+    if (bag.length > 1 && bag[0] === lastName) [bag[0], bag[1]] = [bag[1], bag[0]];
+  }
+  lastName = bag.shift();
+  return lastName;
+}
+
+/* ==========================================================================
+   6. MORPHOGENÈSE — chaque rouage de l'ancien montage glisse et se
+   redimensionne jusqu'à devenir le rouage correspondant du nouveau montage
+   (position, rayon, module, denture interpolés). Un excédent de roues
+   naît sur place à rayon nul puis grandit ; une roue en trop se résorbe
+   sur place. Jamais de coupure : la machine se réarticule sous nos yeux.
+   ========================================================================== */
+const smooth = k => k * k * (3 - 2 * k);
+function lerpAngle(a, b, k) {
+  const d = ((b - a + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
+  return a + d * k;
+}
+
+/** Apparie deux listes de roues par taille décroissante — approximation
+    stable : les grosses roues (les plus lisibles) se correspondent en
+    premier, le solde nait/meurt en périphérie. */
+function pairGears(oldList, newList) {
+  const a = oldList.filter(n => n.type === 'gear').slice().sort((x, y) => y.r - x.r);
+  const b = newList.filter(n => n.type === 'gear').slice().sort((x, y) => y.r - x.r);
+  const n = Math.max(a.length, b.length), pairs = [];
+  for (let i = 0; i < n; i++) pairs.push([a[i] || null, b[i] || null]);
+  return pairs;
+}
+function pairRacks(oldList, newList) {
+  const a = oldList.filter(n => n.type === 'rack');
+  const b = newList.filter(n => n.type === 'rack');
+  const n = Math.max(a.length, b.length), pairs = [];
+  for (let i = 0; i < n; i++) pairs.push([a[i] || null, b[i] || null]);
+  return pairs;
+}
+function pairBelts(oldM, newM) {
+  const a = oldM.belts, b = newM.belts;
+  const n = Math.max(a.length, b.length), pairs = [];
+  for (let i = 0; i < n; i++) pairs.push([a[i] || null, b[i] || null]);
+  return pairs;
+}
+
+function ghostGear(a, b, k) {
+  const src = a || Object.assign({}, b, { r: 0 });
+  const dst = b || Object.assign({}, a, { r: 0 });
+  const sFill = PALETTE[src.color % PALETTE.length], dFill = PALETTE[dst.color % PALETTE.length];
+  const sStroke = OUTLINE[src.color % PALETTE.length], dStroke = OUTLINE[dst.color % PALETTE.length];
+  return {
+    type: 'gear',
+    ax: src.ax + (dst.ax - src.ax) * k,
+    ay: src.ay + (dst.ay - src.ay) * k,
+    rot: lerpAngle(src.rot, dst.rot, k),
+    r: src.r + (dst.r - src.r) * k,
+    m: src.m + (dst.m - src.m) * k,
+    z: Math.max(3, Math.round(src.z + (dst.z - src.z) * k)),
+    internal: k < .5 ? src.internal : dst.internal,
+    color: k < .5 ? src.color : dst.color,
+    srcColor: src.color, dstColor: dst.color, hubK: k,
+    psy: k < .5 ? src.psy : dst.psy, psySeed: (k < .5 ? src.psySeed : dst.psySeed),
+    fill: lerpColor(sFill, dFill, k),
+    stroke: lerpColor(sStroke, dStroke, k),
+    layer: k < .5 ? src.layer : dst.layer,
+    bad: false
+  };
+}
+
+/* ==========================================================================
+   7. ORCHESTRATION — boucle démo, aucune interaction requise
+   ========================================================================== */
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d', { alpha: false });
+const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const SLOW = REDUCED ? .25 : 1;
+
+let scale = 1;
+function resize() {
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  const css = Math.min(innerWidth, innerHeight);
+  canvas.width = canvas.height = Math.round(css * dpr);
+  scale = canvas.width / S;
+}
+addEventListener('resize', resize); resize();
+
+const HOLD  = REDUCED ? 10000 : 6400; // durée d'affichage stable, ms
+const MORPH = REDUCED ? 4200 : 2600;  // durée de la transformation, ms
+
+let t = 0, paused = false;
+let phase = 'hold', phaseStart = performance.now();
+let live = null, incoming = null, gearPairs = null, rackPairs = null, beltPairs = null;
+let rng = mulberry32((Math.random() * 1e9) | 0);
+
+function loadNext() {
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const res = solveNamed(pickName());
+    if (res) return colorize(res);
+  }
+  // secours : le train aléatoire retente jusqu'à réussir, il finit toujours par tenir
+  let res = null;
+  while (!res) res = solveNamed("Train aléatoire");
+  return colorize(res);
+}
+
+function colorize(res) {
+  const off = (rng() * PALETTE.length) | 0;
+  for (const s of res.sol.spec) if (s.color !== undefined) s.color = (s.color + off) % PALETTE.length;
+  const M = build(res.sol.spec);
+  // un montage sur trois environ reçoit une seule roue psychédélique
+  if (rng() < .34) {
+    const gears = M.nodes.filter(n => n.type === 'gear' && !n.internal);
+    if (gears.length) {
+      const g = gears[(rng() * gears.length) | 0];
+      g.psy = true; g.psySeed = rng();
+    }
+  }
+  M.update(0);
+  return { M };
+}
+
+live = loadNext();
+
+function beginTransition() {
+  incoming = loadNext();
+  live.M.update(t); incoming.M.update(t);
+  gearPairs = pairGears(live.M.drawOrder(), incoming.M.drawOrder());
+  rackPairs = pairRacks(live.M.drawOrder(), incoming.M.drawOrder());
+  beltPairs = pairBelts(live.M, incoming.M);
+  phase = 'morph'; phaseStart = performance.now();
+}
+
+function advance(now) {
+  if (paused) return;
+  const el = now - phaseStart;
+  if (phase === 'hold' && el > HOLD) beginTransition();
+  else if (phase === 'morph' && el > MORPH) {
+    live = incoming; incoming = null; gearPairs = rackPairs = beltPairs = null;
+    phase = 'hold'; phaseStart = now;
+  }
+}
+
+addEventListener('keydown', e => {
+  if (e.code === 'Space') { e.preventDefault(); paused = !paused; }
+});
+addEventListener('click', () => { if (phase === 'hold') beginTransition(); });
+
+function frame(now) {
+  advance(now);
+  CLOCK = t;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+
+  if (phase === 'hold' && live) {
+    live.M.update(t);
+    for (const [a, b, cross] of live.M.belts)
+      drawBelt(ctx, live.M.map[a], live.M.map[b], cross, 1);
+    for (const n of live.M.drawOrder())
+      n.type === 'gear' ? drawGear(ctx, n, 1) : drawRack(ctx, n, 1);
+  } else if (phase === 'morph' && live && incoming) {
+    live.M.update(t); incoming.M.update(t);
+    const k = smooth(Math.min(1, (now - phaseStart) / MORPH));
+
+    // les poulies sont des roues comme les autres : on construit d'abord leur
+    // position morphée, puis les courroies s'accrochent à cette position réelle
+    // (sinon la sangle reste plantée à l'ancien point pendant que la roue glisse).
+    const oldGhost = new Map(), newGhost = new Map();
+    for (const [a, b] of gearPairs) {
+      const ghost = ghostGear(a, b, k);
+      if (a) oldGhost.set(a, ghost);
+      if (b) newGhost.set(b, ghost);
+    }
+
+    for (const [ba, bb] of beltPairs) {
+      if (ba) {
+        const pa = oldGhost.get(live.M.map[ba[0]]), pb = oldGhost.get(live.M.map[ba[1]]);
+        drawBelt(ctx, pa, pb, ba[2], 1 - k);
+      }
+      if (bb) {
+        const pa = newGhost.get(incoming.M.map[bb[0]]), pb = newGhost.get(incoming.M.map[bb[1]]);
+        drawBelt(ctx, pa, pb, bb[2], k);
+      }
+    }
+    for (const [a, b] of rackPairs) {
+      if (a) drawRack(ctx, a, 1 - k);
+      if (b) drawRack(ctx, b, k);
+    }
+    // roues appariées : glissent/redimensionnent à pleine opacité ;
+    // roues en excédent (naissantes ou résorbées) : fondu en plus du redimensionnement
+    for (const [a, b] of gearPairs) {
+      const alpha = (a && b) ? 1 : (a ? 1 - k : k);
+      drawGear(ctx, (oldGhost.get(a) || newGhost.get(b)), alpha);
+    }
+  }
+
+  if (!paused) t += .012 * SLOW;
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
